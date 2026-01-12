@@ -14,6 +14,22 @@
     - Segurança e validação de backups
     - Gestão de logs
 
+.PARAMETER FileServer
+    Hostname ou IP do servidor de arquivos (ex.: 192.168.0.2). Quando informado, a etapa "Send-LogToServer" é executada ao final,
+    copiando o arquivo de log para \<FileServer>\TI\<ANO>\<MM. Mês>\COMPUTERNAME.log. Se não informado, a etapa é pulada.
+
+.PARAMETER ExecutaFases
+    Se informado, executa apenas as fases indicadas (IDs). Ex.: -ExecutaFases 1,3,5
+
+.PARAMETER PulaFases
+    Se informado, pula as fases indicadas (IDs). Ex.: -PulaFases 4,7
+
+.PARAMETER LogLevel
+    Nível de log: INFO, WARN, ERROR, DEBUG. Padrão: INFO.
+
+.PARAMETER Simulado
+    Modo ensaio: não executa ações destrutivas.
+
 .NOTES
     Funcionalidades principais:
     - Validação do ambiente (Administrador, Windows, versão mínima do PowerShell)
@@ -26,9 +42,9 @@
 .AUTHOR
     IT4You Ltda
 .VERSION
-    1.5
+    1.6
 .LASTUPDATED
-    11/01/2026
+    12/01/2026
 #>
 
 [CmdletBinding()]
@@ -36,7 +52,8 @@ param(
   [int[]]$ExecutaFases,  # Se não for informado, executa todas as fases
   [int[]]$PulaFases,     # Se não for informado, nenhuma fase será pulada
   [ValidateSet('INFO','WARN','ERROR','DEBUG')][string]$LogLevel = 'INFO',
-  [switch]$Simulado      # Modo ensaio: não executa ações destrutivas
+  [switch]$Simulado,     # Modo ensaio: não executa ações destrutivas
+  [string]$FileServer    # Host/IP do servidor de arquivos para envio do log (opcional)
 )
 
 # Preferências e ambiente
@@ -91,7 +108,7 @@ $StepDescriptions = @{
   'Optimize-HDD'             = 'Desfragmentação de todos os discos físicos disponíveis'
   'Scan-AntiMalware'         = 'Varredura contra malwares com Windows Defender'
   'Confirm-MacriumBackup'    = 'Validação dos arquivos de backup do Macrium Reflect'
-  'Send-LogToServer'         = 'Verificação da existência de Servidor de Arquivos na rede local'
+  'Send-LogToServer'         = 'Verificação e centralização do log no Servidor de Arquivos (opcional com -FileServer)'
 }
 function Get-StepLabel {
   param([string]$Name)
@@ -134,7 +151,6 @@ function Write-Log {
   $rawToWrite = $null
 
   if ($global:ConciseLog) {
-    # Inventário: gravar apenas o conteúdo textual (sem prefixos/rotulagens)
     if ($global:CurrentStepTitle -eq 'Get-SystemInventory') {
       if ($Message -match '^Iniciando:' -or $Message -match '^Informações do Inventário' -or $Message -eq '') {
         $shouldWriteRawToFile = $false
@@ -143,10 +159,7 @@ function Write-Log {
         $rawToWrite = $Message
       }
     }
-
-
   } else {
-    # Se não conciso, gravaria tudo no arquivo
     $shouldWriteRawToFile = $false
   }
 
@@ -156,7 +169,6 @@ function Write-Log {
     $line | Out-File -FilePath $logFile -Append -Encoding UTF8
   }
 
-  # Console amigável (sem “erros vermelhos” do PowerShell)
   switch ($Level) {
     'ERROR' { Write-Host ("{0}[ALERTA]{1} {2}" -f $Yellow, $Reset, $Message) }
     'WARN'  { Write-Host ("{0}[AVISO]{1}  {2}" -f $Yellow, $Reset, $Message) }
@@ -168,7 +180,6 @@ function Write-Log {
 function Show-Header {
   param([string]$Text)
   $bar = '─' * ($Text.Length + 2)
-  # Write-Host ""
   Write-Host ("{0}┌{1}┐{2}" -f $Cyan, $bar, $Reset)
   Write-Host ("{0}│ {1} │{2}" -f $Cyan, $Text, $Reset)
   Write-Host ("{0}└{1}┘{2}" -f $Cyan, $bar, $Reset)
@@ -181,10 +192,7 @@ function Show-Phase {
   Write-Host ("{0}► Fase {1}:{2} {3}" -f $Cyan, $Id, $Reset, $Title)
 }
 
-function Show-StepStart {
-  param([string]$Name)
-  Write-Host ("  {0}•{1} Iniciando: {2} ..." -f $Gray, $Reset, $Name)
-}
+function Show-StepStart { param([string]$Name) Write-Host ("  {0}•{1} Iniciando: {2} ..." -f $Gray, $Reset, $Name) }
 function Show-StepEnd {
   param([string]$Name,[TimeSpan]$Elapsed,[bool]$Ok)
   if ($Ok) {
@@ -194,10 +202,7 @@ function Show-StepEnd {
   }
 }
 
-function Test-IsAdmin {
-  ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
+function Test-IsAdmin { ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
 function Test-AdminOrExit {
   if (-not (Test-IsAdmin)) {
     Show-Header -Text 'Permissão insuficiente'
@@ -240,18 +245,14 @@ function Initialize-Pwsh7 {
 }
 
 function Start-Logging {
-
-    $dataHoraFormatada = Get-Date -Format "dd/MM/yyyy 'às' HH'h' mm'min'"
-
-    Write-Log    ("Guardian 360 ({0})" -f $dataHoraFormatada) 'INFO'
-    Write-Log "____________________________________________________________________________________________________________________________________"
-    Write-Report ("Guardian 360 ({0})" -f $dataHoraFormatada)
-    Write-Report "____________________________________________________________________________________________________________________________________"
+  $dataHoraFormatada = Get-Date -Format "dd/MM/yyyy 'às' HH'h' mm'min'"
+  Write-Log    ("Guardian 360 ({0})" -f $dataHoraFormatada) 'INFO'
+  Write-Log "____________________________________________________________________________________________________________________________________"
+  Write-Report ("Guardian 360 ({0})" -f $dataHoraFormatada)
+  Write-Report "____________________________________________________________________________________________________________________________________"
 }
 
-function Stop-Logging {
-  Write-Log 'Fim da execução Guardian360' 'INFO'
-}
+function Stop-Logging { Write-Log 'Fim da execução Guardian360' 'INFO' }
 
 function Get-RebootPending {
   try {
@@ -284,12 +285,10 @@ function Get-PhysicalDisksByType {
           }
         }
       } else {
-        $list = @() # nenhum disco detectado
+        $list = @()
       }
     }
-  } catch {
-    $list = @()
-  }
+  } catch { $list = @() }
   return ,$list
 }
 
@@ -317,25 +316,16 @@ public class Kernel32 {
 }
 '@
 
-function Invoke-QuickEditLog {
-    param([string]$Message, [string]$Level = 'INFO')
-    try { if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log $Message $Level } } catch {}
-}
+function Invoke-QuickEditLog { param([string]$Message, [string]$Level = 'INFO') try { if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log $Message $Level } } catch {} }
 
 function Get-ConsoleInputMode {
-    $handle = [Kernel32]::GetStdHandle(-10)  # STD_INPUT_HANDLE
+    $handle = [Kernel32]::GetStdHandle(-10)
     $mode = 0
     [Kernel32]::GetConsoleMode($handle, [ref]$mode) | Out-Null
     return $mode
 }
+function Set-ConsoleInputMode { param([uint32]$Mode) $handle = [Kernel32]::GetStdHandle(-10); [Kernel32]::SetConsoleMode($handle, $Mode) | Out-Null }
 
-function Set-ConsoleInputMode {
-    param([uint32]$Mode)
-    $handle = [Kernel32]::GetStdHandle(-10)  # STD_INPUT_HANDLE
-    [Kernel32]::SetConsoleMode($handle, $Mode) | Out-Null
-}
-
-# Constantes para modos de console
 $ENABLE_QUICK_EDIT_MODE = 0x0040
 $ENABLE_INSERT_MODE = 0x0020
 $ENABLE_EXTENDED_FLAGS = 0x0080
@@ -372,12 +362,10 @@ function Disable-QuickEditProtection {
     }
 }
 
-# Registrar evento para restaurar ao sair
 $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Disable-QuickEditProtection }
 #endregion
 
 #region Bloco de Aparência para o Console (Maximizar + Fundo Preto) ---
-# Tipo Win32 para maximizar
 if (-not ('Win32.ConsoleWindow' -as [type])) {
 Add-Type -TypeDefinition @'
 using System;
@@ -395,24 +383,15 @@ namespace Win32 {
 '@
 }
 
-# Estado interno
 $script:_Console_OrigBgColor = $null
 
-function Invoke-ConsoleLog {
-  param([string]$Message,[string]$Level='DEBUG')
-  try { if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log $Message $Level } } catch {}
-}
-
-function Test-HasRawUI {
-  try { return ($null -ne $Host -and $null -ne $Host.UI -and $null -ne $Host.UI.RawUI) } catch { return $false }
-}
+function Invoke-ConsoleLog { param([string]$Message,[string]$Level='DEBUG') try { if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log $Message $Level } } catch {} }
+function Test-HasRawUI { try { return ($null -ne $Host -and $null -ne $Host.UI -and $null -ne $Host.UI.RawUI) } catch { return $false } }
 
 function Expand-ConsoleWindow {
   try {
     $hWnd = [Win32.ConsoleWindow]::GetConsoleWindow()
-    if ($hWnd -ne [IntPtr]::Zero) {
-      [void][Win32.ConsoleWindow]::ShowWindow($hWnd, 3) # SW_MAXIMIZE
-    }
+    if ($hWnd -ne [IntPtr]::Zero) { [void][Win32.ConsoleWindow]::ShowWindow($hWnd, 3) }
     if (Test-HasRawUI) {
       $raw = $Host.UI.RawUI
       $max = $raw.MaxWindowSize
@@ -424,30 +403,20 @@ function Expand-ConsoleWindow {
       }
     }
     Invoke-ConsoleLog 'Console maximizado (API/RawUI).'
-  } catch {
-    Invoke-ConsoleLog ("Falha ao maximizar console: {0}" -f $_.Exception.Message) 'WARN'
-  }
+  } catch { Invoke-ConsoleLog ("Falha ao maximizar console: {0}" -f $_.Exception.Message) 'WARN' }
 }
 
 function Enable-ConsoleAppearance {
-  [CmdletBinding()]
-  param([switch]$ForceMaximize = $true)
-
-  $hostName = ''
-  try { $hostName = $Host.Name } catch {}
+  [CmdletBinding()] param([switch]$ForceMaximize = $true)
+  $hostName = '' ; try { $hostName = $Host.Name } catch {}
   $isDesignHost = ($hostName -match 'ISE' -or $hostName -match 'Visual Studio Code')
 
   if (Test-HasRawUI) {
     try {
-      if ($null -eq $script:_Console_OrigBgColor) {
-        $script:_Console_OrigBgColor = $Host.UI.RawUI.BackgroundColor
-      }
+      if ($null -eq $script:_Console_OrigBgColor) { $script:_Console_OrigBgColor = $Host.UI.RawUI.BackgroundColor }
       $Host.UI.RawUI.BackgroundColor = 'Black'
-      #Clear-Host
       Invoke-ConsoleLog 'Aparência: fundo preto aplicado.'
-    } catch {
-      Invoke-ConsoleLog ("Falha ao aplicar fundo preto: {0}" -f $_.Exception.Message) 'WARN'
-    }
+    } catch { Invoke-ConsoleLog ("Falha ao aplicar fundo preto: {0}" -f $_.Exception.Message) 'WARN' }
   }
 
   if (-not $isDesignHost) {
@@ -458,24 +427,18 @@ function Enable-ConsoleAppearance {
 }
 
 function Disable-ConsoleAppearance {
-  [CmdletBinding()]
-  param()
+  [CmdletBinding()] param()
   if (Test-HasRawUI) {
     try {
       if ($null -ne $script:_Console_OrigBgColor) {
         $Host.UI.RawUI.BackgroundColor = $script:_Console_OrigBgColor
-        #Clear-Host
-        Invoke-ConsoleLog 'Aparência: fundo original restaurado.'
+        Invoke-ConsoleLog 'Aparência: fundo original restaurada.'
       }
-    } catch {
-      Invoke-ConsoleLog ("Falha ao restaurar aparência: {0}" -f $_.Exception.Message) 'WARN'
-    } finally {
-      $script:_Console_OrigBgColor = $null
-    }
+    } catch { Invoke-ConsoleLog ("Falha ao restaurar aparência: {0}" -f $_.Exception.Message) 'WARN' }
+    finally { $script:_Console_OrigBgColor = $null }
   }
 }
 
-# Restauração em saídas inesperadas
 if (-not (Get-Variable -Name ConsoleAppearance_AtExitHandler -Scope Script -ErrorAction SilentlyContinue)) {
   $script:ConsoleAppearance_AtExitHandler = { try { Disable-ConsoleAppearance } catch {} }
   try { Register-EngineEvent PowerShell.Exiting -Action $script:ConsoleAppearance_AtExitHandler | Out-Null } catch {}
@@ -577,7 +540,6 @@ try {
         @{ Name='Clear-RecentFilesHistory';  Action={ Clear-RecentFilesHistory } }
       )},
     @{ Id=5; Title='Atualizações Controladas'; Steps=@(
-        #@{ Name='Block-AppUpdates';     Action={ Block-AppUpdates } },
         @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } },
         @{ Name='Update-ChocoApps';     Action={ if($hasInet){ Update-ChocoApps } else { Write-Log 'Sem internet: pulando Update-ChocoApps' 'WARN' } } },
         @{ Name='Update-WindowsSystem'; Action={ if($hasInet){ Update-WindowsSystem } else { Write-Log 'Sem internet: pulando Update-WindowsSystem' 'WARN' } } }
@@ -593,7 +555,13 @@ try {
         @{ Name='Scan-AntiMalware';       Action={ Scan-AntiMalware } }        
       )},
     @{ Id=9; Title='Gestão'; Steps=@(
-        @{ Name='Send-LogToServer'; Action={ Send-LogToServer } }
+        @{ Name='Send-LogToServer'; Action={
+              if ([string]::IsNullOrWhiteSpace($FileServer)) {
+                Write-Log 'Sem -FileServer: pulando envio do log ao servidor.' 'INFO'
+              } else {
+                Send-LogToServer -Server $FileServer -Simulado:$Simulado
+              }
+            } }
       )}
   )
 
@@ -608,9 +576,7 @@ try {
     Show-Phase -Id $phase.Id -Title $phase.Title
     Write-Log ("=== Fase {0}: {1} ===" -f $phase.Id, $phase.Title) 'INFO'
 
-    foreach ($step in $phase.Steps) {
-      Invoke-GuardianStep -Title $step.Name -Action $step.Action
-    }
+    foreach ($step in $phase.Steps) { Invoke-GuardianStep -Title $step.Name -Action $step.Action }
 
     if ($id -eq 5 -and (Get-RebootPending)) {
       Write-Log 'Reinicialização pendente detectada após Atualizações.' 'WARN'
@@ -620,14 +586,12 @@ try {
 
   # 6) Resumo final
   Write-Host ""
-  Clear-Host   # Descomentar esta linha na versão final do Script
+  #Clear-Host
   Show-Header -Text 'Resumo da Manutenção Automatizada'
   Write-Host ""
 
   $maxLabel = 0
-  foreach ($r in $global:Results) {
-    if ($r.Etapa.Length -gt $maxLabel) { $maxLabel = $r.Etapa.Length }
-  }
+  foreach ($r in $global:Results) { if ($r.Etapa.Length -gt $maxLabel) { $maxLabel = $r.Etapa.Length } }
 
   Write-Report ""
   Write-Report "Resumo da Manutenção Automatizada"
@@ -637,13 +601,10 @@ try {
     $statusPlain = if ($r.Sucesso) { 'OK' } else { 'ALERTA' }
     $labelPadded = $r.Etapa.PadRight($maxLabel)
     $elapsedTxt = (Format-Elapsed $r.Tempo)
-
     $statusConsole = if ($r.Sucesso) { "{0}OK{1}" -f $Green, $Reset } else { "{0}ALERTA{1}" -f $Yellow, $Reset }
     Write-Host ("- {0}  -> {1} (Tempo: {2})" -f $labelPadded, $statusConsole, $elapsedTxt)
-
     Write-Report ("- {0}  -> {1} (Tempo: {2})" -f $labelPadded, $statusPlain, $elapsedTxt)
   }
-
 
   Confirm-MacriumBackup
 

@@ -1,7 +1,11 @@
 ﻿# Copia o arquivo de log para o Servidor de Arquivos da rede local, caso exista
 function Send-LogToServer {
     [CmdletBinding()]
-    param()
+    param(
+        [Parameter(Mandatory)]
+        [string]$Server,     # Host/IP do servidor (ex.: 192.168.0.2 ou SERVIDOR)
+        [switch]$Simulado    # Modo simulado: não efetua a cópia
+    )
 
     $ErrorActionPreference = 'Stop'
 
@@ -15,9 +19,9 @@ function Send-LogToServer {
 
     $diretorioLogLocal = Join-Path -Path $caminhoBaseLocal -ChildPath "$ano\$pastaMes"
 
-    # Ajuste aqui se o IP/host mudar
-    $servidorHost = '192.168.0.2'
-    $servidorBase = "\\$servidorHost\TI"
+    # Servidor informado via parâmetro
+    $servidorHost = $Server
+    $servidorBase = "\$servidorHost\TI"
     $destinoServidor = "$servidorBase\$ano\$pastaMes"
 
     Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
@@ -28,8 +32,7 @@ function Send-LogToServer {
         return
     }
 
-    # --- 2) Seleção do .log mais recente (evitando overhead desnecessário) ---
-    # -File e -Filter reduzem a enumeração; Select-Object -First 1 sem sort completo
+    # --- 2) Seleção do .log mais recente ---
     $arquivoMaisRecente = Get-ChildItem -Path $diretorioLogLocal -File -Filter '*.log' -ErrorAction SilentlyContinue |
                           Sort-Object LastWriteTime -Descending |
                           Select-Object -First 1
@@ -40,37 +43,32 @@ function Send-LogToServer {
     }
 
     # --- 3) Verificação super-rápida de disponibilidade do servidor (ping) ---
-    # Timeout curto para não travar a execução quando o servidor está offline
     $servidorOnline = $false
     try {
-        # Test-Connection é muito mais rápido que Test-Path em UNC quando host está down
         $servidorOnline = Test-Connection -ComputerName $servidorHost -Count 1 -Quiet -TimeoutSeconds 1
     } catch {
-        # Ignora exceções de ICMP bloqueado; tentaremos um fallback leve
         $servidorOnline = $false
     }
 
     if (-not $servidorOnline) {
-        Write-Host "Servidor de arquivos ($servidorBase) inacessível (ping falhou). Operação pulada rapidamente." -ForegroundColor Yellow
+        Write-Host "Servidor de arquivos ($servidorBase) inacessível (ping falhou). Operação ignorada rapidamente." -ForegroundColor Yellow
         return
     }
 
-    # --- 4) Verificação leve do compartilhamento (evita listar diretórios grandes) ---
-    # Usa [System.IO.Directory]::Exists para checagem rápida; evita enumerar conteúdo
+    # --- 4) Verificação leve do compartilhamento ---
     try {
         if (-not ([System.IO.Directory]::Exists($servidorBase))) {
-            Write-Host "Compartilhamento TI indisponível em $servidorBase. Operação pulada." -ForegroundColor Yellow
+            Write-Host "Compartilhamento TI indisponível em $servidorBase. Operação ignorada." -ForegroundColor Yellow
             return
         }
     } catch {
-        Write-Host "Falha ao validar compartilhamento ($servidorBase). Operação pulada. Detalhe: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "Falha ao validar compartilhamento ($servidorBase). Operação ignorada. Detalhe: $($_.Exception.Message)" -ForegroundColor Yellow
         return
     }
 
     # --- 5) Cria estrutura de destino somente se necessário ---
     try {
         if (-not ([System.IO.Directory]::Exists($destinoServidor))) {
-            # New-Item com -Force é OK; [IO.Directory]::CreateDirectory é ainda mais direto
             [void][System.IO.Directory]::CreateDirectory($destinoServidor)
         }
     } catch {
@@ -81,8 +79,12 @@ function Send-LogToServer {
     # --- 6) Copia com nome padronizado (NomeDoComputador.log) ---
     $caminhoFinalServidor = Join-Path -Path $destinoServidor -ChildPath "$($env:COMPUTERNAME).log"
 
+    if ($Simulado) {
+        Write-Host "SIMULADO: copiaria '$($arquivoMaisRecente.FullName)' para '$caminhoFinalServidor'." -ForegroundColor Cyan
+        return
+    }
+
     try {
-        # Copy-Item é suficiente para 1 arquivo. Se futuramente forem arquivos grandes, considere Robocopy.
         Copy-Item -Path $arquivoMaisRecente.FullName -Destination $caminhoFinalServidor -Force -ErrorAction Stop
         Write-Host "Log '$($arquivoMaisRecente.Name)' enviado para '$caminhoFinalServidor'." -ForegroundColor Green
     } catch {
