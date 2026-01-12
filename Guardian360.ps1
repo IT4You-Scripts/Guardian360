@@ -413,7 +413,7 @@ try {
         @{ Name='Optimize-SSD'; Action={ if($hasSSD){ Optimize-SSD } else { Write-Log 'Nenhum SSD detectado: pulando Optimize-SSD' 'INFO' } } },
         @{ Name='Optimize-HDD'; Action={ if($hasHDD){ Optimize-HDD } else { Write-Log 'Nenhum HDD detectado: pulando Optimize-HDD' 'INFO' } } }
       )},
-    @{ Id=8; Title='Segurança'; Steps=@(
+    @{ Id=8; Title='Segurança'; Steps=@( 
         @{ Name='Scan-AntiMalware';       Action={ Scan-AntiMalware } },
         @{ Name='Validate-MacriumBackup'; Action={ Validate-MacriumBackup } }
       )},
