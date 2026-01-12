@@ -407,7 +407,8 @@ function Expand-ConsoleWindow {
 }
 
 function Enable-ConsoleAppearance {
-  [CmdletBinding()] param([switch]$ForceMaximize = $true)
+  #[CmdletBinding()] param([switch]$ForceMaximize = $true)
+  [CmdletBinding()] param([switch]$ForceMaximize)
   $hostName = '' ; try { $hostName = $Host.Name } catch {}
   $isDesignHost = ($hostName -match 'ISE' -or $hostName -match 'Visual Studio Code')
 
@@ -540,6 +541,7 @@ try {
         @{ Name='Clear-RecentFilesHistory';  Action={ Clear-RecentFilesHistory } }
       )},
     @{ Id=5; Title='Atualizações Controladas'; Steps=@(
+        #@{ Name='Block-AppUpdates';     Action={ Block-AppUpdates } },
         @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } },
         @{ Name='Update-ChocoApps';     Action={ if($hasInet){ Update-ChocoApps } else { Write-Log 'Sem internet: pulando Update-ChocoApps' 'WARN' } } },
         @{ Name='Update-WindowsSystem'; Action={ if($hasInet){ Update-WindowsSystem } else { Write-Log 'Sem internet: pulando Update-WindowsSystem' 'WARN' } } }
