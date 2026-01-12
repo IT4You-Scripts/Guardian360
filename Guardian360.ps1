@@ -39,8 +39,6 @@ param(
   [switch]$Simulado      # Modo ensaio: não executa ações destrutivas
 )
 
-Clear-Host
-
 # Preferências e ambiente
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -92,7 +90,7 @@ $StepDescriptions = @{
   'Optimize-SSD'             = 'Otimização de todos os SSDs disponíveis'
   'Optimize-HDD'             = 'Desfragmentação de todos os discos físicos disponíveis'
   'Scan-AntiMalware'         = 'Varredura contra malwares com Windows Defender'
-  'Confirm-MacriumBackup'   = 'Validação dos arquivos de backup do Macrium Reflect'
+  'Confirm-MacriumBackup'    = 'Validação dos arquivos de backup do Macrium Reflect'
   'Send-LogToServer'         = 'Verificação da existência de Servidor de Arquivos na rede local'
 }
 function Get-StepLabel {
@@ -146,14 +144,7 @@ function Write-Log {
       }
     }
 
-    # Macrium: normaliza a linha de IMAGEM MAIS RECENTE DO MACRIUM REFLECT
-    if ($Message -match 'IMAGEM MAIS RECENTE DO MACRIUM REFLECT') {
-      $match = [regex]::Match($Message,'IMAGEM MAIS RECENTE DO MACRIUM REFLECT\s*[:\-]>?\s*(.+)')
-      if ($match.Success) {
-        $shouldWriteRawToFile = $true
-        $rawToWrite = "IMAGEM MAIS RECENTE DO MACRIUM REFLECT: " + $match.Groups[1].Value.Trim()
-      }
-    }
+
   } else {
     # Se não conciso, gravaria tudo no arquivo
     $shouldWriteRawToFile = $false
@@ -177,7 +168,7 @@ function Write-Log {
 function Show-Header {
   param([string]$Text)
   $bar = '─' * ($Text.Length + 2)
-  Write-Host ""
+  # Write-Host ""
   Write-Host ("{0}┌{1}┐{2}" -f $Cyan, $bar, $Reset)
   Write-Host ("{0}│ {1} │{2}" -f $Cyan, $Text, $Reset)
   Write-Host ("{0}└{1}┘{2}" -f $Cyan, $bar, $Reset)
@@ -249,9 +240,15 @@ function Initialize-Pwsh7 {
 }
 
 function Start-Logging {
-  Write-Log ("Início da execução Guardian 360 ({0})" -f $stamp) 'INFO'
-  Write-Report ("Início da execução Guardian 360 ({0})" -f $stamp)
+
+    $dataHoraFormatada = Get-Date -Format "dd/MM/yyyy 'às' HH'h' mm'min'"
+
+    Write-Log    ("Guardian 360 ({0})" -f $dataHoraFormatada) 'INFO'
+    Write-Log "____________________________________________________________________________________________________________________________________"
+    Write-Report ("Guardian 360 ({0})" -f $dataHoraFormatada)
+    Write-Report "____________________________________________________________________________________________________________________________________"
 }
+
 function Stop-Logging {
   Write-Log 'Fim da execução Guardian360' 'INFO'
 }
@@ -519,6 +516,7 @@ Initialize-Pwsh7
 Enable-QuickEditProtection
 Enable-ConsoleAppearance
 Start-Logging
+Clear-Host
 Show-Header -Text 'Guardian 360 — Manutenção e Otimização'
 
 try {
@@ -592,8 +590,7 @@ try {
         @{ Name='Optimize-HDD'; Action={ if($hasHDD){ Optimize-HDD } else { Write-Log 'Nenhum HDD detectado: pulando Optimize-HDD' 'INFO' } } }
       )},
     @{ Id=8; Title='Segurança'; Steps=@(
-        #@{ Name='Scan-AntiMalware';       Action={ Scan-AntiMalware } }
-        @{ Name='Confirm-MacriumBackup'; Action={ Confirm-MacriumBackup } }
+        @{ Name='Scan-AntiMalware';       Action={ Scan-AntiMalware } }        
       )},
     @{ Id=9; Title='Gestão'; Steps=@(
         @{ Name='Send-LogToServer'; Action={ Send-LogToServer } }
@@ -606,6 +603,8 @@ try {
     if ($ExecutaFases -and ($ExecutaFases -notcontains $id)) { continue }
     if ($PulaFases -and ($PulaFases -contains $id)) { continue }
 
+    Write-Host ""
+    # Write-Host "____________________________________________________________________________________________________________________________________"
     Show-Phase -Id $phase.Id -Title $phase.Title
     Write-Log ("=== Fase {0}: {1} ===" -f $phase.Id, $phase.Title) 'INFO'
 
@@ -621,8 +620,7 @@ try {
 
   # 6) Resumo final
   Write-Host ""
-  Write-Host "===================================================================================================================================="
-  #Clear-Host   # Descomentar esta linha na versão final do Script
+  Clear-Host   # Descomentar esta linha na versão final do Script
   Show-Header -Text 'Resumo da Manutenção Automatizada'
   Write-Host ""
 
@@ -631,7 +629,6 @@ try {
     if ($r.Etapa.Length -gt $maxLabel) { $maxLabel = $r.Etapa.Length }
   }
 
-  Write-Report "===================================================================================================================================="
   Write-Report ""
   Write-Report "Resumo da Manutenção Automatizada"
   Write-Report ""
@@ -648,59 +645,14 @@ try {
   }
 
 
-  # — Macrium (linha normalizada no resumo final + log/relatório)
-  try {
-    $rescuePath = 'D:\Rescue'
-    if (Test-Path $rescuePath) {
-      $latest = Get-ChildItem -Path $rescuePath -File -Include *.mrimg,*.mrbak -Recurse -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending | Select-Object -First 1
-      if ($latest) {
-        $msg = "Imagem mais recente do Marium Reflect: $($latest.FullName) | Data: $($latest.LastWriteTime.ToString('dd/MM/yyyy HH:mm'))"
-        Write-Host""
-        Write-Host $msg
-        Write-Log ""
-        Write-Log  $msg 'INFO'
-        Write-Report""
-        Write-Report $msg
-      } else {
-        $warn = "Imagem mais recente do Marium Reflect: Não encontrada em $rescuePath"
-        Write-Host""
-        Write-Host $warn
-        Write-Log ""
-        Write-Log  $warn 'WARN'
-        Write-Report""
-        Write-Report $warn
-      }
-    } else {
-      $warn = "Imagem mais recente do Marium Reflect: Pasta inexistente ($rescuePath)"
-      Write-Host""
-      Write-Host $warn
-      Write-Log ""
-      Write-Log  $warn 'WARN'
-      Write-Report""
-      Write-Report $warn
-    }
-  } catch {
-    $err = "Imagem mais recente do Marium Reflect: Falha ao consultar (" + $_.Exception.Message + ")"
-    Write-Host""
-    Write-Host $err
-    Write-Log ""
-    Write-Log  $err 'WARN'
-    Write-Report""
-    Write-Report $err
-  }
-
-
+  Confirm-MacriumBackup
 
   Write-Host ""
   Write-Host ("{0}Arquivo de log:{1} {2}" -f $Gray, $Reset, $logFile)
   Write-Host ""
-  Write-Host "===================================================================================================================================="
+  
   Write-Report ""
   Write-Report ("Arquivo de log: {0}" -f $logFile)
-  Write-Report ""
-  Write-Report "===================================================================================================================================="
-
   
 } catch {
   Write-Log ("FALHA GERAL (capturada): {0}" -f $_.ToString()) 'ERROR'
