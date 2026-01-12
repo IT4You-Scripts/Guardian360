@@ -57,7 +57,7 @@ $stamp       = Get-Date -Format 'yyyyMMdd_HHmmss'
 $year        = Get-Date -Format 'yyyy'
 $monthNumber = Get-Date -Format 'MM'
 $monthName   = (Get-Culture).DateTimeFormat.GetMonthName([int]$monthNumber)
-$monthFolder = ("{0}. {1}" -f $monthNumber, $monthName).ToUpper()
+$monthFolder = ("{0}. {1}" -f $monthNumber, (Get-Culture).TextInfo.ToTitleCase($monthName.ToLower()))
 $logDir      = Join-Path (Join-Path $baseLogDir $year) $monthFolder
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $computer    = $env:COMPUTERNAME.ToUpper()
