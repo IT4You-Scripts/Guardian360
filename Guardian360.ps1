@@ -51,7 +51,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 $root    = Split-Path -Parent $PSCommandPath
 $funcDir = Join-Path $root 'Functions'
 
-# --- INÍCIO: AJUSTE MÍNIMO DE PASTA/ARQUIVO DE LOG ---
+# --- Início: Ajuste Mínimo de Pasta/Arquivo de Log ---
 $baseLogDir  = Join-Path $root 'Logs'
 $stamp       = Get-Date -Format 'yyyyMMdd_HHmmss'
 $year        = Get-Date -Format 'yyyy'
@@ -62,7 +62,7 @@ $logDir      = Join-Path (Join-Path $baseLogDir $year) $monthFolder
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $computer    = $env:COMPUTERNAME.ToUpper()
 $logFile     = Join-Path $logDir ("{0}_{1}.log" -f $computer, $stamp)
-# --- FIM: AJUSTE MÍNIMO DE PASTA/ARQUIVO DE LOG ---
+# --- Fim: Ajuste Mínimo de Pasta/Arquivo de Log ---
 
 # TLS forte (sem prompts)
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13 } catch {}
@@ -70,11 +70,11 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # Resultados agregados
 $global:Results = New-Object System.Collections.Generic.List[object]
 
-# LOG CONCISO: controla escrita no arquivo
+# Log Conciso: controla escrita no arquivo
 $global:ConciseLog = $true
 $global:CurrentStepTitle = $null
 
-# --- MAPA DE ETAPAS (nomes técnicos -> descrições amigáveis) ---
+# --- Mapeamento das Etapas (nomes técnicos -> descrições amigáveis) ---
 $StepDescriptions = @{
   'Get-SystemInventory'      = 'Coleta do Inventário de Hardware e Software'
   'Repair-SystemIntegrity'   = 'Verificação do Registro e dos arquivos do Windows'
@@ -100,7 +100,7 @@ function Get-StepLabel {
   if ($StepDescriptions.ContainsKey($Name)) { return $StepDescriptions[$Name] }
   return $Name
 }
-# --- FIM MAPA ---
+# --- Fim do Mapeamento ---
 
 # Paleta (console amigável). Fallback se PSStyle não existir (ex.: PowerShell 5.x)
 $pss = Get-Variable -Name PSStyle -ErrorAction SilentlyContinue
@@ -207,7 +207,7 @@ function Test-IsAdmin {
   ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# VERBO APROVADO: Test-
+# Verbo Aprovado: Test-
 function Test-AdminOrExit {
   if (-not (Test-IsAdmin)) {
     Show-Header -Text 'Permissão insuficiente'
@@ -216,7 +216,7 @@ function Test-AdminOrExit {
   }
 }
 
-# VERBO APROVADO: Initialize-
+# Verbo Aprovado: Initialize-
 function Initialize-Pwsh7 {
   if ($PSVersionTable.PSVersion.Major -ge 7) { return }
   Write-Log 'PowerShell 7+ não detectado. Tentando instalação silenciosa...' 'INFO'
@@ -307,7 +307,7 @@ function Format-Elapsed {
   return ('{0:00} min {1:00} seg' -f $min, $sec)
 }
 
-# --- INÍCIO: BLOCO DE PROTEÇÃO QUICK EDIT ---
+# --- Início: Bloco de Proteção QuickEdit ---
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -381,7 +381,7 @@ function Disable-QuickEditProtection {
 
 # Registrar evento para desabilitar proteção ao sair
 $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Disable-QuickEditProtection }
-# --- FIM: BLOCO DE PROTEÇÃO QUICK EDIT ---
+# --- Fim: Bloco de Proteção QuickEdit ---
 
 function Invoke-GuardianStep {
   param(
@@ -411,7 +411,7 @@ function Invoke-GuardianStep {
   $global:Results.Add([pscustomobject]@{ Etapa=$label; EtapaTecnica=$Title; Sucesso=$ok; Tempo=$sw.Elapsed })
   Show-StepEnd -Name $label -Elapsed $sw.Elapsed -Ok:$ok
 }
-# --- FIM SUBSTITUIÇÃO ---
+
 
 # 1) Pré-requisitos (sem prompts)
 Test-AdminOrExit
