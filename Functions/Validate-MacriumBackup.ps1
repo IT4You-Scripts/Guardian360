@@ -1,5 +1,5 @@
 ﻿# Verifica a existência dos arquivos de backup do Macrium Reflect
-function Validate-MacriumBackup {
+function Confirm-MacriumBackup {
     param(
         [string]$DriveLetter = 'D',
         [string]$RescueFolderName = 'Rescue',
@@ -53,14 +53,15 @@ function Validate-MacriumBackup {
         $olderThanThreshold = $newestAgeDays -gt $ThresholdDays
 
         # Título + linha em branco
-        $titulo = if ($fileCount -le 1) { "IMAGEM DO MACRIUM REFLECT" } else { "IMAGENS DO MACRIUM REFLECT" }
+        $titulo = if ($fileCount -le 1) { "Macrium Reflect" } else { "Macrium Reflect" }
+        Write-Host ""
         Write-Host ""
         Write-Host $titulo
         if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log "$titulo" }
 
         # Rótulos com largura padronizada para alinhar a coluna da data
-        $labelAnterior = "-> IMAGEM ANTERIOR:"
-        $labelRecente = "-> IMAGEM MAIS RECENTE:"
+        $labelAnterior = "  • Imagem do Macrium Reflect (penúltima):"
+        $labelRecente = "  • Imagem do Macrium Reflect (mais recente):"
         $labelWidth = [Math]::Max($labelAnterior.Length, $labelRecente.Length) + 1  # +1 para um espaço de separação
 
         if ($fileCount -eq 1) {

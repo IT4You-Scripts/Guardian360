@@ -92,7 +92,7 @@ $StepDescriptions = @{
   'Optimize-SSD'             = 'Otimização de todos os SSDs disponíveis'
   'Optimize-HDD'             = 'Desfragmentação de todos os discos físicos disponíveis'
   'Scan-AntiMalware'         = 'Varredura contra malwares com Windows Defender'
-  'Validate-MacriumBackup'   = 'Validação dos arquivos de backup do Macrium Reflect'
+  'Confirm-MacriumBackup'   = 'Validação dos arquivos de backup do Macrium Reflect'
   'Send-LogToServer'         = 'Verificação da existência de Servidor de Arquivos na rede local'
 }
 function Get-StepLabel {
@@ -410,7 +410,7 @@ function Test-HasRawUI {
   try { return ($null -ne $Host -and $null -ne $Host.UI -and $null -ne $Host.UI.RawUI) } catch { return $false }
 }
 
-function Maximize-ConsoleWindow {
+function Expand-ConsoleWindow {
   try {
     $hWnd = [Win32.ConsoleWindow]::GetConsoleWindow()
     if ($hWnd -ne [IntPtr]::Zero) {
@@ -454,7 +454,7 @@ function Enable-ConsoleAppearance {
   }
 
   if (-not $isDesignHost) {
-    if ($ForceMaximize) { Maximize-ConsoleWindow }
+    if ($ForceMaximize) { Expand-ConsoleWindow }
   } else {
     Invoke-ConsoleLog "Maximização ignorada em host ($hostName)."
   }
@@ -541,7 +541,7 @@ try {
     'Optimize-SSD.ps1',
     'Optimize-HDD.ps1',
     'Scan-AntiMalware.ps1',
-    'Validate-MacriumBackup.ps1',
+    'Confirm-MacriumBackup.ps1',
     'Send-LogToServer.ps1'
   )
   foreach ($ff in $functionFiles) {
@@ -592,8 +592,8 @@ try {
         @{ Name='Optimize-HDD'; Action={ if($hasHDD){ Optimize-HDD } else { Write-Log 'Nenhum HDD detectado: pulando Optimize-HDD' 'INFO' } } }
       )},
     @{ Id=8; Title='Segurança'; Steps=@(
-        @{ Name='Scan-AntiMalware';       Action={ Scan-AntiMalware } },
-        @{ Name='Validate-MacriumBackup'; Action={ Validate-MacriumBackup } }
+        #@{ Name='Scan-AntiMalware';       Action={ Scan-AntiMalware } }
+        @{ Name='Confirm-MacriumBackup'; Action={ Confirm-MacriumBackup } }
       )},
     @{ Id=9; Title='Gestão'; Steps=@(
         @{ Name='Send-LogToServer'; Action={ Send-LogToServer } }
@@ -622,6 +622,7 @@ try {
   # 6) Resumo final
   Write-Host ""
   Write-Host "===================================================================================================================================="
+  #Clear-Host   # Descomentar esta linha na versão final do Script
   Show-Header -Text 'Resumo da Manutenção Automatizada'
   Write-Host ""
 
