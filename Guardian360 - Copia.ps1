@@ -647,51 +647,6 @@ try {
     Write-Report ("- {0}  -> {1} (Tempo: {2})" -f $labelPadded, $statusPlain, $elapsedTxt)
   }
 
-
-  # — Macrium (linha normalizada no resumo final + log/relatório)
-  try {
-    $rescuePath = 'D:\Rescue'
-    if (Test-Path $rescuePath) {
-      $latest = Get-ChildItem -Path $rescuePath -File -Include *.mrimg,*.mrbak -Recurse -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending | Select-Object -First 1
-      if ($latest) {
-        $msg = "Imagem mais recente do Marium Reflect: $($latest.FullName) | Data: $($latest.LastWriteTime.ToString('dd/MM/yyyy HH:mm'))"
-        Write-Host""
-        Write-Host $msg
-        Write-Log ""
-        Write-Log  $msg 'INFO'
-        Write-Report""
-        Write-Report $msg
-      } else {
-        $warn = "Imagem mais recente do Marium Reflect: Não encontrada em $rescuePath"
-        Write-Host""
-        Write-Host $warn
-        Write-Log ""
-        Write-Log  $warn 'WARN'
-        Write-Report""
-        Write-Report $warn
-      }
-    } else {
-      $warn = "Imagem mais recente do Marium Reflect: Pasta inexistente ($rescuePath)"
-      Write-Host""
-      Write-Host $warn
-      Write-Log ""
-      Write-Log  $warn 'WARN'
-      Write-Report""
-      Write-Report $warn
-    }
-  } catch {
-    $err = "Imagem mais recente do Marium Reflect: Falha ao consultar (" + $_.Exception.Message + ")"
-    Write-Host""
-    Write-Host $err
-    Write-Log ""
-    Write-Log  $err 'WARN'
-    Write-Report""
-    Write-Report $err
-  }
-
-
-
   Write-Host ""
   Write-Host ("{0}Arquivo de log:{1} {2}" -f $Gray, $Reset, $logFile)
   Write-Host ""
