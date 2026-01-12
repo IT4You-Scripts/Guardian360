@@ -74,7 +74,7 @@ $global:Results = New-Object System.Collections.Generic.List[object]
 $global:ConciseLog = $true
 $global:CurrentStepTitle = $null
 
-# --- Mapeamento das Etapas (nomes técnicos -> descrições amigáveis) ---
+#region Mapeamento das Etapas (nomes técnicos -> descrições amigáveis) ---
 $StepDescriptions = @{
   'Get-SystemInventory'      = 'Coleta do Inventário de Hardware e Software'
   'Repair-SystemIntegrity'   = 'Verificação do Registro e dos arquivos do Windows'
@@ -100,7 +100,7 @@ function Get-StepLabel {
   if ($StepDescriptions.ContainsKey($Name)) { return $StepDescriptions[$Name] }
   return $Name
 }
-# --- Fim do Mapeamento ---
+#endregion
 
 # Paleta (console amigável). Fallback se PSStyle não existir (ex.: PowerShell 5.x)
 $pss = Get-Variable -Name PSStyle -ErrorAction SilentlyContinue
@@ -207,7 +207,6 @@ function Test-IsAdmin {
   ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Verbo Aprovado: Test-
 function Test-AdminOrExit {
   if (-not (Test-IsAdmin)) {
     Show-Header -Text 'Permissão insuficiente'
@@ -216,7 +215,6 @@ function Test-AdminOrExit {
   }
 }
 
-# Verbo Aprovado: Initialize-
 function Initialize-Pwsh7 {
   if ($PSVersionTable.PSVersion.Major -ge 7) { return }
   Write-Log 'PowerShell 7+ não detectado. Tentando instalação silenciosa...' 'INFO'
@@ -251,13 +249,11 @@ function Initialize-Pwsh7 {
 }
 
 function Start-Logging {
-  # Transcript removido
-  Write-Log ("Início da execução Guardian 360 ({0})" -f $stamp) 'INFO'  # console
-  Write-Report ("Início da execução Guardian 360 ({0})" -f $stamp)      # arquivo (sem prefixo)
+  Write-Log ("Início da execução Guardian 360 ({0})" -f $stamp) 'INFO'
+  Write-Report ("Início da execução Guardian 360 ({0})" -f $stamp)
 }
 function Stop-Logging {
   Write-Log 'Fim da execução Guardian360' 'INFO'
-  # Transcript removido
 }
 
 function Get-RebootPending {
@@ -297,7 +293,7 @@ function Get-PhysicalDisksByType {
   } catch {
     $list = @()
   }
-  return ,$list  # vírgula garante retorno como array
+  return ,$list
 }
 
 function Format-Elapsed {
@@ -307,8 +303,8 @@ function Format-Elapsed {
   return ('{0:00} min {1:00} seg' -f $min, $sec)
 }
 
-# --- Início: Bloco de Proteção QuickEdit ---
-Add-Type @"
+#region Bloco de Proteção QuickEdit ---
+Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 
@@ -322,13 +318,11 @@ public class Kernel32 {
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
 }
-"@
+'@
 
-function Invoke-OptionalLog {
+function Invoke-QuickEditLog {
     param([string]$Message, [string]$Level = 'INFO')
-    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-        Write-Log $Message $Level
-    }
+    try { if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log $Message $Level } } catch {}
 }
 
 function Get-ConsoleInputMode {
@@ -350,38 +344,146 @@ $ENABLE_INSERT_MODE = 0x0020
 $ENABLE_EXTENDED_FLAGS = 0x0080
 
 function Enable-QuickEditProtection {
-    # Ignorar se estiver no ISE ou VSCode
-    if ($host.Name -match 'ISE|Visual Studio Code') { return }
+    $hostName = ''
+    try { $hostName = $Host.Name } catch {}
+    if ($hostName -match 'ISE|Visual Studio Code') { return }
 
     try {
         $currentMode = Get-ConsoleInputMode
-        $newMode = $currentMode -band (-bnot $ENABLE_QUICK_EDIT_MODE)  # Desabilitar Quick Edit
-        $newMode = $newMode -bor $ENABLE_EXTENDED_FLAGS  # Garantir flags estendidas
+        $newMode = $currentMode -band (-bnot $ENABLE_QUICK_EDIT_MODE)
+        $newMode = $newMode -band (-bnot $ENABLE_INSERT_MODE)
+        $newMode = $newMode -bor $ENABLE_EXTENDED_FLAGS
         Set-ConsoleInputMode $newMode
-        Invoke-OptionalLog 'Proteção Quick Edit habilitada.' 'DEBUG'
+        Invoke-QuickEditLog 'Proteção Quick Edit habilitada.' 'DEBUG'
     } catch {
-        Invoke-OptionalLog ("Falha ao habilitar proteção Quick Edit: {0}" -f $_.Exception.Message) 'WARN'
+        Invoke-QuickEditLog ("Falha ao habilitar proteção Quick Edit: {0}" -f $_.Exception.Message) 'WARN'
     }
 }
 
 function Disable-QuickEditProtection {
-    # Ignorar se estiver no ISE ou VSCode
-    if ($host.Name -match 'ISE|Visual Studio Code') { return }
+    $hostName = ''
+    try { $hostName = $Host.Name } catch {}
+    if ($hostName -match 'ISE|Visual Studio Code') { return }
 
     try {
         $currentMode = Get-ConsoleInputMode
-        $newMode = $currentMode -bor $ENABLE_QUICK_EDIT_MODE  # Reabilitar Quick Edit
-        $newMode = $newMode -bor $ENABLE_EXTENDED_FLAGS  # Garantir flags estendidas
+        $newMode = $currentMode -bor $ENABLE_QUICK_EDIT_MODE -bor $ENABLE_EXTENDED_FLAGS -bor $ENABLE_INSERT_MODE
         Set-ConsoleInputMode $newMode
-        Invoke-OptionalLog 'Proteção Quick Edit desabilitada.' 'DEBUG'
+        Invoke-QuickEditLog 'Proteção Quick Edit desabilitada.' 'DEBUG'
     } catch {
-        Invoke-OptionalLog ("Falha ao desabilitar proteção Quick Edit: {0}" -f $_.Exception.Message) 'WARN'
+        Invoke-QuickEditLog ("Falha ao desabilitar proteção Quick Edit: {0}" -f $_.Exception.Message) 'WARN'
     }
 }
 
-# Registrar evento para desabilitar proteção ao sair
+# Registrar evento para restaurar ao sair
 $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Disable-QuickEditProtection }
-# --- Fim: Bloco de Proteção QuickEdit ---
+#endregion
+
+#region Bloco de Aparência para o Console (Maximizar + Fundo Preto) ---
+# Tipo Win32 para maximizar
+if (-not ('Win32.ConsoleWindow' -as [type])) {
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace Win32 {
+  public static class ConsoleWindow {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern IntPtr GetConsoleWindow();
+
+    [DllImport("user32.dll", SetLastError=true)]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  }
+}
+'@
+}
+
+# Estado interno
+$script:_Console_OrigBgColor = $null
+
+function Invoke-ConsoleLog {
+  param([string]$Message,[string]$Level='DEBUG')
+  try { if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log $Message $Level } } catch {}
+}
+
+function Test-HasRawUI {
+  try { return ($null -ne $Host -and $null -ne $Host.UI -and $null -ne $Host.UI.RawUI) } catch { return $false }
+}
+
+function Maximize-ConsoleWindow {
+  try {
+    $hWnd = [Win32.ConsoleWindow]::GetConsoleWindow()
+    if ($hWnd -ne [IntPtr]::Zero) {
+      [void][Win32.ConsoleWindow]::ShowWindow($hWnd, 3) # SW_MAXIMIZE
+    }
+    if (Test-HasRawUI) {
+      $raw = $Host.UI.RawUI
+      $max = $raw.MaxWindowSize
+      if ($max.Width -gt 0 -and $max.Height -gt 0) {
+        $buf = $raw.BufferSize
+        $newBuf = New-Object System.Management.Automation.Host.Size ([Math]::Max($buf.Width, $max.Width), [Math]::Max($buf.Height, [Math]::Max($max.Height, 300)))
+        $raw.BufferSize = $newBuf
+        $raw.WindowSize = New-Object System.Management.Automation.Host.Size ($max.Width, $max.Height)
+      }
+    }
+    Invoke-ConsoleLog 'Console maximizado (API/RawUI).'
+  } catch {
+    Invoke-ConsoleLog ("Falha ao maximizar console: {0}" -f $_.Exception.Message) 'WARN'
+  }
+}
+
+function Enable-ConsoleAppearance {
+  [CmdletBinding()]
+  param([switch]$ForceMaximize = $true)
+
+  $hostName = ''
+  try { $hostName = $Host.Name } catch {}
+  $isDesignHost = ($hostName -match 'ISE' -or $hostName -match 'Visual Studio Code')
+
+  if (Test-HasRawUI) {
+    try {
+      if ($null -eq $script:_Console_OrigBgColor) {
+        $script:_Console_OrigBgColor = $Host.UI.RawUI.BackgroundColor
+      }
+      $Host.UI.RawUI.BackgroundColor = 'Black'
+      #Clear-Host
+      Invoke-ConsoleLog 'Aparência: fundo preto aplicado.'
+    } catch {
+      Invoke-ConsoleLog ("Falha ao aplicar fundo preto: {0}" -f $_.Exception.Message) 'WARN'
+    }
+  }
+
+  if (-not $isDesignHost) {
+    if ($ForceMaximize) { Maximize-ConsoleWindow }
+  } else {
+    Invoke-ConsoleLog "Maximização ignorada em host ($hostName)."
+  }
+}
+
+function Disable-ConsoleAppearance {
+  [CmdletBinding()]
+  param()
+  if (Test-HasRawUI) {
+    try {
+      if ($null -ne $script:_Console_OrigBgColor) {
+        $Host.UI.RawUI.BackgroundColor = $script:_Console_OrigBgColor
+        #Clear-Host
+        Invoke-ConsoleLog 'Aparência: fundo original restaurado.'
+      }
+    } catch {
+      Invoke-ConsoleLog ("Falha ao restaurar aparência: {0}" -f $_.Exception.Message) 'WARN'
+    } finally {
+      $script:_Console_OrigBgColor = $null
+    }
+  }
+}
+
+# Restauração em saídas inesperadas
+if (-not (Get-Variable -Name ConsoleAppearance_AtExitHandler -Scope Script -ErrorAction SilentlyContinue)) {
+  $script:ConsoleAppearance_AtExitHandler = { try { Disable-ConsoleAppearance } catch {} }
+  try { Register-EngineEvent PowerShell.Exiting -Action $script:ConsoleAppearance_AtExitHandler | Out-Null } catch {}
+}
+#endregion
 
 function Invoke-GuardianStep {
   param(
@@ -407,16 +509,15 @@ function Invoke-GuardianStep {
     $global:CurrentStepTitle = $null
   }
   $sw.Stop()
-  # Armazena rótulo e nome técnico (para UI e diagnóstico)
   $global:Results.Add([pscustomobject]@{ Etapa=$label; EtapaTecnica=$Title; Sucesso=$ok; Tempo=$sw.Elapsed })
   Show-StepEnd -Name $label -Elapsed $sw.Elapsed -Ok:$ok
 }
-
 
 # 1) Pré-requisitos (sem prompts)
 Test-AdminOrExit
 Initialize-Pwsh7
 Enable-QuickEditProtection
+Enable-ConsoleAppearance
 Start-Logging
 Show-Header -Text 'Guardian 360 — Manutenção e Otimização'
 
@@ -458,7 +559,7 @@ try {
   $hasSSD = @($disks | Where-Object { $_.MediaType -match 'SSD' }).Count -gt 0
   $hasHDD = @($disks | Where-Object { $_.MediaType -match 'HDD|Unspecified' }).Count -gt 0
 
-  # 4) Fases e passos (se os parâmetros ExecutaFases ou PulaFases não forem usados, todas as fases serão executadas)
+  # 4) Fases e passos
   $Phases = @(
     @{ Id=1; Title='Inventário de Hardware e Software'; Steps=@(
         @{ Name='Get-SystemInventory';   Action={ Get-SystemInventory } }
@@ -478,10 +579,7 @@ try {
         @{ Name='Clear-RecentFilesHistory';  Action={ Clear-RecentFilesHistory } }
       )},
     @{ Id=5; Title='Atualizações Controladas'; Steps=@(
-        #@{ Name='Block-AppUpdates';     Action={ Block-AppUpdates } },
         @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
-        #@{ Name='Update-ChocoApps';     Action={ if($hasInet){ Update-ChocoApps } else { Write-Log 'Sem internet: pulando Update-ChocoApps' 'WARN' } } }
-        # @{ Name='Update-WindowsSystem'; Action={ if($hasInet){ Update-WindowsSystem } else { Write-Log 'Sem internet: pulando Update-WindowsSystem' 'WARN' } } }
       )},
     @{ Id=6; Title='Pós-atualização / Componentes'; Steps=@(
         @{ Name='Remove-OldUpdateFiles'; Action={ Remove-OldUpdateFiles } }
@@ -499,7 +597,7 @@ try {
       )}
   )
 
-  # 5) Execução por fase (UI limpa)
+  # 5) Execução por fase
   foreach ($phase in $Phases) {
     $id = [int]$phase.Id
     if ($ExecutaFases -and ($ExecutaFases -notcontains $id)) { continue }
@@ -512,41 +610,36 @@ try {
       Invoke-GuardianStep -Title $step.Name -Action $step.Action
     }
 
-    # Pós-fase 5: aviso de reboot pendente
     if ($id -eq 5 -and (Get-RebootPending)) {
       Write-Log 'Reinicialização pendente detectada após Atualizações.' 'WARN'
       Write-Host ("{0}› Uma reinicialização está pendente. Ela pode ser realizada fora desta janela de manutenção.{1}" -f $Yellow, $Reset)
     }
   }
 
-  # 6) Resumo final (Parágrafos alinhados)
+  # 6) Resumo final
   Write-Host ""
   Write-Host "===================================================================================================================================="
   Show-Header -Text 'Resumo da Manutenção Automatizada'
   Write-Host ""
 
-  # Comprimento máximo do rótulo para alinhamento
   $maxLabel = 0
   foreach ($r in $global:Results) {
     if ($r.Etapa.Length -gt $maxLabel) { $maxLabel = $r.Etapa.Length }
   }
 
-  # Escreve também no arquivo de log
-   Write-Report "===================================================================================================================================="
-   Write-Report ""
-   Write-Report "Resumo da Manutenção Automatizada"
-   Write-Report ""
+  Write-Report "===================================================================================================================================="
+  Write-Report ""
+  Write-Report "Resumo da Manutenção Automatizada"
+  Write-Report ""
   
   foreach ($r in $global:Results) {
     $statusPlain = if ($r.Sucesso) { 'OK' } else { 'ALERTA' }
     $labelPadded = $r.Etapa.PadRight($maxLabel)
     $elapsedTxt = (Format-Elapsed $r.Tempo)
 
-    # Console com cor
     $statusConsole = if ($r.Sucesso) { "{0}OK{1}" -f $Green, $Reset } else { "{0}ALERTA{1}" -f $Yellow, $Reset }
     Write-Host ("- {0}  -> {1} (Tempo: {2})" -f $labelPadded, $statusConsole, $elapsedTxt)
 
-    # Arquivo sem cor
     Write-Report ("- {0}  -> {1} (Tempo: {2})" -f $labelPadded, $statusPlain, $elapsedTxt)
   }
 
@@ -561,9 +654,9 @@ try {
 
   
 } catch {
-  # Nunca mostrar erro “vermelho” de PowerShell na tela
   Write-Log ("FALHA GERAL (capturada): {0}" -f $_.ToString()) 'ERROR'
 } finally {
   Disable-QuickEditProtection
+  Disable-ConsoleAppearance
   Stop-Logging
 }
