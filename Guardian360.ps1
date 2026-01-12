@@ -557,7 +557,8 @@ try {
     @{ Id=9; Title='Gestão'; Steps=@(
         @{ Name='Send-LogToServer'; Action={
               if ([string]::IsNullOrWhiteSpace($FileServer)) {
-                Write-Log 'Sem -FileServer: pulando envio do log ao servidor.' 'INFO'
+                Write-Report ""
+                Write-Report 'Computador Standalone (sem Servidor de Arquivos na rede local).' 'INFO'
               } else {
                 Send-LogToServer -Server $FileServer -Simulado:$Simulado
               }
