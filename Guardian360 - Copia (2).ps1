@@ -102,6 +102,23 @@ function Get-StepLabel {
 }
 # --- FIM MAPA ---
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Paleta (console amigável). Fallback se PSStyle não existir (ex.: PowerShell 5.x)
 $pss = Get-Variable -Name PSStyle -ErrorAction SilentlyContinue
 $hasStyle = ($null -ne $pss -and $null -ne $pss.Value)
@@ -307,82 +324,6 @@ function Format-Elapsed {
   return ('{0:00} min {1:00} seg' -f $min, $sec)
 }
 
-# --- INÍCIO: BLOCO DE PROTEÇÃO QUICK EDIT ---
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-
-public class Kernel32 {
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern IntPtr GetStdHandle(int nStdHandle);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
-}
-"@
-
-function Invoke-OptionalLog {
-    param([string]$Message, [string]$Level = 'INFO')
-    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-        Write-Log $Message $Level
-    }
-}
-
-function Get-ConsoleInputMode {
-    $handle = [Kernel32]::GetStdHandle(-10)  # STD_INPUT_HANDLE
-    $mode = 0
-    [Kernel32]::GetConsoleMode($handle, [ref]$mode) | Out-Null
-    return $mode
-}
-
-function Set-ConsoleInputMode {
-    param([uint32]$Mode)
-    $handle = [Kernel32]::GetStdHandle(-10)  # STD_INPUT_HANDLE
-    [Kernel32]::SetConsoleMode($handle, $Mode) | Out-Null
-}
-
-# Constantes para modos de console
-$ENABLE_QUICK_EDIT_MODE = 0x0040
-$ENABLE_INSERT_MODE = 0x0020
-$ENABLE_EXTENDED_FLAGS = 0x0080
-
-function Enable-QuickEditProtection {
-    # Ignorar se estiver no ISE ou VSCode
-    if ($host.Name -match 'ISE|Visual Studio Code') { return }
-
-    try {
-        $currentMode = Get-ConsoleInputMode
-        $newMode = $currentMode -band (-bnot $ENABLE_QUICK_EDIT_MODE)  # Desabilitar Quick Edit
-        $newMode = $newMode -bor $ENABLE_EXTENDED_FLAGS  # Garantir flags estendidas
-        Set-ConsoleInputMode $newMode
-        Invoke-OptionalLog 'Proteção Quick Edit habilitada.' 'DEBUG'
-    } catch {
-        Invoke-OptionalLog ("Falha ao habilitar proteção Quick Edit: {0}" -f $_.Exception.Message) 'WARN'
-    }
-}
-
-function Disable-QuickEditProtection {
-    # Ignorar se estiver no ISE ou VSCode
-    if ($host.Name -match 'ISE|Visual Studio Code') { return }
-
-    try {
-        $currentMode = Get-ConsoleInputMode
-        $newMode = $currentMode -bor $ENABLE_QUICK_EDIT_MODE  # Reabilitar Quick Edit
-        $newMode = $newMode -bor $ENABLE_EXTENDED_FLAGS  # Garantir flags estendidas
-        Set-ConsoleInputMode $newMode
-        Invoke-OptionalLog 'Proteção Quick Edit desabilitada.' 'DEBUG'
-    } catch {
-        Invoke-OptionalLog ("Falha ao desabilitar proteção Quick Edit: {0}" -f $_.Exception.Message) 'WARN'
-    }
-}
-
-# Registrar evento para desabilitar proteção ao sair
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Disable-QuickEditProtection }
-# --- FIM: BLOCO DE PROTEÇÃO QUICK EDIT ---
-
 function Invoke-GuardianStep {
   param(
     [Parameter(Mandatory)][string]$Title,
@@ -416,7 +357,6 @@ function Invoke-GuardianStep {
 # 1) Pré-requisitos (sem prompts)
 Test-AdminOrExit
 Initialize-Pwsh7
-Enable-QuickEditProtection
 Start-Logging
 Show-Header -Text 'Guardian 360 — Manutenção e Otimização'
 
@@ -564,6 +504,5 @@ try {
   # Nunca mostrar erro “vermelho” de PowerShell na tela
   Write-Log ("FALHA GERAL (capturada): {0}" -f $_.ToString()) 'ERROR'
 } finally {
-  Disable-QuickEditProtection
   Stop-Logging
 }
