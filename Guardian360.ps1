@@ -604,7 +604,7 @@ try {
     if ($PulaFases -and ($PulaFases -contains $id)) { continue }
 
     Write-Host ""
-    # Write-Host "____________________________________________________________________________________________________________________________________"
+    Write-Host "=================================================================================================" -ForegroundColor DarkGray
     Show-Phase -Id $phase.Id -Title $phase.Title
     Write-Log ("=== Fase {0}: {1} ===" -f $phase.Id, $phase.Title) 'INFO'
 
