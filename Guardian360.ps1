@@ -1,53 +1,4 @@
-﻿<#
-.SYNOPSIS
-    Framework de Manutenção Preventiva, Atualização e Otimização para Windows 10 e 11.
-
-.DESCRIPTION
-    Este script orquestra um conjunto de funções organizadas em etapas cronológicas para:
-    - Diagnóstico do sistema
-    - Correção de integridade
-    - Otimizações estruturais
-    - Limpeza de arquivos temporários
-    - Atualizações controladas
-    - Pós-atualização
-    - Otimização de armazenamento
-    - Segurança e validação de backups
-    - Gestão de logs
-
-.PARAMETER FileServer
-    Hostname ou IP do servidor de arquivos (ex.: 192.168.0.2). Quando informado, a etapa "Send-LogToServer" é executada ao final,
-    copiando o arquivo de log para \<FileServer>\TI\<ANO>\<MM. Mês>\COMPUTERNAME.log. Se não informado, a etapa é pulada.
-
-.PARAMETER ExecutaFases
-    Se informado, executa apenas as fases indicadas (IDs). Ex.: -ExecutaFases 1,3,5
-
-.PARAMETER PulaFases
-    Se informado, pula as fases indicadas (IDs). Ex.: -PulaFases 4,7
-
-.PARAMETER LogLevel
-    Nível de log: INFO, WARN, ERROR, DEBUG. Padrão: INFO.
-
-.PARAMETER Simulado
-    Modo ensaio: não executa ações destrutivas.
-
-.NOTES
-    Funcionalidades principais:
-    - Validação do ambiente (Administrador, Windows, versão mínima do PowerShell)
-    - Instalação automática do PowerShell 7+ se necessário (silenciosa; sem prompts)
-    - Reexecução transparente no PowerShell 7+ se disponível
-    - Tratamento de erros por etapa com registro em log (sem “erros vermelhos” na tela)
-    - Execução autônoma (sem interação do usuário), ideal para Agendador de Tarefas
-    - Compatível com o sistema operacional Microsoft Windows
-
-.AUTHOR
-    IT4You Ltda
-.VERSION
-    1.6
-.LASTUPDATED
-    12/01/2026
-#>
-
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [int[]]$ExecutaFases,  # Se não for informado, executa todas as fases
   [int[]]$PulaFases,     # Se não for informado, nenhuma fase será pulada
@@ -203,13 +154,140 @@ function Show-StepEnd {
 }
 
 function Test-IsAdmin { ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
-function Test-AdminOrExit {
-  if (-not (Test-IsAdmin)) {
+
+# ==== INÍCIO DAS MUDANÇAS CIRÚRGICAS ====
+
+function Get-StoredAdminCredential {
+  try {
+    $keyPath  = 'C:\IT4You\key.bin'
+    $credPath = 'C:\IT4You\credenciais.xml'
+    if (-not (Test-Path $keyPath))  { throw "Arquivo de chave não encontrado em $keyPath" }
+    if (-not (Test-Path $credPath)) { throw "Arquivo de credenciais não encontrado em $credPath" }
+
+    $keyBytes = [System.IO.File]::ReadAllBytes($keyPath)
+
+    # Leitura XML simples conforme seu gerador
+    [xml]$xml = Get-Content -Path $credPath -Encoding UTF8
+    $user = $xml.Credenciais.UserName
+    $enc  = $xml.Credenciais.EncryptedPassword
+    if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($enc)) {
+      throw "Estrutura XML inválida ou campos ausentes (UserName/EncryptedPassword)."
+    }
+
+    $secure = ConvertTo-SecureString -String $enc -Key $keyBytes
+    return New-Object System.Management.Automation.PSCredential ($user, $secure)
+  } catch {
+    Write-Log ("Falha ao obter credenciais armazenadas: {0}" -f $_.Exception.Message) 'ERROR'
+    return $null
+  }
+}
+
+function Invoke-SilentElevation {
+  if ($env:GUARDIAN360_ELEVATED -eq '1') { return }
+
+  Write-Log "Sem privilégios administrativos. Tentando elevação autônoma via Task Scheduler COM API (Highest)..." 'WARN'
+  $cred = Get-StoredAdminCredential
+  if ($null -eq $cred) {
     Show-Header -Text 'Permissão insuficiente'
-    Write-Log "A execução requer privilégios administrativos. Agende como Admin/SYSTEM. Encerrando." 'ERROR'
+    Write-Log "Credenciais armazenadas indisponíveis. Não foi possível elevar. Encerrando." 'ERROR'
+    exit 1
+  }
+
+  try {
+    # 1) Reconstruir parâmetros do script preservando switches/arrays/strings
+    $scriptArgs = New-Object System.Collections.Generic.List[string]
+    foreach ($k in $PSBoundParameters.Keys) {
+      $v = $PSBoundParameters[$k]
+      if ($v -is [System.Management.Automation.SwitchParameter]) {
+        if ($v.IsPresent) { [void]$scriptArgs.Add("-$k") }
+      } elseif ($v -is [System.Array]) {
+        $serialized = ($v | ForEach-Object { "'{0}'" -f $_ }) -join ','
+        [void]$scriptArgs.Add("-$k $serialized")
+      } else {
+        [void]$scriptArgs.Add("-$k '{0}'" -f $v)
+      }
+    }
+
+    # 2) Preparar credenciais p/ COM
+    $plainPwd = (New-Object System.Net.NetworkCredential('', $cred.Password)).Password
+
+    # Parse de usuário: suporta "DOMINIO\usuario", "usuario@dominio", "usuario"
+    $connectUser = $cred.UserName
+    $connectDomain = $null
+    if ($connectUser -like '*\*') {
+      $parts = $connectUser -split '\', 2
+      $connectDomain = $parts[0]
+      $connectUser   = $parts[1]
+    } elseif ($connectUser -like '*@*') {
+      # UPN: passa usuário completo como 'user', domain=$null
+      $connectDomain = $null
+      # $connectUser permanece como está (UPN)
+    } else {
+      # usuário local: domain=$null
+      $connectDomain = $null
+    }
+
+    # 3) Conectar ao serviço do Agendador autenticando como a CONTA ADMIN
+    $svc = New-Object -ComObject "Schedule.Service"
+    $svc.Connect($null, $connectUser, $connectDomain, $plainPwd)
+
+    # 4) Garantir pasta \IT4You
+    $root       = $svc.GetFolder("\")
+    $folderPath = "\IT4You"
+    try { $folder = $svc.GetFolder($folderPath) } catch { $folder = $root.CreateFolder("IT4You") }
+
+    # 5) Definição da tarefa (OnDemand) com Highest
+    $taskName = "Guardian360_Elevate_{0}" -f ([guid]::NewGuid().ToString('N'))
+    $taskPath = "$folderPath\$taskName"
+
+    $def = $svc.NewTask(0)
+    $def.RegistrationInfo.Author = "IT4You"
+    $def.RegistrationInfo.Description = "Elevação autônoma do Guardian360"
+    $def.Settings.Hidden = $true
+    $def.Settings.AllowDemandStart = $true
+    $def.Settings.MultipleInstances = 0 # IgnoreNew
+    $def.Settings.DisallowStartIfOnBatteries = $false
+    $def.Settings.StopIfGoingOnBatteries = $false
+    $def.Settings.StartWhenAvailable = $true
+
+    # TASK_LOGON_PASSWORD = 1 | TASK_RUNLEVEL_HIGHEST = 1
+    $def.Principal.UserId    = $cred.UserName   # aqui usamos o identificador como foi armazenado (DOM\user ou UPN)
+    $def.Principal.LogonType = 1
+    $def.Principal.RunLevel  = 1
+
+    # 6) Ação: reexecutar o próprio script, silencioso, com as mesmas flags
+    $escapedScript = $PSCommandPath.Replace("'", "''")
+    $cmdCore = "$env:GUARDIAN360_ELEVATED='1'; $env:GUARDIAN360_TASKNAME='$taskPath'; & '$escapedScript' {0}" -f ($scriptArgs -join ' ')
+    $psArgs  = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command ""$cmdCore"""
+
+    # TASK_ACTION_EXEC = 0
+    $action = $def.Actions.Create(0)
+    $action.Path = "powershell.exe"
+    $action.Arguments = $psArgs
+
+    # TASK_CREATE_OR_UPDATE = 6 | TASK_LOGON_PASSWORD = 1
+    $null = $folder.RegisterTaskDefinition($taskName, $def, 6, $cred.UserName, $plainPwd, 1, $null)
+
+    # 7) Disparar imediatamente
+    $registered = $folder.GetTask($taskName)
+    $registered.Run($null) | Out-Null
+
+    # 8) Encerrar esta instância (a elevada seguirá)
+    exit 0
+
+  } catch {
+    Show-Header -Text 'Falha ao elevar'
+    Write-Log ("Elevação autônoma via COM falhou: {0}" -f $_.ToString()) 'ERROR'
     exit 1
   }
 }
+function Ensure-AdminOrElevate {
+  if (-not (Test-IsAdmin)) {
+    Invoke-SilentElevation
+  }
+}
+
+# ==== FIM DAS MUDANÇAS CIRÚRGICAS ====
 
 function Initialize-Pwsh7 {
   if ($PSVersionTable.PSVersion.Major -ge 7) { return }
@@ -314,7 +392,7 @@ public class Kernel32 {
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
 }
-'@
+'@ 
 
 function Invoke-QuickEditLog { param([string]$Message, [string]$Level = 'INFO') try { if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log $Message $Level } } catch {} }
 
@@ -475,7 +553,7 @@ function Invoke-GuardianStep {
 }
 
 # 1) Pré-requisitos (sem prompts)
-Test-AdminOrExit
+Ensure-AdminOrElevate
 Initialize-Pwsh7
 Enable-QuickEditProtection
 Enable-ConsoleAppearance
@@ -621,6 +699,10 @@ try {
 } catch {
   Write-Log ("FALHA GERAL (capturada): {0}" -f $_.ToString()) 'ERROR'
 } finally {
+  # Limpa a tarefa temporária criada para elevação, se aplicável
+  if ($env:GUARDIAN360_ELEVATED -eq '1' -and $env:GUARDIAN360_TASKNAME) {
+    try { Unregister-ScheduledTask -TaskName $env:GUARDIAN360_TASKNAME -Confirm:$false } catch {}
+  }
   Disable-QuickEditProtection
   Disable-ConsoleAppearance
   Stop-Logging
