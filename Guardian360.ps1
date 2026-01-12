@@ -579,7 +579,10 @@ try {
         @{ Name='Clear-RecentFilesHistory';  Action={ Clear-RecentFilesHistory } }
       )},
     @{ Id=5; Title='Atualizações Controladas'; Steps=@(
-        @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
+        #@{ Name='Block-AppUpdates';     Action={ Block-AppUpdates } },
+        @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } },
+        @{ Name='Update-ChocoApps';     Action={ if($hasInet){ Update-ChocoApps } else { Write-Log 'Sem internet: pulando Update-ChocoApps' 'WARN' } } },
+        @{ Name='Update-WindowsSystem'; Action={ if($hasInet){ Update-WindowsSystem } else { Write-Log 'Sem internet: pulando Update-WindowsSystem' 'WARN' } } }
       )},
     @{ Id=6; Title='Pós-atualização / Componentes'; Steps=@(
         @{ Name='Remove-OldUpdateFiles'; Action={ Remove-OldUpdateFiles } }
