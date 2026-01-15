@@ -60,18 +60,6 @@ param(
   [string]$FileServer    # Host/IP do servidor de arquivos para envio do log (opcional)
 )
 
-
-
-# Converte parâmetros vindos como string para arrays
-if ($ExecutaFases -is [string]) {
-    $ExecutaFases = $ExecutaFases -split ',' | ForEach-Object { [int]$_ }
-}
-if ($PulaFases -is [string]) {
-    $PulaFases = $PulaFases -split ',' | ForEach-Object { [int]$_ }
-}
-
-
-
 # Preferências e ambiente
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -654,11 +642,8 @@ function DoEvents {
 $TotalSteps = 0
 foreach ($phase in $Phases) {
     $id = [int]$phase.Id
-
-if ($ExecutaFases -and ($id -notin $ExecutaFases)) { continue }
-if ($PulaFases -and ($id -in $PulaFases)) { continue }
-
-
+    if ($ExecutaFases -and ($ExecutaFases -notcontains $id)) { continue }
+    if ($PulaFases -and ($PulaFases -contains $id)) { continue }
 
     # Garante que Steps seja tratado como array
     $steps = @($phase.Steps)
@@ -681,10 +666,8 @@ $CurrentStep = 0
 # === Loop principal com atualização da UI ===
 foreach ($phase in $Phases) {
     $id = [int]$phase.Id
-
-if ($ExecutaFases -and ($id -notin $ExecutaFases)) { continue }
-if ($PulaFases -and ($id -in $PulaFases)) { continue }
-
+    if ($ExecutaFases -and ($ExecutaFases -notcontains $id)) { continue }
+    if ($PulaFases -and ($PulaFases -contains $id)) { continue }
 
     # Atualiza UI com fase atual
     if ($global:GuardianPhaseText) {
