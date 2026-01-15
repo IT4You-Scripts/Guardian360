@@ -13,10 +13,10 @@ param (
     [switch]$Maximized,
 
     # Parâmetros para Guardian.ps1
-    #[int[]]$ExecutaFases,
-    #[int[]]$PulaFases,
-    [string]$ExecutaFases,
-    [string]$PulaFases,
+    [int[]]$ExecutaFases,
+    [int[]]$PulaFases,
+    #[string]$ExecutaFases,
+    #[string]$PulaFases,
  
 
     [ValidateSet('INFO','WARN','ERROR','DEBUG')]
