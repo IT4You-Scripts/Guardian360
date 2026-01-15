@@ -1,7 +1,7 @@
 ﻿#Requires -Version 7.0
 
 # =========================================
-# Guardian360 - Bootstrap / Update Seguro
+# Guardian360 - Bootstrap / Update Sempre
 # =========================================
 
 $ErrorActionPreference = "Stop"
@@ -15,9 +15,6 @@ $BasePath  = "C:\Guardian"
 
 # Cache busting permanente (ANTI GitHub RAW cache)
 $NoCache   = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmss')"
-
-$RemoteVersionUrl = "$BaseUrl/version.json$NoCache"
-$LocalVersionFile = "$BasePath\version.json"
 
 # -----------------------------
 # Estrutura base (NUNCA apaga)
@@ -65,63 +62,23 @@ $Files = @(
 )
 
 # -----------------------------
-# Funções auxiliares
-# -----------------------------
-function Get-RemoteVersion {
-    Invoke-RestMethod -Uri $RemoteVersionUrl -UseBasicParsing
-}
-
-function Get-LocalVersion {
-    if (Test-Path $LocalVersionFile) {
-        Get-Content $LocalVersionFile -Raw | ConvertFrom-Json
-    } else {
-        $null
-    }
-}
-
-function Needs-Update {
-    param ($Local, $Remote)
-
-    if (-not $Local) { return $true }
-
-    try {
-        [version]$Remote.version -gt [version]$Local.version
-    }
-    catch {
-        $true
-    }
-}
-
-# -----------------------------
 # Execução principal
 # -----------------------------
 try {
-    $RemoteVersion = Get-RemoteVersion
-    $LocalVersion  = Get-LocalVersion
 
-    if (Needs-Update $LocalVersion $RemoteVersion) {
+    Write-Host "Atualizando Guardian 360..." -ForegroundColor Cyan
 
-        $from = if ($LocalVersion) { $LocalVersion.version } else { "ainda não instalado" }
-        $to   = $RemoteVersion.version
-
-        Write-Host "Atualizando o programa Guardian 360 ($from → $to)..." -ForegroundColor Cyan
-
-        foreach ($File in $Files) {
-            try {
-                Invoke-WebRequest `
-                    -Uri $File.Url `
-                    -OutFile $File.Path `
-                    -UseBasicParsing `
-                    -ErrorAction Stop
-            }
-            catch {
-                # falha individual ignorada (modo silencioso)
-            }
+    foreach ($File in $Files) {
+        try {
+            Invoke-WebRequest `
+                -Uri "$($File.Url)$NoCache" `
+                -OutFile $File.Path `
+                -UseBasicParsing `
+                -ErrorAction Stop
         }
-
-        # Grava versão remota como versão local
-        $RemoteVersion | ConvertTo-Json -Depth 5 |
-            Set-Content $LocalVersionFile -Encoding UTF8
+        catch {
+            # falha individual ignorada (modo silencioso)
+        }
     }
 
     exit 0
