@@ -708,10 +708,10 @@ foreach ($phase in $Phases) {
         DoEvents
     }
 
-    if ($id -eq 5 -and (Get-RebootPending)) {
-        Write-Log 'Reinicialização pendente detectada após Atualizações.' 'WARN'
-        Write-Host ("{0}› Uma reinicialização está pendente. Ela pode ser realizada fora desta janela de manutenção.{1}" -f $Yellow, $Reset)
-    }
+    #if ($id -eq 5 -and (Get-RebootPending)) {
+    #    Write-Log 'Reinicialização pendente detectada após Atualizações.' 'WARN'
+    #    Write-Host ("{0}› Uma reinicialização está pendente. Ela pode ser realizada fora desta janela de manutenção.{1}" -f $Yellow, $Reset)
+    #}
 }
 
 

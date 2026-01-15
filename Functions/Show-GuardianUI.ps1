@@ -18,6 +18,12 @@ function Show-GuardianUI {
     $window.Background = 'Black'
     $window.Topmost = $true
 
+    # Força a abertura no monitor principal
+    $workArea = [System.Windows.SystemParameters]::WorkArea
+    $window.WindowStartupLocation = 'Manual'
+    $window.Left = $workArea.Left + (($workArea.Width  - $window.Width)  / 2)
+    $window.Top  = $workArea.Top  + (($workArea.Height - $window.Height) / 2)
+
     # Grid principal
     $grid = New-Object Windows.Controls.Grid
 
@@ -43,9 +49,9 @@ function Show-GuardianUI {
         $img = New-Object Windows.Controls.Image
         $img.Source = New-Object Windows.Media.Imaging.BitmapImage([Uri]$LogoPath)
         $img.Stretch = 'Uniform'
-        $img.HorizontalAlignment = 'Center'
+        $img.HorizontalAlignment = 'Left'
         $img.VerticalAlignment = 'Center'
-        $img.Margin = '0,30,0,30'
+        $img.Margin = '20,20,0,20'
         [Windows.Controls.Grid]::SetRow($img, 0)
         $grid.Children.Add($img)
     }

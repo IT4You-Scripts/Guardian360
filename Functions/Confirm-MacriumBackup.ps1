@@ -86,7 +86,7 @@ function Confirm-MacriumBackup {
         if ($sortedFiles.Count -eq 1) {
             Write-Tagged -Tag $tag -Message "Imagem mais recente: $newestDisplay" -Color $color
         } else {
-            Write-Tagged -Tag $tag -Message "Imagem penúltima: $secondNewestDisplay" -Color $color
+            Write-Tagged -Tag $tag -Message "Imagem anterior: $secondNewestDisplay" -Color $color
             Write-Tagged -Tag $tag -Message "Imagem mais recente: $newestDisplay" -Color $color
         }
 
