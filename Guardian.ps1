@@ -548,7 +548,7 @@ Initialize-Pwsh7
 Enable-QuickEditProtection
 Enable-ConsoleAppearance -ForceMaximize
 Start-Logging
-#Clear-Host
+Clear-Host
 Show-Header -Text 'Guardian 360 — Manutenção e Otimização'
 
 try {
