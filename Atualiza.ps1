@@ -1,21 +1,16 @@
-
 #region BootstrapUpgrade Guardian360 a partir do GitHub
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference   = "SilentlyContinue"
 
-# -----------------------------
 # Configurações
-# -----------------------------
 $BaseUrl   = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main"
 $BasePath  = "C:\Guardian"
 
 # Cache busting permanente (ANTI GitHub RAW cache)
 $NoCache   = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmss')"
 
-# -----------------------------
-# Estrutura base (NUNCA apaga)
-# -----------------------------
+# Estrutura base (nunca apaga nada de enhum lugar)
 $Folders = @(
     $BasePath,
     "$BasePath\Functions",
@@ -28,16 +23,15 @@ foreach ($Folder in $Folders) {
     }
 }
 
-# -----------------------------
-# Arquivos gerenciados
-# -----------------------------
+# Arquivos a serem copiados pelo Script
 $Files = @(
-    @{ Url = "$BaseUrl/Guardian.ps1";        Path = "$BasePath\Guardian.ps1" },
-    @{ Url = "$BaseUrl/ElevaGuardian.ps1";        Path = "$BasePath\ElevaGuardian.ps1" },
-	@{ Url = "$BaseUrl/RodaGuardian.ps1";        Path = "$BasePath\RodaGuardian.ps1" },
-	@{ Url = "$BaseUrl/CriaCredenciais_AES.ps1";        Path = "$BasePath\CriaCredenciais_AES.ps1" },
-    @{ Url = "$BaseUrl/Prepara.ps1";        Path = "$BasePath\Prepara.ps1" },
-    @{ Url = "$BaseUrl/Assets/Images/logotipo.png"; Path = "$BasePath\Assets\Images\logotipo.png" },
+    @{ Url = "$BaseUrl/Guardian.ps1";                            Path = "$BasePath\Guardian.ps1" },
+    @{ Url = "$BaseUrl/Atualiza.ps1";                            Path = "$BasePath\Atualiza.ps1" },
+    @{ Url = "$BaseUrl/ElevaGuardian.ps1";                       Path = "$BasePath\ElevaGuardian.ps1" },
+	@{ Url = "$BaseUrl/RodaGuardian.ps1";                        Path = "$BasePath\RodaGuardian.ps1" },
+	@{ Url = "$BaseUrl/CriaCredenciais_AES.ps1";                 Path = "$BasePath\CriaCredenciais_AES.ps1" },
+    @{ Url = "$BaseUrl/Prepara.ps1";                             Path = "$BasePath\Prepara.ps1" },
+    @{ Url = "$BaseUrl/Assets/Images/logotipo.png";              Path = "$BasePath\Assets\Images\logotipo.png" },
     @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1";          Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
     @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1";      Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
     @{ Url = "$BaseUrl/Functions/Clear-BrowserCache.ps1";        Path = "$BasePath\Functions\Clear-BrowserCache.ps1" },
@@ -61,9 +55,7 @@ $Files = @(
     @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1";         Path = "$BasePath\Functions\Update-WingetApps.ps1" }
 )
 
-# -----------------------------
 # Execução principal (atualização)
-# -----------------------------
 Write-Host "Atualizando Guardian 360..." -ForegroundColor Cyan
 
 
