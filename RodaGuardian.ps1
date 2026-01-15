@@ -1,32 +1,36 @@
-﻿[CmdletBinding()]
+﻿
+# RodaGuardian.ps1
+[CmdletBinding()]
 param (
-    # === Infraestrutura do ElevaGuardian ===
+    # Caminho do PowerShell 7
     [string]$PwshPath   = 'C:\Program Files\PowerShell\7\pwsh.exe',
+    # Caminho do script principal Guardian
     [string]$ScriptPath = 'C:\Guardian\Guardian.ps1',
 
+    # Opções de janela
     [switch]$NoWindow,
     [switch]$NonInteractive,
     [switch]$Maximized,
 
-    # === Parâmetros repassados ao Guardian.ps1 ===
-    [int[]]$ExecutaFases,
-    [int[]]$PulaFases,
+    # Parâmetros para Guardian.ps1
+    #[int[]]$ExecutaFases,
+    #[int[]]$PulaFases,
+    [string]$ExecutaFases,
+    [string]$PulaFases,
+ 
 
     [ValidateSet('INFO','WARN','ERROR','DEBUG')]
     [string]$LogLevel,
-
     [switch]$Simulado,
     [string]$FileServer
 )
 
-# -------------------------------
-# Função de falha controlada
-# -------------------------------
 function Fail {
     param ([string]$Message)
     Write-Error $Message
     exit 1
 }
+
 
 #region BootstrapUpgrade Guardian360 a partir do GitHub
 
@@ -61,12 +65,12 @@ foreach ($Folder in $Folders) {
 # Arquivos gerenciados
 # -----------------------------
 $Files = @(
-    @{ Url = "$BaseUrl/Guardian.ps1";        Path = "$BasePath\Guardian.ps1" },
-    @{ Url = "$BaseUrl/ElevaGuardian.ps1";        Path = "$BasePath\ElevaGuardian.ps1" },
-	@{ Url = "$BaseUrl/RodaGuardian.ps1";        Path = "$BasePath\RodaGuardian.ps1" },
-	@{ Url = "$BaseUrl/CriaCredenciais_AES.ps1";        Path = "$BasePath\CriaCredenciais_AES.ps1" },
-    @{ Url = "$BaseUrl/Prepara.ps1";        Path = "$BasePath\Prepara.ps1" },
-    @{ Url = "$BaseUrl/Assets/Images/logotipo.png"; Path = "$BasePath\Assets\Images\logotipo.png" },
+   @{ Url = "$BaseUrl/Guardian.ps1";                            Path = "$BasePath\Guardian.ps1" },
+   @{ Url = "$BaseUrl/ElevaGuardian.ps1";                       Path = "$BasePath\ElevaGuardian.ps1" },
+ @{ Url = "$BaseUrl/RodaGuardian.ps1";                        Path = "$BasePath\RodaGuardian.ps1" },
+	 @{ Url = "$BaseUrl/CriaCredenciais_AES.ps1";                 Path = "$BasePath\CriaCredenciais_AES.ps1" },
+   @{ Url = "$BaseUrl/Prepara.ps1";                             Path = "$BasePath\Prepara.ps1" },
+   @{ Url = "$BaseUrl/Assets/Images/logotipo.png";              Path = "$BasePath\Assets\Images\logotipo.png" },
     @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1";          Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
     @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1";      Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
     @{ Url = "$BaseUrl/Functions/Clear-BrowserCache.ps1";        Path = "$BasePath\Functions\Clear-BrowserCache.ps1" },
@@ -90,9 +94,6 @@ $Files = @(
     @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1";         Path = "$BasePath\Functions\Update-WingetApps.ps1" }
 )
 
-# -----------------------------
-# Execução principal (atualização)
-# -----------------------------
 Write-Host "Atualizando Guardian 360..." -ForegroundColor Cyan
 
 foreach ($File in $Files) {
@@ -110,27 +111,18 @@ foreach ($File in $Files) {
 
 #endregion
 
-# -------------------------------
-# Validações iniciais
-# -------------------------------
+
+# Validações
 if (-not (Test-Path -LiteralPath $PwshPath))   { Fail "PowerShell 7 não encontrado em: $PwshPath" }
 if (-not (Test-Path -LiteralPath $ScriptPath)) { Fail "Guardian.ps1 não encontrado em: $ScriptPath" }
 
-# Desbloqueia o script alvo silenciosamente
+# Desbloqueia o script alvo
 try { Unblock-File -Path $ScriptPath -ErrorAction SilentlyContinue } catch {}
 
-# -------------------------------
-# Diretório de trabalho seguro
-# -------------------------------
-try {
-    $workDir = Split-Path -Path $ScriptPath -Parent
-} catch {
-    $workDir = (Get-Location).Path
-}
+# Diretório de trabalho
+$workDir = Split-Path -Path $ScriptPath -Parent
 
-# -------------------------------
-# Construção do array de argumentos
-# -------------------------------
+# Montagem segura dos argumentos
 $argList = @(
     '-ExecutionPolicy','Bypass',
     '-NoProfile',
@@ -139,15 +131,20 @@ $argList = @(
 
 if ($NonInteractive) { $argList += '-NonInteractive' }
 
+# ✅ Arrays convertidos para string separada por vírgulas
+
+
 if ($ExecutaFases) {
     $argList += '-ExecutaFases'
-    $argList += ($ExecutaFases -join ',')
+    $argList += $ExecutaFases
 }
 
 if ($PulaFases) {
     $argList += '-PulaFases'
-    $argList += ($PulaFases -join ',')
+    $argList += $PulaFases
 }
+
+
 
 if ($LogLevel) {
     $argList += '-LogLevel'
@@ -161,9 +158,7 @@ if ($FileServer) {
     $argList += $FileServer
 }
 
-# -------------------------------
 # Configuração da janela
-# -------------------------------
 $winStyle = if ($NoWindow) {
     'Hidden'
 } elseif ($Maximized) {
@@ -172,11 +167,11 @@ $winStyle = if ($NoWindow) {
     'Normal'
 }
 
-# -------------------------------
-# Execução do Guardian diretamente com array de argumentos
-# -------------------------------
-Write-Host "Iniciando Guardian.ps1..." -ForegroundColor Cyan
+# Log do comando final para debug
+Write-Host "Comando final:" -ForegroundColor Yellow
+Write-Host "$PwshPath $($argList -join ' ')" -ForegroundColor Cyan
 
+# Execução do Guardian
 Push-Location $workDir
 try {
     & $PwshPath @argList

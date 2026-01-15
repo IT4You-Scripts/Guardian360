@@ -51,6 +51,7 @@
     12/01/2026
 #>
 
+
 [CmdletBinding()]
 param(
   [int[]]$ExecutaFases,  # Se não for informado, executa todas as fases
@@ -59,6 +60,46 @@ param(
   [switch]$Simulado,     # Modo ensaio: não executa ações destrutivas
   [string]$FileServer    # Host/IP do servidor de arquivos para envio do log (opcional)
 )
+
+
+
+
+
+#region Ajuste de parâmetros ExecutaFases e PulaFases
+
+
+function Ajusta-Fases {
+    param([object]$valor)
+
+    if (-not $valor) { return @() }
+
+    # Converte tudo para string
+    $str = ($valor -join '') # Junta tudo como string
+
+    # Se tiver vírgula, separa normalmente
+    if ($str -match ',') {
+        return ($str -split ',' | ForEach-Object { [int]([string]$_) })
+    }
+
+    # Se não tiver vírgula, separa cada dígito
+    return ($str.ToCharArray() | ForEach-Object { [int]([string]$_) })
+}
+
+
+# ✅ Ajusta os parâmetros
+$ExecutaFases = Ajusta-Fases $ExecutaFases
+$PulaFases    = Ajusta-Fases $PulaFases
+
+# Remove duplicados e ordena
+$ExecutaFases = $ExecutaFases | Sort-Object -Unique
+$PulaFases    = $PulaFases | Sort-Object -Unique
+
+# Log para confirmar
+Write-Host "ExecutaFases ajustado: $($ExecutaFases -join ', ')"
+Write-Host "PulaFases ajustado: $($PulaFases -join ', ')"
+
+#endregion
+
 
 # Preferências e ambiente
 $ErrorActionPreference = 'Stop'
@@ -507,7 +548,7 @@ Initialize-Pwsh7
 Enable-QuickEditProtection
 Enable-ConsoleAppearance -ForceMaximize
 Start-Logging
-Clear-Host
+#Clear-Host
 Show-Header -Text 'Guardian 360 — Manutenção e Otimização'
 
 try {

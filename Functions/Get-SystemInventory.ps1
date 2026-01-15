@@ -251,7 +251,7 @@ function Get-SystemInventory {
         $Criar_Inventario_Sistema = [PSCustomObject]@{
             "Nome do Computador"        = $env:COMPUTERNAME
             "Usuário Adm"               = $usuarioFormatado
-            "Login ID (Técnico)"        = $loginID
+            "Login ID"                  = $loginID
             "Sistema Operacional"       = $soCaption
             "Processador (CPU)"         = $cpu
             "Placa-Mãe"                 = $placaMaeCompleta

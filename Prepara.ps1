@@ -1,26 +1,22 @@
+# Script para Restaurar Politicas e Limpar pastas
 
-# ============================================================================
-# SCRIPT PARA RESTAURAR POLITICAS, LIMPAR PASTA E COPIAR ARQUIVOS
-# ============================================================================
+Show-Info "Iniciando script..."
 
-# Forcar saida com UTF-8
-$OutputEncoding = [System.Text.Encoding]::UTF8
-
-# Instala a última versão do PowerShell via winget
+# Instala a Ultima versao do PowerShell via winget
 Write-Host "Instalando PowerShell mais recente..." -ForegroundColor Cyan
 winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
 
-# Caminho padrão do PowerShell 7
+# Caminho padrao do PowerShell 7
 $pwshPath = "C:\Program Files\PowerShell\7\pwsh.exe"
 
-# Aguarda instalação
+# Aguarda instalacao
 Start-Sleep -Seconds 5
 
-# Verifica se o executável existe
+# Verifica se o executavel existe
 if (Test-Path $pwshPath) {
     Write-Host "PowerShell 7 instalado com sucesso em $pwshPath" -ForegroundColor Green
 } else {
-    Write-Host "Erro: PowerShell 7 não encontrado. Verifique a instalação." -ForegroundColor Red
+    Write-Host "Erro: PowerShell 7 nao encontrado. Verifique a instalacao." -ForegroundColor Red
     exit
 }
 
@@ -32,23 +28,23 @@ if ($envPath -notlike "*PowerShell\7*") {
     [System.Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
     Write-Host "PATH atualizado com sucesso." -ForegroundColor Green
 } else {
-    Write-Host "PowerShell 7 já está no PATH." -ForegroundColor Yellow
+    Write-Host "PowerShell 7 ja esta no PATH." -ForegroundColor Yellow
 }
 
 # Cria alias para substituir o comando 'powershell' pelo novo 'pwsh'
-Write-Host "Criando alias para usar PowerShell 7 como padrão..." -ForegroundColor Cyan
+Write-Host "Criando alias para usar PowerShell 7 como padrao..." -ForegroundColor Cyan
 try {
-    # Habilita links simbólicos (necessário para criar alias)
+    # Habilita links simbolicos (necessario para criar alias)
     fsutil behavior set SymlinkEvaluation R2L:1 R2R:1
-    # Cria link simbólico
+    # Cria link simbolico
     New-Item -Path "C:\Windows\System32\powershell.exe" -ItemType SymbolicLink -Value $pwshPath -Force
     Write-Host "Alias criado: 'powershell' agora abre PowerShell 7." -ForegroundColor Green
 } catch {
-    Write-Host "Erro ao criar alias. Execute como administrador e verifique permissões." -ForegroundColor Red
+    Write-Host "Erro ao criar alias. Execute como administrador e verifique permissoes." -ForegroundColor Red
 }
 
-# Exibe versão instalada
-Write-Host "Verificando versão do PowerShell..." -ForegroundColor Cyan
+# Exibe versao instalada
+Write-Host "Verificando versao do PowerShell..." -ForegroundColor Cyan
 & $pwshPath -Command { $PSVersionTable.PSVersion }
 
 # Caminho do PowerShell 7 (redundante, mas mantido)
@@ -62,15 +58,9 @@ cmd /c ftype Microsoft.PowerShellScript.1="\"C:\Program Files\PowerShell\7\pwsh.
 function Show-Info($text) { Write-Host $text }
 function Show-Error($text) { Write-Host ($text.ToUpper()) -ForegroundColor White -BackgroundColor Red }
 
-Show-Info "Iniciando script..."
-
 # Restaurar politicas
 Set-ExecutionPolicy Undefined -Scope LocalMachine -Force
 Set-ExecutionPolicy Undefined -Scope CurrentUser -Force
 Set-ExecutionPolicy Undefined -Scope Process -Force
 Set-ExecutionPolicy RemoteSigned -Force
-
-Get-ExecutionPolicy -List
-
-
 Show-Info "Script concluido."
