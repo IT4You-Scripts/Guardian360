@@ -70,6 +70,8 @@ foreach ($Folder in $Folders) {
 # -----------------------------
 $Files = @(
     @{ Url = "$BaseUrl/Guardian.ps1";        Path = "$BasePath\Guardian.ps1" },
+    @{ Url = "$BaseUrl/ElevaGuardian.ps1";        Path = "$BasePath\ElevaGuardian.ps1" },
+	@{ Url = "$BaseUrl/RodaGuardian.ps1";        Path = "$BasePath\RodaGuardian.ps1" },
     @{ Url = "$BaseUrl/Assets/Images/logotipo.png"; Path = "$BasePath\Assets\Images\logotipo.png" },
     @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1";          Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
     @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1";      Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
