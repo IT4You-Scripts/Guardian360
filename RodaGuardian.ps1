@@ -3,7 +3,8 @@
 [CmdletBinding()]
 param (
     # Caminho do PowerShell 7
-    [string]$PwshPath   = 'C:\Program Files\PowerShell\7\pwsh.exe',
+    # [string]$PwshPath   = 'C:\Program Files\PowerShell\7\pwsh.exe',
+    [string]$PwshPath = (Get-Command pwsh).Source,
     # Caminho do script principal Guardian
     [string]$ScriptPath = 'C:\Guardian\Guardian.ps1',
 

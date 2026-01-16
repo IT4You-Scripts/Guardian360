@@ -5,7 +5,8 @@
 [CmdletBinding()]
 param (
     # === Infraestrutura do ElevaGuardian ===
-    [string]$PwshPath   = 'C:\Program Files\PowerShell\7\pwsh.exe',
+    #[string]$PwshPath   = 'C:\Program Files\PowerShell\7\pwsh.exe',
+    [string]$PwshPath = (Get-Command pwsh).Source,
     [string]$ScriptPath = 'C:\Guardian\Guardian.ps1',
     [string]$CredPath   = 'C:\Guardian\credenciais.xml',
     [string]$KeyPath    = 'C:\Guardian\key.bin',
