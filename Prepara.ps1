@@ -1,9 +1,9 @@
 
 <#
 .SYNOPSIS
-    Verifica e corrige Winget, instala PowerShell 7, ajusta PATH, cria alias, restaura políticas e checa variável de ambiente.
+    Verifica e corrige Winget, instala PowerShell 7, ajusta PATH, cria alias, restaura políticas e associa .ps1 corretamente.
 .DESCRIPTION
-    Script corporativo para manutenção avançada.
+    Script corporativo para manutenção avançada com validação de administrador.
 .NOTES
     Autor: [Seu Nome]
     Data: 16/01/2026
@@ -12,6 +12,15 @@
 function Show-Message {
     param([string]$Message, [string]$Color = "White")
     Write-Host $Message -ForegroundColor $Color
+}
+
+# ==========================
+# Validação de Administrador
+# ==========================
+if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    Show-Message "❌ Este script precisa ser executado como ADMINISTRADOR para aplicar todas as configurações." "Red"
+    Show-Message "➡ Clique com o botão direito no PowerShell e selecione 'Executar como administrador'." "Yellow"
+    exit
 }
 
 # ==========================
@@ -144,9 +153,13 @@ try {
     Show-Message "❌ Erro ao criar alias. Execute como administrador." "Red"
 }
 
-# Associa .ps1
+# ==========================
+# Associação .ps1 corrigida
+# ==========================
+Show-Message "🔄 Associando arquivos .ps1 ao PowerShell 7..." "Yellow"
 cmd /c assoc .ps1=Microsoft.PowerShellScript.1
 cmd /c ftype Microsoft.PowerShellScript.1="\"$pwshPath\" -NoExit -Command \"%1\""
+Show-Message "✅ Associação aplicada. Valide com 'assoc .ps1' e 'ftype Microsoft.PowerShellScript.1'." "Green"
 
 # Restaurar políticas
 Show-Message "🔄 Restaurando políticas de execução..." "Yellow"
@@ -156,3 +169,4 @@ Set-ExecutionPolicy Undefined -Scope Process -Force
 Set-ExecutionPolicy RemoteSigned -Force
 
 Show-Message "✅ Script concluído com sucesso!" "Green"
+
