@@ -619,11 +619,11 @@ $hasHDD = ($hddList.Count -gt 0)
         @{ Name='Optimize-NetworkSettings';  Action={ Optimize-NetworkSettings } }
       )},
     @{ Id=4; Title='Limpeza de arquivos temporários'; Steps=@(
-        @{ Name='Clear-BrowserCache';        Action={ Clear-BrowserCache } },
+        #@{ Name='Clear-BrowserCache';        Action={ Clear-BrowserCache } },
         @{ Name='Clear-WindowsUpdateCache';  Action={ Clear-WindowsUpdateCache } },
         @{ Name='Clear-TempFiles';           Action={ Clear-TempFiles } },
-        @{ Name='Clear-AllRecycleBins';      Action={ Clear-AllRecycleBins } },
-        @{ Name='Clear-RecentFilesHistory';  Action={ Clear-RecentFilesHistory } }
+        @{ Name='Clear-AllRecycleBins';      Action={ Clear-AllRecycleBins } }
+        #@{ Name='Clear-RecentFilesHistory';  Action={ Clear-RecentFilesHistory } }
       )},
     @{ Id=5; Title='Atualizações Controladas'; Steps=@(
         @{ Name='Update-WindowsOS'; Action={ if($hasInet){ Update-WindowsOS } else { Write-Log 'Sem internet: pulando Update-WindowsOS' 'WARN' } } },
