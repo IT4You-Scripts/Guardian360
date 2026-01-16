@@ -1,9 +1,9 @@
 
 <#
 .SYNOPSIS
-    Verifica e corrige Winget, instala PowerShell 7, ajusta PATH, cria alias, restaura políticas e associa .ps1 corretamente.
+    Verifica e corrige Winget, instala PowerShell 7, ajusta PATH, cria alias, restaura políticas e valida associação .ps1.
 .DESCRIPTION
-    Script corporativo para manutenção avançada com validação de administrador.
+    Script corporativo com saída limpa e resumo final.
 .NOTES
     Autor: [Seu Nome]
     Data: 16/01/2026
@@ -23,68 +23,34 @@ if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
     exit
 }
 
+# Variáveis de status
+$WingetStatus = $PowerShellStatus = $PathStatus = $AliasStatus = $AssocStatus = $PolicyStatus = "❌"
+
 # ==========================
 # Funções Winget
 # ==========================
 function Test-Winget {
     try {
         $wingetVersion = winget --version 2>$null
-        if (-not $wingetVersion) {
-            Show-Message "❌ Winget não está funcional." "Red"
-            return $false
-        }
-        Show-Message "✅ Winget encontrado. Versão: $wingetVersion" "Green"
-
-        # Teste real
+        if (-not $wingetVersion) { return $false }
         try {
             $result = winget list --source winget 2>$null
-            if ($result) {
-                Show-Message "✅ Teste real OK: Winget list executado." "Green"
-                return $true
-            } else {
-                Show-Message "⚠ Winget não conseguiu listar pacotes." "Yellow"
-                return $false
-            }
-        } catch {
-            Show-Message "❌ Erro no teste real: $_" "Red"
-            return $false
-        }
-    } catch {
-        Show-Message "❌ Erro ao executar Winget: $_" "Red"
-        return $false
-    }
+            return $result -ne $null
+        } catch { return $false }
+    } catch { return $false }
 }
 
 function Remove-Winget {
-    Show-Message "🔄 Removendo Winget e App Installer..." "Yellow"
-    try {
-        Get-AppxPackage Microsoft.DesktopAppInstaller | Remove-AppxPackage -ErrorAction SilentlyContinue
-        Get-AppxPackage Microsoft.VCLibs* | Remove-AppxPackage -ErrorAction SilentlyContinue
-        Remove-Item "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller*" -Recurse -Force -ErrorAction SilentlyContinue
-        Show-Message "✅ Remoção completa." "Green"
-    } catch {
-        Show-Message "❌ Erro na remoção: $_" "Red"
-    }
+    Get-AppxPackage Microsoft.DesktopAppInstaller | Remove-AppxPackage -ErrorAction SilentlyContinue
+    Get-AppxPackage Microsoft.VCLibs* | Remove-AppxPackage -ErrorAction SilentlyContinue
+    Remove-Item "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller*" -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 function Install-Winget {
-    Show-Message "⬇ Baixando e instalando Winget mais recente..." "Yellow"
     $InstallerUrl = "https://aka.ms/getwinget"
     $InstallerPath = "$env:TEMP\AppInstaller.msixbundle"
-    $retryCount = 0
-    do {
-        try {
-            Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -ErrorAction Stop
-            Add-AppxPackage -Path $InstallerPath -ErrorAction Stop
-            Show-Message "✅ Instalação concluída." "Green"
-            return
-        } catch {
-            $retryCount++
-            Show-Message "❌ Erro na instalação (tentativa $retryCount): $_" "Red"
-            Start-Sleep -Seconds 5
-        }
-    } while ($retryCount -lt 3)
-    Show-Message "❌ Falha após 3 tentativas." "Red"
+    Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -ErrorAction Stop
+    Add-AppxPackage -Path $InstallerPath -ErrorAction Stop
 }
 
 # ==========================
@@ -92,14 +58,15 @@ function Install-Winget {
 # ==========================
 Show-Message "===== Verificando Winget =====" "Cyan"
 if (-not (Test-Winget)) {
-    Show-Message "⚠ Winget com problemas. Iniciando reparo..." "Yellow"
+    Show-Message "⚠ Winget com problemas. Reparando..." "Yellow"
     Remove-Winget
     Install-Winget
-    if (Test-Winget) {
-        Show-Message "✅ Winget reparado com sucesso!" "Green"
-    } else {
-        Show-Message "❌ Falha ao reparar Winget." "Red"
-    }
+}
+if (Test-Winget) {
+    Show-Message "✅ Winget OK" "Green"
+    $WingetStatus = "✔ Winget OK"
+} else {
+    Show-Message "❌ Winget falhou" "Red"
 }
 
 # ==========================
@@ -107,66 +74,84 @@ if (-not (Test-Winget)) {
 # ==========================
 Show-Message "===== Instalando PowerShell 7 =====" "Cyan"
 winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
-
 $pwshPath = "C:\Program Files\PowerShell\7\pwsh.exe"
 Start-Sleep -Seconds 5
-
 if (Test-Path $pwshPath) {
-    Show-Message "✅ PowerShell 7 instalado em $pwshPath" "Green"
+    Show-Message "✅ PowerShell 7 OK" "Green"
+    $PowerShellStatus = "✔ PowerShell 7 OK"
 } else {
-    Show-Message "❌ Erro: PowerShell 7 não encontrado." "Red"
-    exit
+    Show-Message "❌ PowerShell não encontrado" "Red"
 }
 
 # ==========================
-# Checagem da variável de ambiente
+# Checagem variável ambiente
 # ==========================
-Show-Message "===== Checando variável de ambiente %ProgramFiles% =====" "Cyan"
-$envProgramFiles = $env:ProgramFiles
-$expectedPath = Join-Path $envProgramFiles "PowerShell\7\pwsh.exe"
+$expectedPath = Join-Path $env:ProgramFiles "PowerShell\7\pwsh.exe"
 if (Test-Path $expectedPath) {
-    Show-Message "✅ Caminho encontrado: $expectedPath" "Green"
-} else {
-    Show-Message "❌ Caminho não encontrado: $expectedPath" "Red"
+    Show-Message "✅ Caminho verificado: $expectedPath" "Green"
 }
 
 # ==========================
 # Ajustes no PATH
 # ==========================
-Show-Message "🔄 Adicionando PowerShell 7 ao PATH..." "Yellow"
 $envPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
 if ($envPath -notlike "*PowerShell\7*") {
     $newPath = "$envPath;$($pwshPath.Substring(0,$pwshPath.LastIndexOf('\')))"
     [System.Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
-    Show-Message "✅ PATH atualizado." "Green"
+    Show-Message "✅ PATH atualizado" "Green"
+    $PathStatus = "✔ PATH OK"
 } else {
-    Show-Message "⚠ PowerShell 7 já está no PATH." "Yellow"
+    Show-Message "⚠ PATH já contém PowerShell 7" "Yellow"
+    $PathStatus = "✔ PATH OK"
 }
 
-# Cria alias
-Show-Message "🔄 Criando alias para usar PowerShell 7 como padrão..." "Yellow"
+# ==========================
+# Alias
+# ==========================
 try {
     fsutil behavior set SymlinkEvaluation R2L:1 R2R:1
     New-Item -Path "C:\Windows\System32\powershell.exe" -ItemType SymbolicLink -Value $pwshPath -Force
-    Show-Message "✅ Alias criado: 'powershell' agora abre PowerShell 7." "Green"
+    Show-Message "✅ Alias criado" "Green"
+    $AliasStatus = "✔ Alias OK"
 } catch {
-    Show-Message "❌ Erro ao criar alias. Execute como administrador." "Red"
+    Show-Message "❌ Erro ao criar alias" "Red"
 }
 
 # ==========================
-# Associação .ps1 corrigida
+# Associação .ps1 + validação (sem mensagem indesejada)
 # ==========================
 Show-Message "🔄 Associando arquivos .ps1 ao PowerShell 7..." "Yellow"
-cmd /c assoc .ps1=Microsoft.PowerShellScript.1
-cmd /c ftype Microsoft.PowerShellScript.1="\"$pwshPath\" -NoExit -Command \"%1\""
-Show-Message "✅ Associação aplicada. Valide com 'assoc .ps1' e 'ftype Microsoft.PowerShellScript.1'." "Green"
+cmd /c assoc .ps1=Microsoft.PowerShellScript.1 > nul 2>&1
+cmd /c ftype Microsoft.PowerShellScript.1="\"$pwshPath\" -NoExit -Command \"%1\"" > nul 2>&1
 
+# Validação da associação
+$assocResult = cmd /c assoc .ps1
+$ftypeResult = cmd /c ftype Microsoft.PowerShellScript.1
+if ($assocResult -like "*.ps1=*Microsoft.PowerShellScript.1*" -and $ftypeResult -like "*pwsh.exe*") {
+    Show-Message "✅ Associação .ps1 OK" "Green"
+    $AssocStatus = "✔ Associação .ps1 OK"
+} else {
+    Show-Message "❌ Associação falhou" "Red"
+}
+
+# ==========================
 # Restaurar políticas
-Show-Message "🔄 Restaurando políticas de execução..." "Yellow"
+# ==========================
 Set-ExecutionPolicy Undefined -Scope LocalMachine -Force
 Set-ExecutionPolicy Undefined -Scope CurrentUser -Force
 Set-ExecutionPolicy Undefined -Scope Process -Force
 Set-ExecutionPolicy RemoteSigned -Force
+Show-Message "✅ Políticas restauradas" "Green"
+$PolicyStatus = "✔ Políticas OK"
 
+# ==========================
+# Resumo Final
+# ==========================
+Show-Message "`n===== RESUMO FINAL =====" "Cyan"
+Show-Message "$WingetStatus" "Green"
+Show-Message "$PowerShellStatus" "Green"
+Show-Message "$PathStatus" "Green"
+Show-Message "$AliasStatus" "Green"
+Show-Message "$AssocStatus" "Green"
+Show-Message "$PolicyStatus" "Green"
 Show-Message "✅ Script concluído com sucesso!" "Green"
-
