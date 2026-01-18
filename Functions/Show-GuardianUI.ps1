@@ -30,18 +30,18 @@ function Show-GuardianUI {
     # Definição das linhas
     #$rowLogo      = New-Object Windows.Controls.RowDefinition; $rowLogo.Height = '2*'
     $rowLogo      = New-Object Windows.Controls.RowDefinition; $rowLogo.Height = 'Auto'
-    $rowText      = New-Object Windows.Controls.RowDefinition; $rowText.Height = '5.5*'
+    $rowText      = New-Object Windows.Controls.RowDefinition; $rowText.Height = '4.5*'
     $rowPhase     = New-Object Windows.Controls.RowDefinition; $rowPhase.Height = '0.7*'
     $rowStep      = New-Object Windows.Controls.RowDefinition; $rowStep.Height = '0.5*'
     $rowProgress  = New-Object Windows.Controls.RowDefinition; $rowProgress.Height = '1*'
-
+    $rowCliente   = New-Object Windows.Controls.RowDefinition; $rowCliente.Height = '0.5*'
  
     $grid.RowDefinitions.Add($rowLogo) | Out-Null
     $grid.RowDefinitions.Add($rowText) | Out-Null
     $grid.RowDefinitions.Add($rowPhase) | Out-Null
     $grid.RowDefinitions.Add($rowStep) | Out-Null
     $grid.RowDefinitions.Add($rowProgress) | Out-Null
-
+    $grid.RowDefinitions.Add($rowCliente) | Out-Null
 
     $window.Content = $grid
 
@@ -94,6 +94,7 @@ function Show-GuardianUI {
     [Windows.Controls.Grid]::SetRow($textBlock, 1)
     $grid.Children.Add($textBlock)
 
+    
     # Texto dinâmico (fase)
     $phaseText = New-Object Windows.Controls.TextBlock
     $phaseText.Text = "Fase atual: Inicializando..."
@@ -115,6 +116,16 @@ function Show-GuardianUI {
     $progressBar.Foreground = '#32CD32'
     [Windows.Controls.Grid]::SetRow($progressBar, 4)
     $grid.Children.Add($progressBar)
+
+    # Texto discreto com nome do cliente
+    $clienteText = New-Object Windows.Controls.TextBlock
+    $clienteText.Text = "Cliente: $Cliente"
+    $clienteText.FontSize = 12
+    $clienteText.Foreground = 'Gray'
+    $clienteText.HorizontalAlignment = 'Right'
+    $clienteText.Margin = '0,5,45,5'
+    [Windows.Controls.Grid]::SetRow($clienteText, 5)
+    $grid.Children.Add($clienteText)
 
     # Guarda referências globais para atualização dinâmica
     $global:GuardianUIWindow = $window
