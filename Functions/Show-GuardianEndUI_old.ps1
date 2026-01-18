@@ -28,10 +28,10 @@
 
     # Definição das linhas (logo + texto)
     $rowLogo = New-Object Windows.Controls.RowDefinition
-    $rowLogo.Height = 'Auto'
+    $rowLogo.Height = '2*'
 
     $rowText = New-Object Windows.Controls.RowDefinition
-    $rowText.Height = '6*'
+    $rowText.Height = '8*'
 
     $grid.RowDefinitions.Add($rowLogo)
     $grid.RowDefinitions.Add($rowText)
@@ -42,11 +42,10 @@
     if (Test-Path $LogoPath) {
         $img = New-Object Windows.Controls.Image
         $img.Source = New-Object Windows.Media.Imaging.BitmapImage([Uri]$LogoPath)
-        $img.Width = '1150'
-		$img.Stretch = 'Uniform'
+        $img.Stretch = 'Uniform'
         $img.HorizontalAlignment = 'Left'
         $img.VerticalAlignment = 'Center'
-        $img.Margin = '20,20,10,20'
+        $img.Margin = '20,20,20,20'
         [Windows.Controls.Grid]::SetRow($img, 0)
         $grid.Children.Add($img)
     }
@@ -57,7 +56,7 @@
     $textBlock.TextAlignment = 'Left'
     $textBlock.TextWrapping = 'Wrap'
     $textBlock.Foreground = 'White'
-    $textBlock.Margin = '20,0,20,0'
+    $textBlock.Margin = '20,20,20,10'
 
     # Conteúdo
     $textBlock.Inlines.Add("A Manutenção Preventiva Automatizada foi finalizada com ")

@@ -28,9 +28,8 @@ function Show-GuardianUI {
     $grid = New-Object Windows.Controls.Grid
 
     # Definição das linhas
-    #$rowLogo      = New-Object Windows.Controls.RowDefinition; $rowLogo.Height = '2*'
-    $rowLogo      = New-Object Windows.Controls.RowDefinition; $rowLogo.Height = 'Auto'
-    $rowText      = New-Object Windows.Controls.RowDefinition; $rowText.Height = '5.5*'
+    $rowLogo      = New-Object Windows.Controls.RowDefinition; $rowLogo.Height = '2*'
+    $rowText      = New-Object Windows.Controls.RowDefinition; $rowText.Height = '6*'
     $rowPhase     = New-Object Windows.Controls.RowDefinition; $rowPhase.Height = '0.7*'
     $rowStep      = New-Object Windows.Controls.RowDefinition; $rowStep.Height = '0.5*'
     $rowProgress  = New-Object Windows.Controls.RowDefinition; $rowProgress.Height = '1*'
@@ -49,11 +48,10 @@ function Show-GuardianUI {
     if (Test-Path $LogoPath) {
         $img = New-Object Windows.Controls.Image
         $img.Source = New-Object Windows.Media.Imaging.BitmapImage([Uri]$LogoPath)
-        $img.Width = '1150'
         $img.Stretch = 'Uniform'
         $img.HorizontalAlignment = 'Left'
         $img.VerticalAlignment = 'Center'
-        $img.Margin = '20,20,10,20'
+        $img.Margin = '20,20,0,20'
         [Windows.Controls.Grid]::SetRow($img, 0)
         $grid.Children.Add($img)
     }
@@ -64,7 +62,7 @@ function Show-GuardianUI {
     $textBlock.TextAlignment = 'Left'
     $textBlock.TextWrapping = 'Wrap'
     $textBlock.Foreground = 'White'
-    $textBlock.Margin = '20,0,20,0'
+    $textBlock.Margin = '20,20,20,10'
 
     # Conteúdo inicial
     $textBlock.Inlines.Add("Prezado(a) usuário(a),`n`n")
