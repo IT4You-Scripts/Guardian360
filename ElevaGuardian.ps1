@@ -23,7 +23,8 @@ param (
     [string]$LogLevel,
 
     [switch]$Simulado,
-    [string]$FileServer
+    [string]$FileServer,
+    [string]$Cliente       # Nome do nosso Cliente (preferencialmente, nome da Empresa onde ele trabalha)
 )
 
 # -------------------------------
@@ -234,6 +235,12 @@ if ($FileServer) {
     $argList += '-FileServer'
     $argList += $FileServer
 }
+
+if ($Cliente) {
+    $argList += '-Cliente'
+    $argList += "`"$Cliente`""
+}
+
 
 # -------------------------------
 # Configuração da janela

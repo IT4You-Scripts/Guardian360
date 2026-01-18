@@ -23,7 +23,8 @@ param (
     [ValidateSet('INFO','WARN','ERROR','DEBUG')]
     [string]$LogLevel,
     [switch]$Simulado,
-    [string]$FileServer
+    [string]$FileServer,
+    [string]$Cliente       # Nome do nosso Cliente (preferencialmente, nome da Empresa onde ele trabalha)
 )
 
 function Fail {
@@ -160,6 +161,10 @@ if ($FileServer) {
     $argList += $FileServer
 }
 
+if ($Cliente) {
+    $argList += '-Cliente'
+    $argList += $Cliente
+}
 # Configuração da janela
 $winStyle = if ($NoWindow) {
     'Hidden'
