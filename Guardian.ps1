@@ -58,11 +58,13 @@ param(
   [int[]]$PulaFases,     # Se não for informado, nenhuma fase será pulada
   [ValidateSet('INFO','WARN','ERROR','DEBUG')][string]$LogLevel = 'INFO',
   [switch]$Simulado,     # Modo ensaio: não executa ações destrutivas
-  [string]$FileServer    # Host/IP do servidor de arquivos para envio do log (opcional)
+  [string]$FileServer,   # Host/IP do servidor de arquivos para envio do log (opcional)
+  [string]$Cliente       # Nome do nosso Cliente (preferencialmente, nome da Empresa onde ele trabalha)
 )
 
-
-
+if ([string]::IsNullOrWhiteSpace($Cliente)) {
+    $Cliente = 'Cliente não identificado'
+}
 
 
 #region Ajuste de parâmetros ExecutaFases e PulaFases
@@ -765,11 +767,16 @@ foreach ($phase in $Phases) {
   Show-Header -Text 'Resumo da Manutenção Automatizada'
   Write-Host ""
 
+  Write-Host ("Cliente: {0}{1}{2}" -f $Cyan, $Cliente, $Reset)
+  Write-Host ""
+  
   $maxLabel = 0
   foreach ($r in $global:Results) { if ($r.Etapa.Length -gt $maxLabel) { $maxLabel = $r.Etapa.Length } }
 
   Write-Report ""
   Write-Report "Resumo da Manutenção Automatizada"
+  Write-Report ""
+  Write-Report ("Cliente: {0}" -f $Cliente)
   Write-Report ""
   
   foreach ($r in $global:Results) {
