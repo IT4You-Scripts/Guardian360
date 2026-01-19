@@ -566,7 +566,7 @@ function Invoke-GuardianStep {
 }
 
 # 1) Pré-requisitos para o Script poder rodar corretamente (sem prompts)
-Test-AdminOrExit
+#Test-AdminOrExit
 Initialize-Pwsh7
 Enable-QuickEditProtection
 Enable-ConsoleAppearance -ForceMaximize
