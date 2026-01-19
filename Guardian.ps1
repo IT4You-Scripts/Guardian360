@@ -277,6 +277,7 @@ function Test-AdminOrExit {
   if (-not (Test-IsAdmin)) {
     Show-Header -Text 'Permissão insuficiente'
     Write-Log "A execução requer privilégios administrativos. Agende como Admin/SYSTEM. Encerrando." 'ERROR'
+    Pause
     exit 1
   }
 }
@@ -566,7 +567,7 @@ function Invoke-GuardianStep {
 }
 
 # 1) Pré-requisitos para o Script poder rodar corretamente (sem prompts)
-#Test-AdminOrExit
+Test-AdminOrExit
 Initialize-Pwsh7
 Enable-QuickEditProtection
 Enable-ConsoleAppearance -ForceMaximize
