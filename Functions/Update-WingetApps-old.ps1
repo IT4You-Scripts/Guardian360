@@ -1,5 +1,4 @@
-﻿
-function Update-WingetApps {
+﻿function Update-WingetApps {
     [CmdletBinding()]
     param()
 
@@ -42,18 +41,13 @@ function Update-WingetApps {
         return
     }
 
-    # Pós-processamento: aplica pin apenas se o pacote existir
+    # Pós-processamento: tenta remover blacklist (winget não suporta exclusão nativa)
     foreach ($id in $blacklistedIds) {
         try {
-            $exists = winget list --id $id 2>$null
-            if ($exists) {
-                winget pin add --id $id --blocking --force --accept-source-agreements 2>$null | Out-Null
-                Write-Log ("Winget: pacote fixado (pin) para impedir upgrades futuros -> {0}" -f $id) 'INFO'
-            } else {
-                Write-Log ("Pacote {0} não encontrado. Pin ignorado." -f $id) 'WARN'
-            }
+            winget pin add --id $id --blocking --force --accept-source-agreements 2>$null | Out-Null
+            Write-Log ("Winget: pacote fixado (pin) para impedir upgrades futuros -> {0}" -f $id) 'INFO'
         } catch {
-            Write-Log ("Falha ao aplicar pin em {0}: {1}" -f $id, $_.Exception.Message) 'WARN'
+            Write-Log ("Falha ao aplicar pin em {0}" -f $id) 'WARN'
         }
     }
 
