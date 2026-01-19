@@ -1,12 +1,12 @@
 
 <#
 .SYNOPSIS
-    Verifica e corrige Winget, instala PowerShell 7, ajusta PATH, cria alias, restaura políticas e valida associação .ps1.
+    Verifica e corrige Winget, instala PowerShell 7, ajusta PATH, cria alias, restaura politicas e valida associacao .ps1.
 .DESCRIPTION
-    Script corporativo com saída limpa e resumo final.
+    Script corporativo com saida limpa e resumo final.
 .NOTES
     Autor: [Seu Nome]
-    Data: 16/01/2026
+    Data: 19/01/2026
 #>
 
 function Show-Message {
@@ -15,28 +15,26 @@ function Show-Message {
 }
 
 # ==========================
-# Validação de Administrador
+# Validacao de Administrador
 # ==========================
 if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
-    Show-Message "❌ Este script precisa ser executado como ADMINISTRADOR para aplicar todas as configurações." "Red"
-    Show-Message "➡ Clique com o botão direito no PowerShell e selecione 'Executar como administrador'." "Yellow"
+    Show-Message "ERRO: Este script precisa ser executado como ADMINISTRADOR para aplicar todas as configuracoes." "Red"
+    Show-Message "DICA: Clique com o botao direito no PowerShell e selecione 'Executar como administrador'." "Yellow"
     exit
 }
 
-# Variáveis de status
-$WingetStatus = $PowerShellStatus = $PathStatus = $AliasStatus = $AssocStatus = $PolicyStatus = "❌"
+# Variaveis de status
+$WingetStatus = $PowerShellStatus = $PathStatus = $AliasStatus = $AssocStatus = $PolicyStatus = "FALHOU"
 
 # ==========================
-# Funções Winget
+# Funcoes Winget
 # ==========================
 function Test-Winget {
     try {
         $wingetVersion = winget --version 2>$null
         if (-not $wingetVersion) { return $false }
-        try {
-            $result = winget list --source winget 2>$null
-            return $result -ne $null
-        } catch { return $false }
+        $result = winget list --source winget 2>$null
+        return $result -ne $null
     } catch { return $false }
 }
 
@@ -49,24 +47,24 @@ function Remove-Winget {
 function Install-Winget {
     $InstallerUrl = "https://aka.ms/getwinget"
     $InstallerPath = "$env:TEMP\AppInstaller.msixbundle"
-    Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -ErrorAction Stop
+    Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -UseBasicParsing -ErrorAction Stop
     Add-AppxPackage -Path $InstallerPath -ErrorAction Stop
 }
 
 # ==========================
-# Execução Winget
+# Execucao Winget
 # ==========================
 Show-Message "===== Verificando Winget =====" "Cyan"
 if (-not (Test-Winget)) {
-    Show-Message "⚠ Winget com problemas. Reparando..." "Yellow"
+    Show-Message "Winget com problemas. Reparando..." "Yellow"
     Remove-Winget
     Install-Winget
 }
 if (Test-Winget) {
-    Show-Message "✅ Winget OK" "Green"
-    $WingetStatus = "✔ Winget OK"
+    Show-Message "Winget OK" "Green"
+    $WingetStatus = "OK"
 } else {
-    Show-Message "❌ Winget falhou" "Red"
+    Show-Message "Winget falhou" "Red"
 }
 
 # ==========================
@@ -77,18 +75,10 @@ winget install --id Microsoft.PowerShell --source winget --accept-package-agreem
 $pwshPath = "C:\Program Files\PowerShell\7\pwsh.exe"
 Start-Sleep -Seconds 5
 if (Test-Path $pwshPath) {
-    Show-Message "✅ PowerShell 7 OK" "Green"
-    $PowerShellStatus = "✔ PowerShell 7 OK"
+    Show-Message "PowerShell 7 OK" "Green"
+    $PowerShellStatus = "OK"
 } else {
-    Show-Message "❌ PowerShell não encontrado" "Red"
-}
-
-# ==========================
-# Checagem variável ambiente
-# ==========================
-$expectedPath = Join-Path $env:ProgramFiles "PowerShell\7\pwsh.exe"
-if (Test-Path $expectedPath) {
-    Show-Message "✅ Caminho verificado: $expectedPath" "Green"
+    Show-Message "PowerShell nao encontrado" "Red"
 }
 
 # ==========================
@@ -98,60 +88,68 @@ $envPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
 if ($envPath -notlike "*PowerShell\7*") {
     $newPath = "$envPath;$($pwshPath.Substring(0,$pwshPath.LastIndexOf('\')))"
     [System.Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
-    Show-Message "✅ PATH atualizado" "Green"
-    $PathStatus = "✔ PATH OK"
+    Show-Message "PATH atualizado" "Green"
+    $PathStatus = "OK"
 } else {
-    Show-Message "⚠ PATH já contém PowerShell 7" "Yellow"
-    $PathStatus = "✔ PATH OK"
+    Show-Message "PATH ja contem PowerShell 7" "Yellow"
+    $PathStatus = "OK"
 }
 
 # ==========================
-# Alias
+# Alias via perfil do PowerShell
 # ==========================
 try {
-    fsutil behavior set SymlinkEvaluation R2L:1 R2R:1
-    New-Item -Path "C:\Windows\System32\powershell.exe" -ItemType SymbolicLink -Value $pwshPath -Force
-    Show-Message "✅ Alias criado" "Green"
-    $AliasStatus = "✔ Alias OK"
+    $profilePath = "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
+    if (-not (Test-Path $profilePath)) {
+        New-Item -ItemType File -Path $profilePath -Force
+    }
+    Add-Content -Path $profilePath -Value "Set-Alias powershell '$pwshPath'"
+    Show-Message "Alias criado no perfil do PowerShell" "Green"
+    $AliasStatus = "OK"
 } catch {
-    Show-Message "❌ Erro ao criar alias" "Red"
+    Show-Message "Erro ao criar alias" "Red"
 }
 
 # ==========================
-# Associação .ps1 + validação (sem mensagem indesejada)
+# Associacao .ps1
 # ==========================
-Show-Message "🔄 Associando arquivos .ps1 ao PowerShell 7..." "Yellow"
-cmd /c assoc .ps1=Microsoft.PowerShellScript.1 > nul 2>&1
-cmd /c ftype Microsoft.PowerShellScript.1="\"$pwshPath\" -NoExit -Command \"%1\"" > nul 2>&1
+Show-Message "Associando arquivos .ps1 ao PowerShell 7..." "Yellow"
 
-# Validação da associação
+Start-Process -FilePath "cmd.exe" -ArgumentList '/c assoc .ps1=Microsoft.PowerShellScript.1' -NoNewWindow -Wait
+
+# Comando ftype concatenado corretamente
+$ftypeCmd = '/c ftype Microsoft.PowerShellScript.1="' + $pwshPath + '" -NoExit -Command "%1"'
+Start-Process -FilePath "cmd.exe" -ArgumentList $ftypeCmd -NoNewWindow -Wait
+
+# Validacao
 $assocResult = cmd /c assoc .ps1
 $ftypeResult = cmd /c ftype Microsoft.PowerShellScript.1
 if ($assocResult -like "*.ps1=*Microsoft.PowerShellScript.1*" -and $ftypeResult -like "*pwsh.exe*") {
-    Show-Message "✅ Associação .ps1 OK" "Green"
-    $AssocStatus = "✔ Associação .ps1 OK"
+    Show-Message "Associacao .ps1 OK" "Green"
+    $AssocStatus = "OK"
 } else {
-    Show-Message "❌ Associação falhou" "Red"
+    Show-Message "Associacao falhou" "Red"
 }
 
 # ==========================
-# Restaurar políticas
+# Restaurar politicas
 # ==========================
 Set-ExecutionPolicy Undefined -Scope LocalMachine -Force
 Set-ExecutionPolicy Undefined -Scope CurrentUser -Force
 Set-ExecutionPolicy Undefined -Scope Process -Force
 Set-ExecutionPolicy RemoteSigned -Force
-Show-Message "✅ Políticas restauradas" "Green"
-$PolicyStatus = "✔ Políticas OK"
+Show-Message "Politicas restauradas" "Green"
+$PolicyStatus = "OK"
 
 # ==========================
 # Resumo Final
 # ==========================
 Show-Message "`n===== RESUMO FINAL =====" "Cyan"
-Show-Message "$WingetStatus" "Green"
-Show-Message "$PowerShellStatus" "Green"
-Show-Message "$PathStatus" "Green"
-Show-Message "$AliasStatus" "Green"
-Show-Message "$AssocStatus" "Green"
-Show-Message "$PolicyStatus" "Green"
-Show-Message "✅ Script concluído com sucesso!" "Green"
+Show-Message "Winget: $WingetStatus" "Green"
+Show-Message "PowerShell 7: $PowerShellStatus" "Green"
+Show-Message "PATH: $PathStatus" "Green"
+Show-Message "Alias: $AliasStatus" "Green"
+Show-Message "Associacao .ps1: $AssocStatus" "Green"
+Show-Message "Politicas: $PolicyStatus" "Green"
+Show-Message "Script concluido com sucesso!" "Green"
+
