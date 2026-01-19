@@ -126,6 +126,27 @@ $computer    = $env:COMPUTERNAME.ToUpper()
 $logFile     = Join-Path $logDir ("{0}_{1}.log" -f $computer, $stamp)
 # Fim: Ajuste Mínimo de Pasta/Arquivo de Log
 
+
+
+
+
+# === Verificação de execução recente (último log) ===
+if (Test-Path $logDir) {
+    $ultimoLog = Get-ChildItem -Path $logDir -Filter "*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($ultimoLog) {
+        $horasDesdeUltimoLog = (New-TimeSpan -Start $ultimoLog.LastWriteTime -End (Get-Date)).TotalHours
+        if ($horasDesdeUltimoLog -lt 48) {
+            #Write-Host "Última execução foi há $([math]::Round($horasDesdeUltimoLog,2)) horas. Saindo sem executar nada." -ForegroundColor Yellow
+            exit 0
+        }
+    }
+}
+# ================================================
+
+
+
+
+
 # TLS forte (sem prompts)
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13 } catch {}
 
