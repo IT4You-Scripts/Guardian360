@@ -67,47 +67,6 @@ if ([string]::IsNullOrWhiteSpace($Cliente)) {
 }
 
 
-# --- BLOCO DE ELEVAÇÃO E DETECÇÃO DO POWERSHELL 7 ---
-# Se não estiver como Admin, reinicia com privilégios elevados
-if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    try {
-        $scriptPath = $PSCommandPath
-        $pwshPath = (Get-Command pwsh.exe -ErrorAction SilentlyContinue)?.Source
-        if ($pwshPath) {
-            Start-Process $pwshPath -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
-        } else {
-            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
-        }
-        exit
-    } catch {
-        Write-Host "Falha ao tentar elevar privilégios: $($_.Exception.Message)" -ForegroundColor Red
-        exit 1
-    }
-}
-
-# Se já está como Admin, mas não no PowerShell 7, reinicia nele (sem prompt)
-if ($PSVersionTable.PSVersion.Major -lt 7) {
-    try {
-        $scriptPath = $PSCommandPath
-        $pwshPath = (Get-Command pwsh.exe -ErrorAction SilentlyContinue)?.Source
-        if ($pwshPath) {
-            Write-Host "Migrando para PowerShell 7..." -ForegroundColor Yellow
-            Start-Process $pwshPath -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -WindowStyle Hidden
-            exit
-        } else {
-            Write-Host "PowerShell 7 não encontrado. Continuando na versão atual." -ForegroundColor Yellow
-        }
-    } catch {
-        Write-Host "Falha ao tentar reiniciar no PowerShell 7: $($_.Exception.Message)" -ForegroundColor Red
-    }
-}
-# --- FIM DO BLOCO ---
-
-
-
-
-
-
 #region Ajuste de parâmetros ExecutaFases e PulaFases
 
 
