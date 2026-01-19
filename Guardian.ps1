@@ -136,7 +136,7 @@ if (Test-Path $logDir) {
     if ($ultimoLog) {
         $horasDesdeUltimoLog = (New-TimeSpan -Start $ultimoLog.LastWriteTime -End (Get-Date)).TotalHours
         if ($horasDesdeUltimoLog -lt 48) {
-            #Write-Host "Última execução foi há $([math]::Round($horasDesdeUltimoLog,2)) horas. Saindo sem executar nada." -ForegroundColor Yellow
+            Write-Host "Última execução foi há $([math]::Round($horasDesdeUltimoLog,2)) horas. Saindo sem executar nada." -ForegroundColor Yellow
             exit 0
         }
     }
