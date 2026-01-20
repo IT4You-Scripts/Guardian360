@@ -1,6 +1,6 @@
 ﻿
 # ElevaGuardian.ps1
-# Executa Guardian.ps1 em PowerShell 7 usando credenciais criptografadas (key.bin + credenciais.xml)
+# Executa Guardian.ps1 em PowerShell 7 usando credenciais criptografadas (agora via DPAPI, sem key.bin)
 # Responsável apenas por elevação, contexto de execução e repasse de parâmetros
 
 [CmdletBinding()]
@@ -9,7 +9,7 @@ param (
     [string]$PwshPath = (Get-Command pwsh).Source,
     [string]$ScriptPath = 'C:\Guardian\Guardian.ps1',
     [string]$CredPath   = 'C:\Guardian\credenciais.xml',
-    [string]$KeyPath    = 'C:\Guardian\key.bin',
+    #[string]$KeyPath    = 'C:\Guardian\key.bin',  # Mantido para compatibilidade, mas não será usado
 
     [switch]$NoWindow,
     [switch]$NonInteractive,
@@ -85,33 +85,6 @@ foreach ($Folder in $Folders) {
 # Arquivos gerenciados
 # -----------------------------
 $Files = @(
-    @{ Url = "$BaseUrl/Atualiza.ps1";                            Path = "$BasePath\Atualiza.ps1" },
-    @{ Url = "$BaseUrl/CriaCredenciais_AES.ps1";                 Path = "$BasePath\CriaCredenciais_AES.ps1" },
-    @{ Url = "$BaseUrl/ElevaGuardian.ps1";                       Path = "$BasePath\ElevaGuardian.ps1" },
-    @{ Url = "$BaseUrl/Guardian.ps1";                            Path = "$BasePath\Guardian.ps1" },
-    @{ Url = "$BaseUrl/Prepara.ps1";                             Path = "$BasePath\Prepara.ps1" },
-    @{ Url = "$BaseUrl/RodaGuardian.ps1";                        Path = "$BasePath\RodaGuardian.ps1" },
-    @{ Url = "$BaseUrl/Assets/Images/logotipo.png";              Path = "$BasePath\Assets\Images\logotipo.png" },
-    @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1";          Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
-    @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1";      Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
-    @{ Url = "$BaseUrl/Functions/Clear-BrowserCache.ps1";        Path = "$BasePath\Functions\Clear-BrowserCache.ps1" },
-    @{ Url = "$BaseUrl/Functions/Clear-RecentFilesHistory.ps1";  Path = "$BasePath\Functions\Clear-RecentFilesHistory.ps1" },
-    @{ Url = "$BaseUrl/Functions/Clear-TempFiles.ps1";           Path = "$BasePath\Functions\Clear-TempFiles.ps1" },
-    @{ Url = "$BaseUrl/Functions/Clear-WindowsUpdateCache.ps1";  Path = "$BasePath\Functions\Clear-WindowsUpdateCache.ps1" },
-    @{ Url = "$BaseUrl/Functions/Confirm-MacriumBackup.ps1";     Path = "$BasePath\Functions\Confirm-MacriumBackup.ps1" },
-    @{ Url = "$BaseUrl/Functions/Get-SystemInventory.ps1";       Path = "$BasePath\Functions\Get-SystemInventory.ps1" },
-    @{ Url = "$BaseUrl/Functions/Optimize-HDD.ps1";              Path = "$BasePath\Functions\Optimize-HDD.ps1" },
-    @{ Url = "$BaseUrl/Functions/Optimize-NetworkSettings.ps1";  Path = "$BasePath\Functions\Optimize-NetworkSettings.ps1" },
-    @{ Url = "$BaseUrl/Functions/Optimize-PowerSettings.ps1";    Path = "$BasePath\Functions\Optimize-PowerSettings.ps1" },
-    @{ Url = "$BaseUrl/Functions/Optimize-SSD.ps1";              Path = "$BasePath\Functions\Optimize-SSD.ps1" },
-    @{ Url = "$BaseUrl/Functions/Remove-OldUpdateFiles.ps1";     Path = "$BasePath\Functions\Remove-OldUpdateFiles.ps1" },
-    @{ Url = "$BaseUrl/Functions/Repair-SystemIntegrity.ps1";    Path = "$BasePath\Functions\Repair-SystemIntegrity.ps1" },
-    @{ Url = "$BaseUrl/Functions/Scan-AntiMalware.ps1";          Path = "$BasePath\Functions\Scan-AntiMalware.ps1" },
-    @{ Url = "$BaseUrl/Functions/Send-LogToServer.ps1";          Path = "$BasePath\Functions\Send-LogToServer.ps1" },
-    @{ Url = "$BaseUrl/Functions/Show-GuardianEndUI.ps1";        Path = "$BasePath\Functions\Show-GuardianEndUI.ps1" },
-    @{ Url = "$BaseUrl/Functions/Show-GuardianUI.ps1";           Path = "$BasePath\Functions\Show-GuardianUI.ps1" },
-    @{ Url = "$BaseUrl/Functions/Update-MicrosoftStore.ps1";     Path = "$BasePath\Functions\Update-MicrosoftStore.ps1" },
-    @{ Url = "$BaseUrl/Functions/Update-WindowsOS.ps1";          Path = "$BasePath\Functions\Update-WindowsOS.ps1" },
     @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1";         Path = "$BasePath\Functions\Update-WingetApps.ps1" }
 )
 
@@ -137,23 +110,18 @@ foreach ($File in $Files) {
 if (-not (Test-Path -LiteralPath $PwshPath))   { Fail "PowerShell 7 não encontrado em: $PwshPath" }
 if (-not (Test-Path -LiteralPath $ScriptPath)) { Fail "Guardian.ps1 não encontrado em: $ScriptPath" }
 if (-not (Test-Path -LiteralPath $CredPath))   { Fail "Credenciais não encontradas em: $CredPath. Gere o arquivo antes de continuar." }
-if (-not (Test-Path -LiteralPath $KeyPath))    { Fail "Chave AES não encontrada em: $KeyPath. Gere a chave antes de continuar." }
 
 # Desbloqueia o script alvo silenciosamente
 try { Unblock-File -Path $ScriptPath -ErrorAction SilentlyContinue } catch {}
 
 # -------------------------------
-# Leitura da chave AES
+# *** ATUALIZAÇÃO: Criptografia DPAPI ***
 # -------------------------------
-try {
-    $keyBytes = [IO.File]::ReadAllBytes($KeyPath)
-} catch {
-    Fail "Falha ao ler a chave AES ($KeyPath): $($_.Exception.Message)"
-}
+# Antes: Leitura da chave AES (key.bin) e uso do -Key
+# Agora: DPAPI (ConvertTo-SecureString sem chave)
+# Mantemos comentários e estrutura, mas ignoramos key.bin
 
-# -------------------------------
 # Leitura das credenciais
-# -------------------------------
 $user = $null
 $enc  = $null
 
@@ -185,11 +153,13 @@ if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($enc)) 
     Fail "Credenciais incompletas (UserName / EncryptedPassword)."
 }
 
-# Reconstrução do PSCredential
+# Reconstrução do PSCredential usando DPAPI
 try {
-    $secure = ConvertTo-SecureString -String $enc -Key $keyBytes
+    # Antes: $secure = ConvertTo-SecureString -String $enc -Key $keyBytes
+    # Agora: DPAPI (sem chave)
+    $secure = ConvertTo-SecureString -String $enc
 } catch {
-    Fail "Falha ao descriptografar a senha (key.bin incompatível)."
+    Fail "Falha ao descriptografar a senha via DPAPI."
 }
 
 if ($user -notlike '*\*' -and $user -notlike '*@*') {
