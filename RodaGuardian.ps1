@@ -82,7 +82,7 @@ foreach ($Folder in $Folders) {
 # -----------------------------
 $Files = @(
     @{ Url = "$BaseUrl/Atualiza.ps1";                            Path = "$BasePath\Atualiza.ps1" },
-    @{ Url = "$BaseUrl/CriaCredenciais_AES.ps1";                 Path = "$BasePath\CriaCredenciais_AES.ps1" },
+    @{ Url = "$BaseUrl/CriaCredenciais.ps1";                     Path = "$BasePath\CriaCredenciais.ps1" },
     @{ Url = "$BaseUrl/ElevaGuardian.ps1";                       Path = "$BasePath\ElevaGuardian.ps1" },
     @{ Url = "$BaseUrl/Guardian.ps1";                            Path = "$BasePath\Guardian.ps1" },
     @{ Url = "$BaseUrl/Prepara.ps1";                             Path = "$BasePath\Prepara.ps1" },
