@@ -1,11 +1,11 @@
-﻿
-# ElevaGuardian.ps1
+﻿# ElevaGuardian.ps1
 # Executa Guardian.ps1 em PowerShell 7 usando credenciais criptografadas (key.bin + credenciais.xml)
 # Responsável apenas por elevação, contexto de execução e repasse de parâmetros
 
 [CmdletBinding()]
 param (
     # === Infraestrutura do ElevaGuardian ===
+    #[string]$PwshPath   = 'C:\Program Files\PowerShell\7\pwsh.exe',
     [string]$PwshPath = (Get-Command pwsh).Source,
     [string]$ScriptPath = 'C:\Guardian\Guardian.ps1',
     [string]$CredPath   = 'C:\Guardian\credenciais.xml',
@@ -24,38 +24,22 @@ param (
 
     [switch]$Simulado,
     [string]$FileServer,
-    [string]$Cliente
+    [string]$Cliente       # Nome do nosso Cliente (preferencialmente, nome da Empresa onde ele trabalha)
 )
-
-# -------------------------------
-# Função para cabeçalho estilizado
-# -------------------------------
-function Show-Header {
-    param(
-        [string]$Text,
-        [ConsoleColor]$Color = 'Cyan'
-    )
-
-    $bar = '─' * ($Text.Length + 2)
-    Write-Host ""
-    Write-Host ("┌$bar┐") -ForegroundColor $Color
-    Write-Host ("│ $Text │") -ForegroundColor $Color
-    Write-Host ("└$bar┘") -ForegroundColor $Color
-    Write-Host ""
-}
 
 # -------------------------------
 # Função de falha controlada
 # -------------------------------
 function Fail {
     param ([string]$Message)
-    Show-Header $Message -Color Red
-    Write-Host "O script será encerrado em 5 segundos..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 5
+    Write-Error $Message
     exit 1
 }
 
+
+
 #region BootstrapUpgrade Guardian360 a partir do GitHub
+
 $ErrorActionPreference = "Stop"
 $ProgressPreference   = "SilentlyContinue"
 
@@ -64,6 +48,8 @@ $ProgressPreference   = "SilentlyContinue"
 # -----------------------------
 $BaseUrl   = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main"
 $BasePath  = "C:\Guardian"
+
+# Cache busting permanente (ANTI GitHub RAW cache)
 $NoCache   = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmss')"
 
 # -----------------------------
@@ -115,7 +101,10 @@ $Files = @(
     @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1";         Path = "$BasePath\Functions\Update-WingetApps.ps1" }
 )
 
-Show-Header "Atualizando Guardian 360..." -Color Cyan
+# -----------------------------
+# Execução principal (atualização)
+# -----------------------------
+Write-Host "Atualizando Guardian 360..." -ForegroundColor Cyan
 
 foreach ($File in $Files) {
     try {
@@ -126,9 +115,10 @@ foreach ($File in $Files) {
             -ErrorAction Stop
     }
     catch {
-        # falha individual ignorada
+        # falha individual ignorada (modo silencioso)
     }
 }
+
 #endregion
 
 # -------------------------------
@@ -136,8 +126,8 @@ foreach ($File in $Files) {
 # -------------------------------
 if (-not (Test-Path -LiteralPath $PwshPath))   { Fail "PowerShell 7 não encontrado em: $PwshPath" }
 if (-not (Test-Path -LiteralPath $ScriptPath)) { Fail "Guardian.ps1 não encontrado em: $ScriptPath" }
-if (-not (Test-Path -LiteralPath $CredPath))   { Fail "Credenciais não encontradas em: $CredPath. Gere o arquivo antes de continuar." }
-if (-not (Test-Path -LiteralPath $KeyPath))    { Fail "Chave AES não encontrada em: $KeyPath. Gere a chave antes de continuar." }
+if (-not (Test-Path -LiteralPath $CredPath))   { Fail "Credenciais não encontradas em: $CredPath" }
+if (-not (Test-Path -LiteralPath $KeyPath))    { Fail "Chave AES não encontrada em: $KeyPath" }
 
 # Desbloqueia o script alvo silenciosamente
 try { Unblock-File -Path $ScriptPath -ErrorAction SilentlyContinue } catch {}
@@ -164,6 +154,7 @@ try {
 }
 
 if ($raw -match '<\s*Credenciais\b') {
+    # XML manual
     try {
         [xml]$xml = $raw
         $user = $xml.Credenciais.UserName
@@ -172,6 +163,7 @@ if ($raw -match '<\s*Credenciais\b') {
         Fail "XML de credenciais inválido: $($_.Exception.Message)"
     }
 } else {
+    # Export-Clixml
     try {
         $data = Import-Clixml -Path $CredPath -ErrorAction Stop
         $user = $data.UserName
@@ -185,13 +177,16 @@ if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($enc)) 
     Fail "Credenciais incompletas (UserName / EncryptedPassword)."
 }
 
+# -------------------------------
 # Reconstrução do PSCredential
+# -------------------------------
 try {
     $secure = ConvertTo-SecureString -String $enc -Key $keyBytes
 } catch {
     Fail "Falha ao descriptografar a senha (key.bin incompatível)."
 }
 
+# Qualifica usuário local se necessário
 if ($user -notlike '*\*' -and $user -notlike '*@*') {
     $user = "$env:COMPUTERNAME\$user"
 }
@@ -205,24 +200,67 @@ try {
 # -------------------------------
 # Construção segura do ArgumentList
 # -------------------------------
-$argList = @('-ExecutionPolicy','Bypass','-NoProfile','-File', $ScriptPath)
-if ($NonInteractive) { $argList += '-NonInteractive' }
-if ($ExecutaFases)   { $argList += '-ExecutaFases'; $argList += ($ExecutaFases -join ',') }
-if ($PulaFases)      { $argList += '-PulaFases'; $argList += ($PulaFases -join ',') }
-if ($LogLevel)       { $argList += '-LogLevel'; $argList += $LogLevel }
-if ($Simulado)       { $argList += '-Simulado' }
-if ($FileServer)     { $argList += '-FileServer'; $argList += $FileServer }
-if ($Cliente)        { $argList += '-Cliente'; $argList += "`"$Cliente`"" }
+$argList = @(
+    '-ExecutionPolicy','Bypass',
+    '-NoProfile',
+    '-File', $ScriptPath
+)
+
+if ($NonInteractive) {
+    $argList += '-NonInteractive'
+}
+
+# ---- Repasse de parâmetros do Guardian ----
+
+if ($ExecutaFases) {
+    $argList += '-ExecutaFases'
+    $argList += ($ExecutaFases -join ',')
+}
+
+if ($PulaFases) {
+    $argList += '-PulaFases'
+    $argList += ($PulaFases -join ',')
+}
+
+if ($LogLevel) {
+    $argList += '-LogLevel'
+    $argList += $LogLevel
+}
+
+if ($Simulado) {
+    $argList += '-Simulado'
+}
+
+if ($FileServer) {
+    $argList += '-FileServer'
+    $argList += $FileServer
+}
+
+if ($Cliente) {
+    $argList += '-Cliente'
+    $argList += "`"$Cliente`""
+}
+
 
 # -------------------------------
 # Configuração da janela
 # -------------------------------
-$winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } else { 'Normal' }
+$winStyle = if ($NoWindow) {
+    'Hidden'
+} elseif ($Maximized) {
+    'Maximized'
+} else {
+    'Normal'
+}
 
 # -------------------------------
 # Diretório de trabalho seguro
 # -------------------------------
-try { $workDir = Split-Path -Path $ScriptPath -Parent } catch { $workDir = (Get-Location).Path }
+try {
+    $workDir = Split-Path -Path $ScriptPath -Parent
+} catch {
+    $workDir = (Get-Location).Path
+}
 
 # -------------------------------
 # Execução do Guardian
@@ -237,12 +275,7 @@ try {
         -UseNewEnvironment `
         -PassThru
 
-    Show-Header "Guardian iniciado com sucesso. PID: $($proc.Id)" -Color Green
-}
-catch {
-    if ($_.Exception.Message -like "*Nome de usuário ou senha incorretos*") {
-        Fail "Credenciais incorretas. Verifique usuário e senha e tente novamente."
-    } else {
-        Fail "Falha ao iniciar o Guardian.ps1: $($_.Exception.Message)"
-    }
+    Write-Host "Guardian iniciado com sucesso. PID: $($proc.Id)"
+} catch {
+    Fail "Falha ao iniciar o Guardian.ps1: $($_.Exception.Message)"
 }

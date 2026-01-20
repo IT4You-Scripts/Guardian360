@@ -3,7 +3,6 @@
 [CmdletBinding()]
 param (
     # Caminho do PowerShell 7
-    # [string]$PwshPath   = 'C:\Program Files\PowerShell\7\pwsh.exe',
     [string]$PwshPath = (Get-Command pwsh).Source,
     # Caminho do script principal Guardian
     [string]$ScriptPath = 'C:\Guardian\Guardian.ps1',
@@ -16,26 +15,43 @@ param (
     # Parâmetros para Guardian.ps1
     [int[]]$ExecutaFases,
     [int[]]$PulaFases,
-    #[string]$ExecutaFases,
-    #[string]$PulaFases,
- 
 
     [ValidateSet('INFO','WARN','ERROR','DEBUG')]
     [string]$LogLevel,
     [switch]$Simulado,
     [string]$FileServer,
-    [string]$Cliente       # Nome do nosso Cliente (preferencialmente, nome da Empresa onde ele trabalha)
+    [string]$Cliente
 )
 
+# -------------------------------
+# Função para cabeçalho estilizado
+# -------------------------------
+function Show-Header {
+    param(
+        [string]$Text,
+        [ConsoleColor]$Color = 'Cyan'
+    )
+
+    $bar = '─' * ($Text.Length + 2)
+    Write-Host ""
+    Write-Host ("┌$bar┐") -ForegroundColor $Color
+    Write-Host ("│ $Text │") -ForegroundColor $Color
+    Write-Host ("└$bar┘") -ForegroundColor $Color
+    Write-Host ""
+}
+
+# -------------------------------
+# Função de falha controlada
+# -------------------------------
 function Fail {
     param ([string]$Message)
-    Write-Error $Message
+    Show-Header $Message -Color Red
+    Write-Host "O script será encerrado em 5 segundos..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 5
     exit 1
 }
 
-
 #region BootstrapUpgrade Guardian360 a partir do GitHub
-
 $ErrorActionPreference = "Stop"
 $ProgressPreference   = "SilentlyContinue"
 
@@ -44,8 +60,6 @@ $ProgressPreference   = "SilentlyContinue"
 # -----------------------------
 $BaseUrl   = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main"
 $BasePath  = "C:\Guardian"
-
-# Cache busting permanente (ANTI GitHub RAW cache)
 $NoCache   = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmss')"
 
 # -----------------------------
@@ -72,7 +86,6 @@ $Files = @(
     @{ Url = "$BaseUrl/ElevaGuardian.ps1";                       Path = "$BasePath\ElevaGuardian.ps1" },
     @{ Url = "$BaseUrl/Guardian.ps1";                            Path = "$BasePath\Guardian.ps1" },
     @{ Url = "$BaseUrl/Prepara.ps1";                             Path = "$BasePath\Prepara.ps1" },
-    @{ Url = "$BaseUrl/RodaGuardian.ps1";                        Path = "$BasePath\RodaGuardian.ps1" },
     @{ Url = "$BaseUrl/Assets/Images/logotipo.png";              Path = "$BasePath\Assets\Images\logotipo.png" },
     @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1";          Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
     @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1";      Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
@@ -97,7 +110,7 @@ $Files = @(
     @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1";         Path = "$BasePath\Functions\Update-WingetApps.ps1" }
 )
 
-Write-Host "Atualizando Guardian 360..." -ForegroundColor Cyan
+Show-Header "Atualizando Guardian 360..." -Color Cyan
 
 foreach ($File in $Files) {
     try {
@@ -108,14 +121,14 @@ foreach ($File in $Files) {
             -ErrorAction Stop
     }
     catch {
-        # falha individual ignorada (modo silencioso)
+        # falha individual ignorada
     }
 }
-
 #endregion
 
-
+# -------------------------------
 # Validações
+# -------------------------------
 if (-not (Test-Path -LiteralPath $PwshPath))   { Fail "PowerShell 7 não encontrado em: $PwshPath" }
 if (-not (Test-Path -LiteralPath $ScriptPath)) { Fail "Guardian.ps1 não encontrado em: $ScriptPath" }
 
@@ -125,63 +138,36 @@ try { Unblock-File -Path $ScriptPath -ErrorAction SilentlyContinue } catch {}
 # Diretório de trabalho
 $workDir = Split-Path -Path $ScriptPath -Parent
 
+# -------------------------------
 # Montagem segura dos argumentos
-$argList = @(
-    '-ExecutionPolicy','Bypass',
-    '-NoProfile',
-    '-File',$ScriptPath
-)
-
+# -------------------------------
+$argList = @('-ExecutionPolicy','Bypass','-NoProfile','-File',$ScriptPath)
 if ($NonInteractive) { $argList += '-NonInteractive' }
+if ($ExecutaFases)   { $argList += '-ExecutaFases'; $argList += ($ExecutaFases -join ',') }
+if ($PulaFases)      { $argList += '-PulaFases'; $argList += ($PulaFases -join ',') }
+if ($LogLevel)       { $argList += '-LogLevel'; $argList += $LogLevel }
+if ($Simulado)       { $argList += '-Simulado' }
+if ($FileServer)     { $argList += '-FileServer'; $argList += $FileServer }
+if ($Cliente)        { $argList += '-Cliente'; $argList += "`"$Cliente`"" }
 
-# ✅ Arrays convertidos para string separada por vírgulas
-
-
-if ($ExecutaFases) {
-    $argList += '-ExecutaFases'
-    $argList += $ExecutaFases
-}
-
-if ($PulaFases) {
-    $argList += '-PulaFases'
-    $argList += $PulaFases
-}
-
-
-
-if ($LogLevel) {
-    $argList += '-LogLevel'
-    $argList += $LogLevel
-}
-
-if ($Simulado) { $argList += '-Simulado' }
-
-if ($FileServer) {
-    $argList += '-FileServer'
-    $argList += $FileServer
-}
-
-if ($Cliente) {
-    $argList += '-Cliente'
-    $argList += $Cliente
-}
+# -------------------------------
 # Configuração da janela
-$winStyle = if ($NoWindow) {
-    'Hidden'
-} elseif ($Maximized) {
-    'Maximized'
-} else {
-    'Normal'
-}
+# -------------------------------
+$winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } else { 'Normal' }
 
+# -------------------------------
 # Log do comando final para debug
-Write-Host "Comando final:" -ForegroundColor Yellow
+# -------------------------------
+Show-Header "Comando final:" -Color Yellow
 Write-Host "$PwshPath $($argList -join ' ')" -ForegroundColor Cyan
 
+# -------------------------------
 # Execução do Guardian
+# -------------------------------
 Push-Location $workDir
 try {
     & $PwshPath @argList
+    Show-Header "Guardian executado com sucesso!" -Color Green
 } catch {
     Fail "Falha ao iniciar o Guardian.ps1: $($_.Exception.Message)"
 }

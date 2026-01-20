@@ -1,33 +1,63 @@
 
 <#
 .SYNOPSIS
-    Verifica e corrige Winget, instala PowerShell 7, ajusta PATH, cria alias, restaura politicas e valida associacao .ps1.
+    Verifica e corrige Winget, instala PowerShell 7, ajusta PATH, cria alias, restaura políticas e valida associação .ps1.
 .DESCRIPTION
-    Script corporativo com saida limpa e resumo final.
+    Script corporativo com saída limpa e resumo final.
 .NOTES
     Autor: [Seu Nome]
     Data: 19/01/2026
 #>
 
+# -------------------------------
+# Função para cabeçalho estilizado
+# -------------------------------
+function Show-Header {
+    param(
+        [string]$Text,
+        [ConsoleColor]$Color = 'Cyan'
+    )
+
+    $bar = '-' * ($Text.Length + 2)
+    Write-Host ""
+    Write-Host ("+$bar+") -ForegroundColor $Color
+    Write-Host ("¦ $Text ¦") -ForegroundColor $Color
+    Write-Host ("+$bar+") -ForegroundColor $Color
+    Write-Host ""
+}
+
+# -------------------------------
+# Função para mensagens simples
+# -------------------------------
 function Show-Message {
     param([string]$Message, [string]$Color = "White")
     Write-Host $Message -ForegroundColor $Color
 }
 
-# ==========================
-# Validacao de Administrador
-# ==========================
-if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
-    Show-Message "ERRO: Este script precisa ser executado como ADMINISTRADOR para aplicar todas as configuracoes." "Red"
-    Show-Message "DICA: Clique com o botao direito no PowerShell e selecione 'Executar como administrador'." "Yellow"
-    exit
+# -------------------------------
+# Função de falha controlada
+# -------------------------------
+function Fail {
+    param ([string]$Message)
+    Show-Header $Message -Color Red
+    Write-Host "O script será encerrado em 5 segundos..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 5
+    exit 1
 }
 
-# Variaveis de status
+# ==========================
+# Validação de Administrador
+# ==========================
+if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    Fail "ERRO: Este script precisa ser executado como ADMINISTRADOR para aplicar todas as configurações.
+DICA: Clique com o botão direito no PowerShell e selecione 'Executar como administrador'."
+}
+
+# Variáveis de status
 $WingetStatus = $PowerShellStatus = $PathStatus = $AliasStatus = $AssocStatus = $PolicyStatus = "FALHOU"
 
 # ==========================
-# Funcoes Winget
+# Funções Winget
 # ==========================
 function Test-Winget {
     try {
@@ -52,33 +82,33 @@ function Install-Winget {
 }
 
 # ==========================
-# Execucao Winget
+# Execução Winget
 # ==========================
-Show-Message "===== Verificando Winget =====" "Cyan"
+Show-Header "Verificando Winget" -Color Cyan
 if (-not (Test-Winget)) {
-    Show-Message "Winget com problemas. Reparando..." "Yellow"
+    Show-Header "Winget com problemas. Reparando..." -Color Yellow
     Remove-Winget
     Install-Winget
 }
 if (Test-Winget) {
-    Show-Message "Winget OK" "Green"
+    Show-Header "Winget OK" -Color Green
     $WingetStatus = "OK"
 } else {
-    Show-Message "Winget falhou" "Red"
+    Fail "Winget falhou"
 }
 
 # ==========================
 # Instala PowerShell 7
 # ==========================
-Show-Message "===== Instalando PowerShell 7 =====" "Cyan"
+Show-Header "Instalando PowerShell 7" -Color Cyan
 winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
 $pwshPath = "C:\Program Files\PowerShell\7\pwsh.exe"
 Start-Sleep -Seconds 5
 if (Test-Path $pwshPath) {
-    Show-Message "PowerShell 7 OK" "Green"
+    Show-Header "PowerShell 7 OK" -Color Green
     $PowerShellStatus = "OK"
 } else {
-    Show-Message "PowerShell nao encontrado" "Red"
+    Fail "PowerShell não encontrado"
 }
 
 # ==========================
@@ -88,10 +118,10 @@ $envPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
 if ($envPath -notlike "*PowerShell\7*") {
     $newPath = "$envPath;$($pwshPath.Substring(0,$pwshPath.LastIndexOf('\')))"
     [System.Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
-    Show-Message "PATH atualizado" "Green"
+    Show-Header "PATH atualizado" -Color Green
     $PathStatus = "OK"
 } else {
-    Show-Message "PATH ja contem PowerShell 7" "Yellow"
+    Show-Header "PATH já contém PowerShell 7" -Color Yellow
     $PathStatus = "OK"
 }
 
@@ -104,52 +134,49 @@ try {
         New-Item -ItemType File -Path $profilePath -Force
     }
     Add-Content -Path $profilePath -Value "Set-Alias powershell '$pwshPath'"
-    Show-Message "Alias criado no perfil do PowerShell" "Green"
+    Show-Header "Alias criado no perfil do PowerShell" -Color Green
     $AliasStatus = "OK"
 } catch {
-    Show-Message "Erro ao criar alias" "Red"
+    Fail "Erro ao criar alias"
 }
 
 # ==========================
-# Associacao .ps1
+# Associação .ps1
 # ==========================
-Show-Message "Associando arquivos .ps1 ao PowerShell 7..." "Yellow"
+Show-Header "Associando arquivos .ps1 ao PowerShell 7..." -Color Yellow
 
 Start-Process -FilePath "cmd.exe" -ArgumentList '/c assoc .ps1=Microsoft.PowerShellScript.1' -NoNewWindow -Wait
 
-# Comando ftype concatenado corretamente
 $ftypeCmd = '/c ftype Microsoft.PowerShellScript.1="' + $pwshPath + '" -NoExit -Command "%1"'
 Start-Process -FilePath "cmd.exe" -ArgumentList $ftypeCmd -NoNewWindow -Wait
 
-# Validacao
 $assocResult = cmd /c assoc .ps1
 $ftypeResult = cmd /c ftype Microsoft.PowerShellScript.1
 if ($assocResult -like "*.ps1=*Microsoft.PowerShellScript.1*" -and $ftypeResult -like "*pwsh.exe*") {
-    Show-Message "Associacao .ps1 OK" "Green"
+    Show-Header "Associação .ps1 OK" -Color Green
     $AssocStatus = "OK"
 } else {
-    Show-Message "Associacao falhou" "Red"
+    Fail "Associação falhou"
 }
 
 # ==========================
-# Restaurar politicas
+# Restaurar políticas
 # ==========================
 Set-ExecutionPolicy Undefined -Scope LocalMachine -Force
 Set-ExecutionPolicy Undefined -Scope CurrentUser -Force
 Set-ExecutionPolicy Undefined -Scope Process -Force
 Set-ExecutionPolicy RemoteSigned -Force
-Show-Message "Politicas restauradas" "Green"
+Show-Header "Políticas restauradas" -Color Green
 $PolicyStatus = "OK"
 
 # ==========================
 # Resumo Final
 # ==========================
-Show-Message "`n===== RESUMO FINAL =====" "Cyan"
+Show-Header "===== RESUMO FINAL =====" -Color Cyan
 Show-Message "Winget: $WingetStatus" "Green"
 Show-Message "PowerShell 7: $PowerShellStatus" "Green"
 Show-Message "PATH: $PathStatus" "Green"
 Show-Message "Alias: $AliasStatus" "Green"
-Show-Message "Associacao .ps1: $AssocStatus" "Green"
-Show-Message "Politicas: $PolicyStatus" "Green"
-Show-Message "Script concluido com sucesso!" "Green"
-
+Show-Message "Associação .ps1: $AssocStatus" "Green"
+Show-Message "Políticas: $PolicyStatus" "Green"
+Show-Header "Script concluído com sucesso!" -Color Green
