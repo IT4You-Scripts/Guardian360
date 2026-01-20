@@ -835,11 +835,13 @@ foreach ($phase in $Phases) {
 
   # 6) Resumo final
   Write-Host ""
+  Write-Host "=================================================================================================" -ForegroundColor DarkGray
+  Write-Host ""
   Show-Header -Text 'Resumo da Manutenção Automatizada'
   Write-Host ""
 
-  Write-Host ("Cliente: {0}{1}{2}" -f $Cyan, $Cliente, $Reset)
-  Write-Host ""
+  #Write-Host ("Cliente: {0}{1}{2}" -f $Cyan, $Cliente, $Reset)
+  #Write-Host ""
   
   $maxLabel = 0
   foreach ($r in $global:Results) { if ($r.Etapa.Length -gt $maxLabel) { $maxLabel = $r.Etapa.Length } }
@@ -877,6 +879,10 @@ Write-Host ("{0}Arquivo de log:{1} {2}" -f $Gray, $Reset, $logFile)
 Write-Host ""
 Write-Report ""
 Write-Report ("Arquivo de log: {0}" -f $logFile)
+
+
+Write-Host ""
+Write-Host "=================================================================================================" -ForegroundColor DarkGray
 
 # Fecha a tela gráfica do Guardian ao terminar o script, se estiver aberta
 
