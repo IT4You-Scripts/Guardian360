@@ -1,34 +1,33 @@
-Ôªø
+
 <#
 .SYNOPSIS
-    Verifica e corrige Winget, instala PowerShell 7, ajusta PATH, cria alias, restaura pol√≠ticas e valida associa√ß√£oo .ps1.
+    Verifica e corrige Winget, instala PowerShell 7, ajusta PATH, cria alias, restaura polÌticas e valida associaÁ„o .ps1.
 .DESCRIPTION
-    Script corporativo com sa√≠da limpa e resumo final.
+    Script corporativo com saÌda limpa e resumo final.
 .NOTES
     Autor: [Seu Nome]
     Data: 19/01/2026
 #>
 
 # -------------------------------
-# Fun√ß√£o para cabe√ßalho estilizado
+# FunÁ„o para cabeÁalho estilizado
 # -------------------------------
-
 function Show-Header {
     param(
         [string]$Text,
         [ConsoleColor]$Color = 'Cyan'
     )
 
-    $bar = '‚îÄ' * ($Text.Length + 2)
+    $bar = '-' * ($Text.Length + 2)
     Write-Host ""
-    Write-Host ("‚îå$bar‚îê") -ForegroundColor $Color
-    Write-Host ("‚îÇ $Text ‚îÇ") -ForegroundColor $Color
-    Write-Host ("‚îî$bar‚îò") -ForegroundColor $Color
+    Write-Host ("+$bar+") -ForegroundColor $Color
+    Write-Host ("¶ $Text ¶") -ForegroundColor $Color
+    Write-Host ("+$bar+") -ForegroundColor $Color
     Write-Host ""
 }
 
 # -------------------------------
-# Fun√ß√£o para mensagens simples
+# FunÁ„o para mensagens simples
 # -------------------------------
 function Show-Message {
     param([string]$Message, [string]$Color = "White")
@@ -36,29 +35,29 @@ function Show-Message {
 }
 
 # -------------------------------
-# Fun√ß√£o de falha controlada
+# FunÁ„o de falha controlada
 # -------------------------------
 function Fail {
     param ([string]$Message)
     Show-Header $Message -Color Red
-    Write-Host "O script ser√° encerrado em 5 segundos..." -ForegroundColor Yellow
+    Write-Host "O script ser· encerrado em 5 segundos..." -ForegroundColor Yellow
     Start-Sleep -Seconds 5
     exit 1
 }
 
 # ==========================
-# Valida√ß√£o de Administrador
+# ValidaÁ„o de Administrador
 # ==========================
 if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
-    Fail "ERRO: Este script precisa ser executado como ADMINISTRADOR para aplicar todas as configura√ß√µes.
-DICA: Clique com o bot√£o direito no PowerShell e selecione 'Executar como administrador'."
+    Fail "ERRO: Este script precisa ser executado como ADMINISTRADOR para aplicar todas as configuraÁıes.
+DICA: Clique com o bot„o direito no PowerShell e selecione 'Executar como administrador'."
 }
 
-# Vari√°veis de status
+# Vari·veis de status
 $WingetStatus = $PowerShellStatus = $PathStatus = $AliasStatus = $AssocStatus = $PolicyStatus = "FALHOU"
 
 # ==========================
-# Fun√ß√µes Winget
+# FunÁıes Winget
 # ==========================
 function Test-Winget {
     try {
@@ -83,7 +82,7 @@ function Install-Winget {
 }
 
 # ==========================
-# Execu√ß√£o do Winget
+# ExecuÁ„o Winget
 # ==========================
 Show-Header "Verificando Winget" -Color Cyan
 if (-not (Test-Winget)) {
@@ -109,7 +108,7 @@ if (Test-Path $pwshPath) {
     Show-Header "PowerShell 7 OK" -Color Green
     $PowerShellStatus = "OK"
 } else {
-    Fail "PowerShell n√£o encontrado"
+    Fail "PowerShell n„o encontrado"
 }
 
 # ==========================
@@ -122,7 +121,7 @@ if ($envPath -notlike "*PowerShell\7*") {
     Show-Header "PATH atualizado" -Color Green
     $PathStatus = "OK"
 } else {
-    Show-Header "PATH j√° cont√©m PowerShell 7" -Color Yellow
+    Show-Header "PATH j· contÈm PowerShell 7" -Color Yellow
     $PathStatus = "OK"
 }
 
@@ -142,7 +141,7 @@ try {
 }
 
 # ==========================
-# Associa√ß√£o .ps1
+# AssociaÁ„o .ps1
 # ==========================
 Show-Header "Associando arquivos .ps1 ao PowerShell 7..." -Color Yellow
 
@@ -154,20 +153,20 @@ Start-Process -FilePath "cmd.exe" -ArgumentList $ftypeCmd -NoNewWindow -Wait
 $assocResult = cmd /c assoc .ps1
 $ftypeResult = cmd /c ftype Microsoft.PowerShellScript.1
 if ($assocResult -like "*.ps1=*Microsoft.PowerShellScript.1*" -and $ftypeResult -like "*pwsh.exe*") {
-    Show-Header "Associa√ß√£o .ps1 OK" -Color Green
+    Show-Header "AssociaÁ„o .ps1 OK" -Color Green
     $AssocStatus = "OK"
 } else {
-    Fail "Associa√ß√£o falhou"
+    Fail "AssociaÁ„o falhou"
 }
 
 # ==========================
-# Restaurar pol√≠ticas
+# Restaurar polÌticas
 # ==========================
 Set-ExecutionPolicy Undefined -Scope LocalMachine -Force
 Set-ExecutionPolicy Undefined -Scope CurrentUser -Force
 Set-ExecutionPolicy Undefined -Scope Process -Force
 Set-ExecutionPolicy RemoteSigned -Force
-Show-Header "Pol√≠ticas restauradas" -Color Green
+Show-Header "PolÌticas restauradas" -Color Green
 $PolicyStatus = "OK"
 
 # ==========================
@@ -178,6 +177,6 @@ Show-Message "Winget: $WingetStatus" "Green"
 Show-Message "PowerShell 7: $PowerShellStatus" "Green"
 Show-Message "PATH: $PathStatus" "Green"
 Show-Message "Alias: $AliasStatus" "Green"
-Show-Message "Associa√ß√£o .ps1: $AssocStatus" "Green"
-Show-Message "Pol√≠ticas: $PolicyStatus" "Green"
-Show-Header "Script conclu√≠do com sucesso!" -Color Green
+Show-Message "AssociaÁ„o .ps1: $AssocStatus" "Green"
+Show-Message "PolÌticas: $PolicyStatus" "Green"
+Show-Header "Script concluÌdo com sucesso!" -Color Green

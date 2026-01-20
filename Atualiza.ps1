@@ -101,7 +101,7 @@ foreach ($File in $Files) {
 }
 
 # Se chegou até aqui, tudo certo
-Show-Header "✅ Atualização concluída com sucesso!" -Color Green
+Show-Header "Atualização concluída com sucesso!" -Color Green
 exit 0
 
 #endregion
