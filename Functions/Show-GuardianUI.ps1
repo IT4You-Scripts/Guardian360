@@ -79,7 +79,6 @@ function Show-GuardianUI {
     $inline2 = New-Object Windows.Documents.Run("(11) 9.7191-1500")
     $inline2.Foreground = '#90EE90'
     $textBlock.Inlines.Add($inline2)
-    #$textBlock.Inlines.Add("`n`n")
     $textBlock.Inlines.Add("   E-mail: ")
     $inline3 = New-Object Windows.Documents.Run("suporte@it4you.com.br")
     $inline3.Foreground = '#90EE90'
@@ -107,7 +106,7 @@ function Show-GuardianUI {
     # Barra de progresso
     $progressBar = New-Object Windows.Controls.ProgressBar
     $progressBar.Height = 5
-    $progressBar.Margin = '40'
+    $progressBar.Margin = '20'
     $progressBar.Minimum = 0
     $progressBar.Maximum = 9
     $progressBar.Value = 0
