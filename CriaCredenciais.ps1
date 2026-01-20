@@ -31,7 +31,7 @@ try {
 
 # Criptografa a senha usando DPAPI (escopo: usuário atual)
 try {
-    $encryptedPassword = ConvertFrom-SecureString -SecureString $cred.Password
+    $encryptedPassword = ConvertFrom-SecureString -SecureString $cred.Password -Scope LocalMachine
 } catch {
     Write-Host "Erro ao criptografar senha: $($_.Exception.Message)"
     exit 1
