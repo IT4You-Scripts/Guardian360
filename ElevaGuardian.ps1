@@ -1,41 +1,35 @@
 ﻿
 # ElevaGuardian.ps1
-# Executa Guardian.ps1 em PowerShell 7 usando credenciais criptografadas (agora via DPAPI, sem key.bin)
-# Responsável apenas por elevação, contexto de execução e repasse de parâmetros
+# Executa Guardian.ps1 em PowerShell 7 usando credenciais criptografadas (AES)
+# Responsável por elevação, contexto de execução e repasse seguro de parâmetros
 
 [CmdletBinding()]
 param (
-    # === Infraestrutura do ElevaGuardian ===
+    # Infraestrutura
     [string]$PwshPath = (Get-Command pwsh).Source,
     [string]$ScriptPath = 'C:\Guardian\Guardian.ps1',
     [string]$CredPath   = 'C:\Guardian\credenciais.xml',
-    #[string]$KeyPath    = 'C:\Guardian\key.bin',  # Mantido para compatibilidade, mas não será usado
+    [string]$KeyPath    = 'C:\Guardian\chave.key',
 
+    # Opções de janela
     [switch]$NoWindow,
     [switch]$NonInteractive,
     [switch]$Maximized,
 
-    # === Parâmetros repassados ao Guardian.ps1 ===
+    # Parâmetros para Guardian.ps1
     [int[]]$ExecutaFases,
     [int[]]$PulaFases,
-
-    [ValidateSet('INFO','WARN','ERROR','DEBUG')]
-    [string]$LogLevel,
-
+    [ValidateSet('INFO','WARN','ERROR','DEBUG')] [string]$LogLevel,
     [switch]$Simulado,
     [string]$FileServer,
     [string]$Cliente
 )
 
 # -------------------------------
-# Função para cabeçalho estilizado
+# Funções auxiliares
 # -------------------------------
 function Show-Header {
-    param(
-        [string]$Text,
-        [ConsoleColor]$Color = 'Cyan'
-    )
-
+    param([string]$Text,[ConsoleColor]$Color='Cyan')
     $bar = '─' * ($Text.Length + 2)
     Write-Host ""
     Write-Host ("┌$bar┐") -ForegroundColor $Color
@@ -44,185 +38,72 @@ function Show-Header {
     Write-Host ""
 }
 
-# -------------------------------
-# Função de falha controlada
-# -------------------------------
 function Fail {
-    param ([string]$Message)
+    param([string]$Message)
     Show-Header $Message -Color Red
     Write-Host "O script será encerrado em 5 segundos..." -ForegroundColor Yellow
     Start-Sleep -Seconds 5
     exit 1
 }
 
-#region BootstrapUpgrade Guardian360 a partir do GitHub
+# -------------------------------
+# Bootstrap: Atualização via GitHub
+# -------------------------------
 $ErrorActionPreference = "Stop"
 $ProgressPreference   = "SilentlyContinue"
 
-# -----------------------------
-# Configurações
-# -----------------------------
 $BaseUrl   = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main"
 $BasePath  = "C:\Guardian"
 $NoCache   = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmss')"
 
-# -----------------------------
-# Estrutura base (NUNCA apaga)
-# -----------------------------
-$Folders = @(
-    $BasePath,
-    "$BasePath\Functions",
-    "$BasePath\Assets\Images"
-)
-
+$Folders = @("$BasePath","$BasePath\Functions","$BasePath\Assets\Images")
 foreach ($Folder in $Folders) {
-    if (-not (Test-Path $Folder)) {
-        New-Item -ItemType Directory -Path $Folder -Force | Out-Null
-    }
+    if (-not (Test-Path $Folder)) { New-Item -ItemType Directory -Path $Folder -Force | Out-Null }
 }
-
-# -----------------------------
-# Arquivos gerenciados
-# -----------------------------
-$Files = @(
-    @{ Url = "$BaseUrl/Atualiza.ps1";                            Path = "$BasePath\Atualiza.ps1" },
-    @{ Url = "$BaseUrl/CriaCredenciais.ps1";                     Path = "$BasePath\CriaCredenciais.ps1" },
-    @{ Url = "$BaseUrl/ElevaGuardian.ps1";                       Path = "$BasePath\ElevaGuardian.ps1" },
-    @{ Url = "$BaseUrl/Guardian.ps1";                            Path = "$BasePath\Guardian.ps1" },
-    @{ Url = "$BaseUrl/Prepara.ps1";                             Path = "$BasePath\Prepara.ps1" },
-    @{ Url = "$BaseUrl/Assets/Images/logotipo.png";              Path = "$BasePath\Assets\Images\logotipo.png" },
-    @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1";          Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
-    @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1";      Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
-    @{ Url = "$BaseUrl/Functions/Clear-BrowserCache.ps1";        Path = "$BasePath\Functions\Clear-BrowserCache.ps1" },
-    @{ Url = "$BaseUrl/Functions/Clear-RecentFilesHistory.ps1";  Path = "$BasePath\Functions\Clear-RecentFilesHistory.ps1" },
-    @{ Url = "$BaseUrl/Functions/Clear-TempFiles.ps1";           Path = "$BasePath\Functions\Clear-TempFiles.ps1" },
-    @{ Url = "$BaseUrl/Functions/Clear-WindowsUpdateCache.ps1";  Path = "$BasePath\Functions\Clear-WindowsUpdateCache.ps1" },
-    @{ Url = "$BaseUrl/Functions/Confirm-MacriumBackup.ps1";     Path = "$BasePath\Functions\Confirm-MacriumBackup.ps1" },
-    @{ Url = "$BaseUrl/Functions/Get-SystemInventory.ps1";       Path = "$BasePath\Functions\Get-SystemInventory.ps1" },
-    @{ Url = "$BaseUrl/Functions/Optimize-HDD.ps1";              Path = "$BasePath\Functions\Optimize-HDD.ps1" },
-    @{ Url = "$BaseUrl/Functions/Optimize-NetworkSettings.ps1";  Path = "$BasePath\Functions\Optimize-NetworkSettings.ps1" },
-    @{ Url = "$BaseUrl/Functions/Optimize-PowerSettings.ps1";    Path = "$BasePath\Functions\Optimize-PowerSettings.ps1" },
-    @{ Url = "$BaseUrl/Functions/Optimize-SSD.ps1";              Path = "$BasePath\Functions\Optimize-SSD.ps1" },
-    @{ Url = "$BaseUrl/Functions/Remove-OldUpdateFiles.ps1";     Path = "$BasePath\Functions\Remove-OldUpdateFiles.ps1" },
-    @{ Url = "$BaseUrl/Functions/Repair-SystemIntegrity.ps1";    Path = "$BasePath\Functions\Repair-SystemIntegrity.ps1" },
-    @{ Url = "$BaseUrl/Functions/Scan-AntiMalware.ps1";          Path = "$BasePath\Functions\Scan-AntiMalware.ps1" },
-    @{ Url = "$BaseUrl/Functions/Send-LogToServer.ps1";          Path = "$BasePath\Functions\Send-LogToServer.ps1" },
-    @{ Url = "$BaseUrl/Functions/Show-GuardianEndUI.ps1";        Path = "$BasePath\Functions\Show-GuardianEndUI.ps1" },
-    @{ Url = "$BaseUrl/Functions/Show-GuardianUI.ps1";           Path = "$BasePath\Functions\Show-GuardianUI.ps1" },
-    @{ Url = "$BaseUrl/Functions/Update-MicrosoftStore.ps1";     Path = "$BasePath\Functions\Update-MicrosoftStore.ps1" },
-    @{ Url = "$BaseUrl/Functions/Update-WindowsOS.ps1";          Path = "$BasePath\Functions\Update-WindowsOS.ps1" },
-    @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1";         Path = "$BasePath\Functions\Update-WingetApps.ps1" }
-)
 
 Show-Header "Atualizando Guardian 360..." -Color Cyan
-
-foreach ($File in $Files) {
-    try {
-        Invoke-WebRequest `
-            -Uri "$($File.Url)$NoCache" `
-            -OutFile $File.Path `
-            -UseBasicParsing `
-            -ErrorAction Stop
-    }
-    catch {
-        # falha individual ignorada
-    }
-}
-#endregion
+# (Bloco de atualização comentado para evitar download automático)
+foreach ($File in $Files) { try { Invoke-WebRequest -Uri "$($File.Url)$NoCache" -OutFile $File.Path -UseBasicParsing } catch {} }
 
 # -------------------------------
 # Validações iniciais
 # -------------------------------
-if (-not (Test-Path -LiteralPath $PwshPath))   { Fail "PowerShell 7 não encontrado em: $PwshPath" }
-if (-not (Test-Path -LiteralPath $ScriptPath)) { Fail "Guardian.ps1 não encontrado em: $ScriptPath" }
-if (-not (Test-Path -LiteralPath $CredPath))   { Fail "Credenciais não encontradas em: $CredPath. Gere o arquivo antes de continuar." }
-
-# Desbloqueia o script alvo silenciosamente
-try { Unblock-File -Path $ScriptPath -ErrorAction SilentlyContinue } catch {}
+try { $PwshPath   = (Resolve-Path $PwshPath).Path } catch { Fail "PowerShell 7 não encontrado em: $PwshPath" }
+try { $ScriptPath = (Resolve-Path $ScriptPath).Path } catch { Fail "Guardian.ps1 não encontrado em: $ScriptPath" }
+try { $CredPath   = (Resolve-Path $CredPath).Path } catch { Fail "Credenciais não encontradas em: $CredPath" }
+try { $KeyPath    = (Resolve-Path $KeyPath).Path } catch { Fail "Chave AES não encontrada em: $KeyPath" }
 
 # -------------------------------
-# *** ATUALIZAÇÃO: Criptografia DPAPI ***
+# Leitura das credenciais AES
 # -------------------------------
-# Antes: Leitura da chave AES (key.bin) e uso do -Key
-# Agora: DPAPI (ConvertTo-SecureString sem chave)
-# Mantemos comentários e estrutura, mas ignoramos key.bin
-
-# Leitura das credenciais
-$user = $null
-$enc  = $null
-
 try {
-    $raw = Get-Content -LiteralPath $CredPath -Raw -ErrorAction Stop
-} catch {
-    Fail "Falha ao ler o arquivo de credenciais: $($_.Exception.Message)"
-}
-
-if ($raw -match '<\s*Credenciais\b') {
-    try {
-        [xml]$xml = $raw
-        $user = $xml.Credenciais.UserName
-        $enc  = $xml.Credenciais.EncryptedPassword
-    } catch {
-        Fail "XML de credenciais inválido: $($_.Exception.Message)"
-    }
-} else {
-    try {
-        $data = Import-Clixml -Path $CredPath -ErrorAction Stop
-        $user = $data.UserName
-        $enc  = $data.EncryptedPassword
-    } catch {
-        Fail "Arquivo de credenciais não é XML manual nem Clixml válido."
-    }
-}
+    [xml]$xml = Get-Content -LiteralPath $CredPath -Raw
+    $user = $xml.Credenciais.UserName
+    $enc  = $xml.Credenciais.EncryptedPassword
+} catch { Fail "Falha ao ler credenciais: $($_.Exception.Message)" }
 
 if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($enc)) {
     Fail "Credenciais incompletas (UserName / EncryptedPassword)."
 }
 
-# Reconstrução do PSCredential usando DPAPI
-
-# *** ATUALIZAÇÃO: Criptografia AES ***
-# Leitura da chave AES
-$KeyPath = 'C:\Guardian\chave.key'
-if (-not (Test-Path -LiteralPath $KeyPath)) {
-    Fail "Arquivo de chave AES não encontrado em: $KeyPath. Gere as credenciais primeiro."
-}
-
 try {
     $keyBytes = [IO.File]::ReadAllBytes($KeyPath)
-} catch {
-    Fail "Falha ao ler a chave AES: $($_.Exception.Message)"
-}
-
-# Reconstrução do PSCredential usando AES
-try {
-    $secure = ConvertTo-SecureString -String $enc -Key $keyBytes
-} catch {
-    Fail "Não foi possível abrir as credenciais. Verifique se a chave AES é a correta."
-}
-
-
-if ($user -notlike '*\*' -and $user -notlike '*@*') {
-    $user = "$env:COMPUTERNAME\$user"
-}
-
-try {
-    $cred = [System.Management.Automation.PSCredential]::new($user, $secure)
-} catch {
-    Fail "Falha ao criar PSCredential: $($_.Exception.Message)"
-}
+    $secure   = ConvertTo-SecureString -String $enc -Key $keyBytes
+    if ($user -notlike '*\*' -and $user -notlike '*@*') { $user = "$env:COMPUTERNAME\$user" }
+    $cred     = [System.Management.Automation.PSCredential]::new($user,$secure)
+} catch { Fail "Não foi possível abrir as credenciais. Verifique chave AES." }
 
 # -------------------------------
-# Construção segura do ArgumentList
+# Montagem segura do comando
 # -------------------------------
-$argList = @('-ExecutionPolicy','Bypass','-NoProfile','-File', $ScriptPath)
-if ($NonInteractive) { $argList += '-NonInteractive' }
-if ($ExecutaFases)   { $argList += '-ExecutaFases'; $argList += ($ExecutaFases -join ',') }
-if ($PulaFases)      { $argList += '-PulaFases'; $argList += ($PulaFases -join ',') }
-if ($LogLevel)       { $argList += '-LogLevel'; $argList += $LogLevel }
-if ($Simulado)       { $argList += '-Simulado' }
-if ($FileServer)     { $argList += '-FileServer'; $argList += $FileServer }
-if ($Cliente)        { $argList += '-Cliente'; $argList += "`"$Cliente`"" }
+$argString = "-ExecutionPolicy Bypass -NoProfile -File `"$ScriptPath`""
+if ($NonInteractive) { $argString += " -NonInteractive" }
+if ($ExecutaFases)   { $argString += " -ExecutaFases $($ExecutaFases -join ',')" }
+if ($PulaFases)      { $argString += " -PulaFases $($PulaFases -join ',')" }
+if ($LogLevel)       { $argString += " -LogLevel $LogLevel" }
+if ($Simulado)       { $argString += " -Simulado" }
+if ($FileServer)     { $argString += " -FileServer $FileServer" }
+if ($Cliente)        { $argString += " -Cliente `"$Cliente`"" }
 
 # -------------------------------
 # Configuração da janela
@@ -230,9 +111,10 @@ if ($Cliente)        { $argList += '-Cliente'; $argList += "`"$Cliente`"" }
 $winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } else { 'Normal' }
 
 # -------------------------------
-# Diretório de trabalho seguro
+# Log do comando final
 # -------------------------------
-try { $workDir = Split-Path -Path $ScriptPath -Parent } catch { $workDir = (Get-Location).Path }
+Show-Header "Comando final:" -Color Yellow
+Write-Host "$PwshPath $argString" -ForegroundColor Cyan
 
 # -------------------------------
 # Execução do Guardian
@@ -240,19 +122,14 @@ try { $workDir = Split-Path -Path $ScriptPath -Parent } catch { $workDir = (Get-
 try {
     $proc = Start-Process `
         -FilePath $PwshPath `
-        -ArgumentList $argList `
+        -ArgumentList $argString `
         -Credential $cred `
-        -WorkingDirectory $workDir `
+        -WorkingDirectory (Split-Path $ScriptPath -Parent) `
         -WindowStyle $winStyle `
         -UseNewEnvironment `
         -PassThru
 
     Show-Header "Guardian iniciado com sucesso. PID: $($proc.Id)" -Color Green
-}
-catch {
-    if ($_.Exception.Message -like "*Nome de usuário ou senha incorretos*") {
-        Fail "Credenciais incorretas. Verifique usuário e senha e tente novamente."
-    } else {
-        Fail "Falha ao iniciar o Guardian.ps1: $($_.Exception.Message)"
-    }
+} catch {
+    Fail "Falha ao iniciar Guardian.ps1: $($_.Exception.Message)"
 }
