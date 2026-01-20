@@ -769,6 +769,14 @@ if ($global:GuardianProgressBar) {
 # Contador de passos concluídos
 $CurrentStep = 0
 
+
+ Write-Host ""
+ Write-Host ("► Cliente: {0}" -f $Cliente)
+
+ Write-Report ""
+ Write-Report ("Cliente: {0}" -f $Cliente)
+
+
 # === Loop principal com atualização da UI ===
 foreach ($phase in $Phases) {
     $id = [int]$phase.Id
@@ -839,8 +847,7 @@ foreach ($phase in $Phases) {
   Write-Report ""
   Write-Report "Resumo da Manutenção Automatizada"
   Write-Report ""
-  Write-Report ("Cliente: {0}" -f $Cliente)
-  Write-Report ""
+
   
   foreach ($r in $global:Results) {
     $statusPlain = if ($r.Sucesso) { 'OK' } else { 'ALERTA' }
