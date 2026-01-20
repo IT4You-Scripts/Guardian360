@@ -771,7 +771,7 @@ $CurrentStep = 0
 
 
  Write-Host ""
- Write-Host ("► Cliente: {0}" -f $Cliente)
+ Write-Host ("► Cliente: {0}{1}{2}" -f $Cyan, $Cliente, $Reset)
 
  Write-Report ""
  Write-Report ("Cliente: {0}" -f $Cliente)
