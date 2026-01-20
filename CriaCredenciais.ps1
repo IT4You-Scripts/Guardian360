@@ -1,10 +1,11 @@
 ﻿
-# Script: CriaCredenciais_DPAPI.ps1
-# Descrição: Criptografa credenciais usando DPAPI (sem chave manual) e salva em XML.
+# Script: CriaCredenciais_AES.ps1
+# Descrição: Criptografa credenciais usando AES (com chave) e salva em XML.
 
 # Caminhos
 $Folder   = 'C:\Guardian'
 $CredPath = 'C:\Guardian\credenciais.xml'
+$KeyPath  = 'C:\Guardian\chave.key'
 
 # Garante que a pasta existe
 if (-not (Test-Path $Folder)) {
@@ -29,9 +30,19 @@ try {
     exit 1
 }
 
-# Criptografa a senha usando DPAPI (escopo: usuário atual)
+# Gera chave AES (32 bytes) se não existir
+if (-not (Test-Path $KeyPath)) {
+    $key = New-Object Byte[] 32
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($key)
+    [IO.File]::WriteAllBytes($KeyPath, $key)
+    Write-Host "Chave AES gerada e salva em $KeyPath."
+} else {
+    $key = [IO.File]::ReadAllBytes($KeyPath)
+}
+
+# Criptografa a senha usando AES
 try {
-    $encryptedPassword = ConvertFrom-SecureString -SecureString $cred.Password -Scope LocalMachine
+    $encryptedPassword = ConvertFrom-SecureString -SecureString $cred.Password -Key $key
 } catch {
     Write-Host "Erro ao criptografar senha: $($_.Exception.Message)"
     exit 1

@@ -180,13 +180,27 @@ if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($enc)) 
 }
 
 # Reconstrução do PSCredential usando DPAPI
-try {
-    # Antes: $secure = ConvertTo-SecureString -String $enc -Key $keyBytes
-    # Agora: DPAPI (sem chave)
-    $secure = ConvertTo-SecureString -String $enc
-} catch {
-    Fail "Não foi possível abrir as credenciais. Elas precisam ser criadas pelo mesmo usuário que está executando este script."
+
+# *** ATUALIZAÇÃO: Criptografia AES ***
+# Leitura da chave AES
+$KeyPath = 'C:\Guardian\chave.key'
+if (-not (Test-Path -LiteralPath $KeyPath)) {
+    Fail "Arquivo de chave AES não encontrado em: $KeyPath. Gere as credenciais primeiro."
 }
+
+try {
+    $keyBytes = [IO.File]::ReadAllBytes($KeyPath)
+} catch {
+    Fail "Falha ao ler a chave AES: $($_.Exception.Message)"
+}
+
+# Reconstrução do PSCredential usando AES
+try {
+    $secure = ConvertTo-SecureString -String $enc -Key $keyBytes
+} catch {
+    Fail "Não foi possível abrir as credenciais. Verifique se a chave AES é a correta."
+}
+
 
 if ($user -notlike '*\*' -and $user -notlike '*@*') {
     $user = "$env:COMPUTERNAME\$user"
