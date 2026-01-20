@@ -185,7 +185,7 @@ try {
     # Agora: DPAPI (sem chave)
     $secure = ConvertTo-SecureString -String $enc
 } catch {
-    Fail "Falha ao descriptografar a senha via DPAPI."
+    Fail "Não foi possível abrir as credenciais. Elas precisam ser criadas pelo mesmo usuário que está executando este script."
 }
 
 if ($user -notlike '*\*' -and $user -notlike '*@*') {
