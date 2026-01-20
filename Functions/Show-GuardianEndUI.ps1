@@ -11,8 +11,8 @@
     # Janela principal
     $window = New-Object Windows.Window
     $window.Title = $Title
-    $window.Width = 1200
-    $window.Height = 900
+    $window.Width = 1100
+    $window.Height = 800
     $window.WindowStartupLocation = 'CenterScreen'
     $window.Background = 'Black'
     $window.Topmost = $true
@@ -42,7 +42,7 @@
     if (Test-Path $LogoPath) {
         $img = New-Object Windows.Controls.Image
         $img.Source = New-Object Windows.Media.Imaging.BitmapImage([Uri]$LogoPath)
-        $img.Width = '1150'
+        $img.Width = '1050'
 		$img.Stretch = 'Uniform'
         $img.HorizontalAlignment = 'Left'
         $img.VerticalAlignment = 'Center'
@@ -92,9 +92,9 @@
     $inlineTel = New-Object Windows.Documents.Run("(11) 9.7191-1500")
     $inlineTel.Foreground = '#90EE90'
     $textBlock.Inlines.Add($inlineTel)
-    $textBlock.Inlines.Add("`n`n")
+    # $textBlock.Inlines.Add("`n`n")
 
-    $textBlock.Inlines.Add("E-mail: ")
+    $textBlock.Inlines.Add("   E-mail: ")
     $inlineEmail = New-Object Windows.Documents.Run("suporte@it4you.com.br")
     $inlineEmail.Foreground = '#90EE90'
     $textBlock.Inlines.Add($inlineEmail)

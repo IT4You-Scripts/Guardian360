@@ -12,8 +12,8 @@ function Show-GuardianUI {
     # Janela principal
     $window = New-Object Windows.Window
     $window.Title = $Title
-    $window.Width = 1100
-    $window.Height = 800
+    $window.Width = 1200
+    $window.Height = 900
     $window.WindowStartupLocation = 'CenterScreen'
     $window.Background = 'Black'
     $window.Topmost = $true
@@ -30,7 +30,7 @@ function Show-GuardianUI {
     # Definição das linhas
     #$rowLogo      = New-Object Windows.Controls.RowDefinition; $rowLogo.Height = '2*'
     $rowLogo      = New-Object Windows.Controls.RowDefinition; $rowLogo.Height = 'Auto'
-    $rowText      = New-Object Windows.Controls.RowDefinition; $rowText.Height = '4.0*'
+    $rowText      = New-Object Windows.Controls.RowDefinition; $rowText.Height = '4.5*'
     $rowPhase     = New-Object Windows.Controls.RowDefinition; $rowPhase.Height = '0.7*'
     $rowStep      = New-Object Windows.Controls.RowDefinition; $rowStep.Height = '0.5*'
     $rowProgress  = New-Object Windows.Controls.RowDefinition; $rowProgress.Height = '1*'
@@ -49,7 +49,7 @@ function Show-GuardianUI {
     if (Test-Path $LogoPath) {
         $img = New-Object Windows.Controls.Image
         $img.Source = New-Object Windows.Media.Imaging.BitmapImage([Uri]$LogoPath)
-        $img.Width = '1050'
+        $img.Width = '1150'
         $img.Stretch = 'Uniform'
         $img.HorizontalAlignment = 'Left'
         $img.VerticalAlignment = 'Center'
@@ -73,14 +73,15 @@ function Show-GuardianUI {
     $inline1.Foreground = '#90EE90'
     $textBlock.Inlines.Add($inline1)
     $textBlock.Inlines.Add(".`n`n")
-    $textBlock.Inlines.Add("A execução segue o calendário de vistorias agendado e comunicado por e-mail, garantindo segurança e eficiência. Utilizamos Inteligência Artificial para analisar o sistema com precisão, identificar inconsistências e aplicar soluções automatizadas adaptadas ao seu equipamento. Durante a execução, solicitamos que evite utilizar o computador, a fim de assegurar a integridade da manutenção e prevenir interferências.`n`n")
+    $textBlock.Inlines.Add("A execução segue rigorosamente o calendário de vistorias previamente agendado e comunicado por e-mail à sua empresa, garantindo segurança, transparência e eficiência. Para aprimorar ainda mais este processo, utilizamos recursos avançados de Inteligência Artificial, que permitem analisar o estado do sistema com maior precisão, identificar possíveis inconsistências e aplicar soluções automatizadas, adaptadas às necessidades específicas do seu equipamento.`n`n")
+    $textBlock.Inlines.Add("Durante a execução, solicitamos que evite utilizar o computador, a fim de assegurar a integridade da manutenção e prevenir interferências.`n`n")
     $textBlock.Inlines.Add("Em caso de dúvidas, estamos à disposição pelos canais oficiais:`n`n")
     $textBlock.Inlines.Add("Telefone/WhatsApp: ")
     $inline2 = New-Object Windows.Documents.Run("(11) 9.7191-1500")
     $inline2.Foreground = '#90EE90'
     $textBlock.Inlines.Add($inline2)
-    #$textBlock.Inlines.Add("`n`n")
-    $textBlock.Inlines.Add("   E-mail: ")
+    $textBlock.Inlines.Add("`n`n")
+    $textBlock.Inlines.Add("E-mail: ")
     $inline3 = New-Object Windows.Documents.Run("suporte@it4you.com.br")
     $inline3.Foreground = '#90EE90'
     $textBlock.Inlines.Add($inline3)
@@ -106,7 +107,7 @@ function Show-GuardianUI {
 
     # Barra de progresso
     $progressBar = New-Object Windows.Controls.ProgressBar
-    $progressBar.Height = 5
+    $progressBar.Height = 10
     $progressBar.Margin = '40'
     $progressBar.Minimum = 0
     $progressBar.Maximum = 9
