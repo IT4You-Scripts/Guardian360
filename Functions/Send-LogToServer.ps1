@@ -2,14 +2,14 @@
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$Server,
-
-        [switch]$Simulado   # <-- MANTIDO por compatibilidade
+        [string]$Server
     )
 
     Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
 
-    # Base local
+    # ------------------------------------------------------------------
+    # 1. Validação da base local
+    # ------------------------------------------------------------------
     $baseLogs = "C:\Guardian\Logs"
 
     if (-not (Test-Path $baseLogs)) {
@@ -17,61 +17,82 @@
         return
     }
 
-    # Ano mais recente
+    # ------------------------------------------------------------------
+    # 2. Ano mais recente
+    # ------------------------------------------------------------------
     $anoDir = Get-ChildItem $baseLogs -Directory |
               Sort-Object Name -Descending |
               Select-Object -First 1
 
-    if (-not $anoDir) { return }
+    if (-not $anoDir) {
+        Write-Host "Nenhum diretório de ano encontrado." -ForegroundColor Yellow
+        return
+    }
 
-    # Mês mais recente
+    # ------------------------------------------------------------------
+    # 3. Mês mais recente
+    # ------------------------------------------------------------------
     $mesDir = Get-ChildItem $anoDir.FullName -Directory |
               Sort-Object Name -Descending |
               Select-Object -First 1
 
-    if (-not $mesDir) { return }
+    if (-not $mesDir) {
+        Write-Host "Nenhum diretório de mês encontrado." -ForegroundColor Yellow
+        return
+    }
 
-    # Log mais recente
+    # ------------------------------------------------------------------
+    # 4. Log mais recente
+    # ------------------------------------------------------------------
     $log = Get-ChildItem $mesDir.FullName -Filter *.log -File |
            Sort-Object LastWriteTime -Descending |
            Select-Object -First 1
 
     if (-not $log) {
-        Write-Host "Nenhum log encontrado." -ForegroundColor Yellow
+        Write-Host "Nenhum arquivo .log encontrado." -ForegroundColor Yellow
         return
     }
 
-    # Validação DNS leve (não bloqueante)
+    # ------------------------------------------------------------------
+    # 5. Validação DNS (leve, não bloqueante)
+    # ------------------------------------------------------------------
     try {
         [void][System.Net.Dns]::GetHostEntry($Server)
     } catch {
         Write-Host "[AVISO] DNS não validado para '$Server'. Tentando SMB mesmo assim..." -ForegroundColor Yellow
     }
 
-    # Caminhos remotos
-    $destinoBase  = "\\$Server\TI"
-    $destinoFinal = Join-Path $destinoBase "$($anoDir.Name)\$($mesDir.Name)"
-    $arquivoDestino = Join-Path $destinoFinal "$($env:COMPUTERNAME).log"
+    # ------------------------------------------------------------------
+    # 6. Validação SMB real
+    # ------------------------------------------------------------------
+    $destinoBase = "\\$Server\TI"
 
-    # Validação SMB real
     if (-not (Test-Path $destinoBase)) {
         $msg = "[ALERTA] Compartilhamento '$destinoBase' não acessível."
         Show-PrettyWarning $msg
+
         if (Get-Command Send-LogAlert -ErrorAction SilentlyContinue) {
             Send-LogAlert $msg
         }
         return
     }
 
-    # Aguarda o log ser FECHADO
-    Write-Host "Aguardando finalização do arquivo de log..." -ForegroundColor Yellow
+    # ------------------------------------------------------------------
+    # 7. Aguarda o log SER FECHADO (anti-arquivo cortado)
+    # ------------------------------------------------------------------
+    Write-Host "Aguardando finalização real do arquivo de log..." -ForegroundColor Yellow
 
     if (-not (Wait-FileUnlocked -Path $log.FullName -TimeoutSeconds 20)) {
-        Write-Host "ERRO: Log ainda em uso após timeout." -ForegroundColor Red
+        Write-Host "ERRO: log ainda em uso após timeout." -ForegroundColor Red
         return
     }
 
-    # Garante estrutura no servidor
+    # ------------------------------------------------------------------
+    # 8. Estrutura no servidor
+    # ------------------------------------------------------------------
+    $destinoFinal = Join-Path $destinoBase "$($anoDir.Name)\$($mesDir.Name)"
+    $arquivoDestino = Join-Path $destinoFinal "$($env:COMPUTERNAME).log"
+
     try {
         if (-not (Test-Path $destinoFinal)) {
             New-Item -ItemType Directory -Path $destinoFinal -Force | Out-Null
@@ -81,13 +102,9 @@
         return
     }
 
-    # Simulação (mantida apenas por compatibilidade)
-    if ($Simulado) {
-        Write-Host "SIMULAÇÃO: '$($log.FullName)' -> '$arquivoDestino'" -ForegroundColor Cyan
-        return
-    }
-
-    # Cópia FINAL (arquivo completo)
+    # ------------------------------------------------------------------
+    # 9. Cópia FINAL (arquivo completo)
+    # ------------------------------------------------------------------
     try {
         Copy-Item -Path $log.FullName -Destination $arquivoDestino -Force
         Write-Host "Log copiado COMPLETO: $arquivoDestino" -ForegroundColor Green
