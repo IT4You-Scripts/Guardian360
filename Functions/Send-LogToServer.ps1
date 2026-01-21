@@ -12,11 +12,13 @@ function Send-LogToServer {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$Server,     # Hostname (recomendado)
+        [string]$Server,     # Hostname ou IP
         [switch]$Simulado
     )
 
+    # ===============================
     # Diretório local de logs
+    # ===============================
     $agora = Get-Date
     $ano   = $agora.Year
     $mes   = $agora.Month
@@ -41,34 +43,43 @@ function Send-LogToServer {
         return
     }
 
+    # ===============================
     # Caminhos remotos
+    # ===============================
     $servidorHost    = $Server
     $servidorBase    = "\\$servidorHost\TI"
     $destinoServidor = "$servidorBase\$ano\$mesFormatado"
-    $nomeFinalLog    = "$($env:COMPUTERNAME).log"
+
+    # NOME FINAL SEM TIMESTAMP
+    $nomeFinalLog = "$($env:COMPUTERNAME).log"
 
     Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
 
-    # Validação LEVE de nome (sem ICMP / sem travar)
+    # ===============================
+    # Validação LEVE de nome (não trava)
+    # ===============================
     try {
         [void][System.Net.Dns]::GetHostEntry($servidorHost)
     } catch {
         Write-Host "[AVISO] Não foi possível validar o nome '$servidorHost' via DNS. Tentando SMB mesmo assim..." -ForegroundColor Yellow
     }
 
+    # ===============================
     # Simulação
+    # ===============================
     if ($Simulado) {
-        $msg = "SIMULAÇÃO: Robocopy '$($arquivoMaisRecente.FullName)' -> '$destinoServidor\$nomeFinalLog'"
+        $msg = "SIMULAÇÃO: '$($arquivoMaisRecente.FullName)' -> '$destinoServidor\$nomeFinalLog'"
         Write-Host $msg -ForegroundColor Cyan
         Send-LogAlert $msg
         return
     }
 
-    # Argumentos Robocopy (blindado)
+    # ===============================
+    # Robocopy (arquivo → arquivo)
+    # ===============================
     $argumentos = @(
-        "`"$($arquivoMaisRecente.Directory.FullName)`"",
-        "`"$destinoServidor`"",
-        "`"$($arquivoMaisRecente.Name)`"",
+        "`"$($arquivoMaisRecente.FullName)`"",
+        "`"$destinoServidor\$nomeFinalLog`"",
         "/R:1",     # 1 retry
         "/W:1",     # espera 1s
         "/NFL",     # sem lista de arquivos
@@ -92,7 +103,7 @@ function Send-LogToServer {
             throw "Robocopy falhou (ExitCode $($process.ExitCode))"
         }
 
-        $okMsg = "Log '$($arquivoMaisRecente.Name)' enviado com sucesso para '$destinoServidor'."
+        $okMsg = "Log '$nomeFinalLog' enviado com sucesso para '$destinoServidor'."
         Write-Host $okMsg -ForegroundColor Green
         Send-LogAlert $okMsg
 
