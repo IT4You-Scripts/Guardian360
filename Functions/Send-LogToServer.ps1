@@ -1,4 +1,14 @@
-﻿function Send-LogToServer {
+﻿# ===============================
+# FALLBACK DE ALERTA (BLINDADO)
+# ===============================
+if (-not (Get-Command Send-LogAlert -ErrorAction SilentlyContinue)) {
+    function Send-LogAlert {
+        param([string]$Text)
+        # Fallback silencioso – não quebra execução
+    }
+}
+
+function Send-LogToServer {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -16,9 +26,13 @@
     $diretorioLogLocal = "C:\Guardian\Logs\$ano\$mesFormatado"
 
     # Seleciona o .log mais recente
-    $arquivoMaisRecente = Get-ChildItem -Path $diretorioLogLocal -File -Filter '*.log' -ErrorAction SilentlyContinue |
-                          Sort-Object LastWriteTime -Descending |
-                          Select-Object -First 1
+    $arquivoMaisRecente = Get-ChildItem `
+        -Path $diretorioLogLocal `
+        -File `
+        -Filter '*.log' `
+        -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
 
     if (-not $arquivoMaisRecente) {
         $msg = "Nenhum arquivo .log encontrado em: $diretorioLogLocal"
@@ -80,7 +94,7 @@
 
         $okMsg = "Log '$($arquivoMaisRecente.Name)' enviado com sucesso para '$destinoServidor'."
         Write-Host $okMsg -ForegroundColor Green
-        #send-LogAlert $okMsg
+        Send-LogAlert $okMsg
 
     } catch {
         $errMsg = "Erro ao enviar log via Robocopy: $($_.Exception.Message)"
