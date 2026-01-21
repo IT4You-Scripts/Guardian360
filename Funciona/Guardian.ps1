@@ -705,6 +705,16 @@ $hasHDD = ($hddList.Count -gt 0)
       )},
     @{ Id=8; Title='Segurança'; Steps=@(
         @{ Name='Scan-AntiMalware';       Action={ Scan-AntiMalware } }        
+      )},
+    @{ Id=9; Title='Gestão'; Steps=@(
+        @{ Name='Send-LogToServer'; Action={
+              if ([string]::IsNullOrWhiteSpace($FileServer)) {
+                Write-Report ""
+                Write-Report 'Computador Standalone (sem Servidor de Arquivos na rede local).' 'INFO'
+              } else {
+                Send-LogToServer -Server $FileServer -Simulado:$Simulado
+              }
+            } }
       )}
   )
 
@@ -891,19 +901,6 @@ if ($global:GuardianUIWindow) {
 
 # Pausa breve para garantir que a UI feche antes do término do script
 Start-Sleep -Milliseconds 500
-
-
-
-#region Envio do Log para Servidor de Arquivos
-if ($PSBoundParameters.ContainsKey('FileServer')) {
-    Send-LogToServer -Server $FileServer
-}
-#endregion
-
-
-
-
-
 
 
 } catch {
