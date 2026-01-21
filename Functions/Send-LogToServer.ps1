@@ -1,38 +1,12 @@
-﻿$ErrorActionPreference = 'Stop'
-
-function Send-LogAlert  {
-    param([string]$text)
-    try {
-        if (Get-Command Write-Report -ErrorAction SilentlyContinue) {
-            Write-Report -Text $text
-        }
-    } catch {}
-}
-
-function Show-PrettyWarning {
-    param([string]$text)
-    $len = $text.Length + 2
-    Write-Host ("") -ForegroundColor Yellow
-    Write-Host ("┌" + ("─" * $len) + "┐") -ForegroundColor Yellow
-    Write-Host ("│ $text │") -ForegroundColor Yellow
-    Write-Host ("└" + ("─" * $len) + "┘") -ForegroundColor Yellow
-    Write-Host ("") -ForegroundColor Yellow
-}
-
-function Send-LogToServer {
+﻿function Send-LogToServer {
     [CmdletBinding()]
-param(
-    [Parameter(Mandatory)]
-    [string]$Server,
+    param(
+        [Parameter(Mandatory)]
+        [string]$Server,     # IP ou Hostname
+        [switch]$Simulado
+    )
 
-    [System.Management.Automation.PSCredential]
-    $Credential,
-
-    [switch]$Simulado
-)
-
-
-    # Diretório local de logs (baseado na data atual)
+    # Diretório local de logs
     $agora = Get-Date
     $ano   = $agora.Year
     $mes   = $agora.Month
@@ -47,92 +21,77 @@ param(
                           Select-Object -First 1
 
     if (-not $arquivoMaisRecente) {
-        Write-Host "Nenhum arquivo .log encontrado em: $diretorioLogLocal" -ForegroundColor Yellow
-        Send-LogAlert "Nenhum arquivo .log encontrado em: $diretorioLogLocal"
+        $msg = "Nenhum arquivo .log encontrado em: $diretorioLogLocal"
+        Write-Host $msg -ForegroundColor Yellow
+        Send-LogAlert $msg
         return
     }
 
-    # Monta caminhos de destino
+    # Caminhos remotos
     $servidorHost    = $Server
     $servidorBase    = "\\$servidorHost\TI"
     $destinoServidor = "$servidorBase\$ano\$mesFormatado"
-    $caminhoFinalServidor = Join-Path -Path $destinoServidor -ChildPath "$($env:COMPUTERNAME).log"
+    $nomeFinalLog    = "$($env:COMPUTERNAME).log"
 
-    Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
+    Write-Host "Centralizando log no servidor (modo blindado)..." -ForegroundColor Cyan
 
-    # Verificação rápida de disponibilidade (ping curto)
-    $servidorOnline = $false
+    # Teste rápido de rede (evita travamento)
     try {
-        $servidorOnline = Test-Connection -ComputerName $servidorHost -Count 1 -Quiet -TimeoutSeconds 1
+        if (-not (Test-Connection -ComputerName $servidorHost -Count 1 -Quiet -TimeoutSeconds 1)) {
+            throw "Servidor inacessível"
+        }
     } catch {
-        $servidorOnline = $false
-    }
-
-    if (-not $servidorOnline) {
-        $msg = "[ALERTA] Servidor de Arquivos '$servidorHost' não foi encontrado."
+        $msg = "[ALERTA] Servidor de Arquivos '$servidorHost' não respondeu ao ping."
         Show-PrettyWarning $msg
         Send-LogAlert $msg
         return
     }
 
-    # =========================
-    # CORREÇÃO APLICADA AQUI 👇
-    # =========================
-
-    # Força abertura de sessão SMB para evitar falso negativo no Test-Path
-    try {
-        cmd.exe /c "net use \\$servidorHost\TI >nul 2>&1"
-    } catch {}
-
-    # Verificação leve do compartilhamento base
-
-# Validação REAL do compartilhamento usando credencial explícita
-try {
-    $psDrive = New-PSDrive `
-        -Name "TI_TEMP" `
-        -PSProvider FileSystem `
-        -Root $servidorBase `
-        -Credential $Credential `
-        -ErrorAction Stop
-
-    Remove-PSDrive -Name "TI_TEMP" -Force
-}
-catch {
-    $msg = "[ALERTA] Falha de autenticação ou acesso ao compartilhamento '$servidorBase'."
-    Show-PrettyWarning $msg
-    Send-LogAlert "$msg Detalhe: $($_.Exception.Message)"
-    return
-}
-
-
-
-    # Garante a estrutura de destino
-    try {
-        if (-not ([System.IO.Directory]::Exists($destinoServidor))) {
-            [void][System.IO.Directory]::CreateDirectory($destinoServidor)
-        }
-    } catch {
-        $msg = "Erro ao criar a pasta de destino no servidor: $($_.Exception.Message)"
-        Write-Host $msg -ForegroundColor Red
+    # Simulação
+    if ($Simulado) {
+        $msg = "SIMULAÇÃO: Robocopy '$($arquivoMaisRecente.FullName)' -> '$destinoServidor\$nomeFinalLog'"
+        Write-Host $msg -ForegroundColor Cyan
         Send-LogAlert $msg
         return
     }
 
-    # Simulado vs Cópia real
-    if ($Simulado) {
-        Write-Host "SIMULAÇÃO: copiaria '$($arquivoMaisRecente.FullName)' para '$caminhoFinalServidor'." -ForegroundColor Cyan
-        Send-LogAlert "SIMULAÇÃO: cópia de '$($arquivoMaisRecente.FullName)' para '$caminhoFinalServidor'."
-        return
-    }
+    # Comando Robocopy (à prova de travamento SMB)
+    $argumentos = @(
+        "`"$($arquivoMaisRecente.Directory.FullName)`"",
+        "`"$destinoServidor`"",
+        "`"$($arquivoMaisRecente.Name)`"",
+        "/R:1",     # 1 retry
+        "/W:1",     # espera 1s
+        "/NFL",     # sem lista de arquivos
+        "/NDL",     # sem lista de diretórios
+        "/NJH",     # sem header
+        "/NJS",     # sem summary
+        "/NC",      # sem classe
+        "/NS"       # sem tamanho
+    ) -join ' '
 
     try {
-        Copy-Item -Path $arquivoMaisRecente.FullName -Destination $caminhoFinalServidor -Force -ErrorAction Stop
-        $okMsg = "Log '$($arquivoMaisRecente.Name)' enviado para '$caminhoFinalServidor'."
+        $process = Start-Process `
+            -FilePath "robocopy.exe" `
+            -ArgumentList $argumentos `
+            -Wait `
+            -NoNewWindow `
+            -PassThru
+
+        # ExitCode < 8 = sucesso no Robocopy
+        if ($process.ExitCode -ge 8) {
+            throw "Robocopy falhou (ExitCode $($process.ExitCode))"
+        }
+
+        $okMsg = "Log '$($arquivoMaisRecente.Name)' enviado com sucesso para '$destinoServidor'."
         Write-Host $okMsg -ForegroundColor Green
         Send-LogAlert $okMsg
+
     } catch {
-        $errMsg = "Erro ao copiar para o servidor: $($_.Exception.Message)"
+        $errMsg = "Erro ao enviar log via Robocopy: $($_.Exception.Message)"
         Write-Host $errMsg -ForegroundColor Red
         Send-LogAlert $errMsg
+        return
     }
 }
+
