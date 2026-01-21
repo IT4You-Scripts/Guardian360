@@ -1,124 +1,90 @@
-﻿# ===============================
-# FALLBACK DE ALERTA (BLINDADO)
-# ===============================
-if (-not (Get-Command Send-LogAlert -ErrorAction SilentlyContinue)) {
-    function Send-LogAlert {
-        param([string]$Text)
-        # fallback silencioso
-    }
-}
-
-function Send-LogToServer {
+﻿function Send-LogToServer {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
         [string]$Server
     )
 
-    Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
+    $ErrorActionPreference = 'Stop'
 
-    # ==========================================================
-    # 1. BASE LOCAL DE LOGS
-    # ==========================================================
-    $baseLogs = "C:\Guardian\Logs"
+    # ===== CREDENCIAIS (AES) =====
+    $keyPath  = "C:\Guardian\chave.key"
+    $credPath = "C:\Guardian\credenciais.xml"
+    $usuario  = "SERVIDOR\Administrador"  # <<< AJUSTE AQUI
 
-    if (-not (Test-Path $baseLogs)) {
-        $msg = "Base de logs inexistente: $baseLogs"
-        Write-Host $msg -ForegroundColor Yellow
-        Send-LogAlert $msg
+    if (-not (Test-Path $keyPath) -or -not (Test-Path $credPath)) {
+        Write-Host "Credenciais AES não encontradas." -ForegroundColor Red
         return
     }
 
-    # ==========================================================
-    # 2. ANO MAIS RECENTE
-    # ==========================================================
-    $anoDir = Get-ChildItem -Path $baseLogs -Directory -ErrorAction SilentlyContinue |
-              Sort-Object Name -Descending |
-              Select-Object -First 1
+    $key = Get-Content $keyPath
+    $securePassword = Get-Content $credPath | ConvertTo-SecureString -Key $key
+    $credential = New-Object System.Management.Automation.PSCredential ($usuario, $securePassword)
 
-    if (-not $anoDir) {
-        $msg = "Nenhum diretório de ano encontrado."
-        Write-Host $msg -ForegroundColor Yellow
-        Send-LogAlert $msg
-        return
-    }
+    # ===== LOG LOCAL =====
+    $agora = Get-Date
+    $ano   = $agora.Year
+    $mes   = $agora.Month
+    $mesNome = (Get-Culture).DateTimeFormat.MonthNames[$mes - 1]
+    $mesNomeFormatado = (Get-Culture).TextInfo.ToTitleCase($mesNome)
+    $mesFormatado = "{0:D2}. {1}" -f $mes, $mesNomeFormatado
+    $diretorioLogLocal = "C:\Guardian\Logs\$ano\$mesFormatado"
 
-    # ==========================================================
-    # 3. MÊS MAIS RECENTE
-    # ==========================================================
-    $mesDir = Get-ChildItem -Path $anoDir.FullName -Directory -ErrorAction SilentlyContinue |
-              Sort-Object Name -Descending |
-              Select-Object -First 1
-
-    if (-not $mesDir) {
-        $msg = "Nenhum diretório de mês encontrado."
-        Write-Host $msg -ForegroundColor Yellow
-        Send-LogAlert $msg
-        return
-    }
-
-    # ==========================================================
-    # 4. ARQUIVO DE LOG MAIS RECENTE (REAL)
-    # ==========================================================
-    $arquivo = Get-ChildItem -Path $mesDir.FullName -Filter '*.log' -File -ErrorAction SilentlyContinue |
-               Sort-Object LastWriteTime -Descending |
-               Select-Object -First 1
+    $arquivo = Get-ChildItem `
+        -Path $diretorioLogLocal `
+        -Filter *.log `
+        -File `
+        -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
 
     if (-not $arquivo) {
-        $msg = "Nenhum arquivo .log encontrado em: $($mesDir.FullName)"
-        Write-Host $msg -ForegroundColor Yellow
-        Send-LogAlert $msg
+        Write-Host "Nenhum log encontrado." -ForegroundColor Yellow
         return
     }
 
-    # ==========================================================
-    # 5. DESTINO NO SERVIDOR
-    # ==========================================================
-    $destinoBase = "\\$Server\TI\$($anoDir.Name)\$($mesDir.Name)"
-    $nomeFinal   = "$($env:COMPUTERNAME).log"
-    $destinoLog  = Join-Path $destinoBase $nomeFinal
+    # ===== DESTINO =====
+    $drive   = "G"
+    $share   = "\\$Server\TI"
+    $destino = "$drive`:\$ano\$mesFormatado"
+    $final   = "$($env:COMPUTERNAME).log"
 
-    # ==========================================================
-    # 6. VALIDAÇÃO SMB REAL
-    # ==========================================================
-    if (-not (Test-Path "\\$Server\TI")) {
-        $msg = "[ALERTA] Compartilhamento '\\$Server\TI' não acessível."
-        Write-Host $msg -ForegroundColor Red
-        Send-LogAlert $msg
-        return
-    }
+    Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
 
-    # ==========================================================
-    # 7. CRIA ESTRUTURA NO SERVIDOR
-    # ==========================================================
     try {
-        if (-not (Test-Path $destinoBase)) {
-            New-Item -ItemType Directory -Path $destinoBase -Force | Out-Null
+        # Limpa drive se existir
+        if (Get-PSDrive $drive -ErrorAction SilentlyContinue) {
+            Remove-PSDrive $drive -Force
         }
-    } catch {
-        $msg = "Erro ao criar diretório no servidor: $($_.Exception.Message)"
-        Write-Host $msg -ForegroundColor Red
-        Send-LogAlert $msg
-        return
-    }
 
-    # ==========================================================
-    # 8. CÓPIA FINAL (SIMPLES, ÍNTEGRA, SEM TRUNCAR)
-    # ==========================================================
-    try {
+        # Mapeia com credencial AES
+        New-PSDrive `
+            -Name $drive `
+            -PSProvider FileSystem `
+            -Root $share `
+            -Credential $credential `
+            -ErrorAction Stop | Out-Null
+
+        # Cria estrutura no servidor
+        if (-not (Test-Path $destino)) {
+            New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        }
+
+        # Cópia final (simples e direta)
         Copy-Item `
             -Path $arquivo.FullName `
-            -Destination $destinoLog `
+            -Destination "$destino\$final" `
             -Force `
             -ErrorAction Stop
 
-        $okMsg = "Log '$nomeFinal' enviado com sucesso para '$destinoBase'."
-        Write-Host $okMsg -ForegroundColor Green
-        Send-LogAlert $okMsg
+        Write-Host "Log enviado com sucesso." -ForegroundColor Green
 
     } catch {
-        $errMsg = "Erro ao enviar log: $($_.Exception.Message)"
-        Write-Host $errMsg -ForegroundColor Red
-        Send-LogAlert $errMsg
+        Write-Host "ERRO AO ENVIAR LOG: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    finally {
+        if (Get-PSDrive $drive -ErrorAction SilentlyContinue) {
+            Remove-PSDrive $drive -Force
+        }
     }
 }
