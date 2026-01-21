@@ -162,7 +162,11 @@ if ($PulaFases)      { $argString += " -PulaFases $($PulaFases -join ',')" }
 if ($LogLevel)       { $argString += " -LogLevel $LogLevel" }
 if ($Simulado)       { $argString += " -Simulado" }
 if ($FileServer)     { $argString += " -FileServer $FileServer" }
-if ($Cliente)        { $argString += " -Cliente `"$Cliente`"" }
+#if ($Cliente)        { $argString += " -Cliente `"$Cliente`"" }
+if ($Cliente) {
+    $safeCliente = $Cliente.Replace('"','\"')
+    $argString += " -Cliente `"$safeCliente`""
+}
 
 # -------------------------------
 # Configuração da janela
