@@ -21,11 +21,16 @@ function Show-PrettyWarning {
 
 function Send-LogToServer {
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$Server,     # IP/Hostname (ex.: 192.168.0.2 ou Servidor)
-        [switch]$Simulado    # Modo simulado: não efetua a cópia
-    )
+param(
+    [Parameter(Mandatory)]
+    [string]$Server,
+
+    [System.Management.Automation.PSCredential]
+    $Credential,
+
+    [switch]$Simulado
+)
+
 
     # Diretório local de logs (baseado na data atual)
     $agora = Get-Date
@@ -80,21 +85,26 @@ function Send-LogToServer {
     } catch {}
 
     # Verificação leve do compartilhamento base
-    try {
 
-        if (-not (Test-Path $servidorBase)) {
-            $msg = "[ALERTA] Compartilhamento '$servidorBase' não acessível."
-            Show-PrettyWarning $msg
-            Send-LogAlert $msg
-            return
-        }
+# Validação REAL do compartilhamento usando credencial explícita
+try {
+    $psDrive = New-PSDrive `
+        -Name "TI_TEMP" `
+        -PSProvider FileSystem `
+        -Root $servidorBase `
+        -Credential $Credential `
+        -ErrorAction Stop
 
-    } catch {
-        $msg = "Falha ao validar compartilhamento ($servidorBase)."
-        Show-PrettyWarning $msg
-        Send-LogAlert "$msg Detalhe: $($_.Exception.Message)"
-        return
-    }
+    Remove-PSDrive -Name "TI_TEMP" -Force
+}
+catch {
+    $msg = "[ALERTA] Falha de autenticação ou acesso ao compartilhamento '$servidorBase'."
+    Show-PrettyWarning $msg
+    Send-LogAlert "$msg Detalhe: $($_.Exception.Message)"
+    return
+}
+
+
 
     # Garante a estrutura de destino
     try {
