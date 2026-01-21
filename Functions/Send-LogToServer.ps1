@@ -1,119 +1,119 @@
-﻿function Send-LogToServer {
+﻿$ErrorActionPreference = 'Stop'
+
+function Send-LogAlert  {
+    param([string]$text)
+    try {
+        if (Get-Command Write-Report -ErrorAction SilentlyContinue) {
+            Write-Report -Text $text
+        }
+    } catch {}
+}
+
+function Show-PrettyWarning {
+    param([string]$text)
+    $len = $text.Length + 2
+    Write-Host ("") -ForegroundColor Yellow
+    Write-Host ("┌" + ("─" * $len) + "┐") -ForegroundColor Yellow
+    Write-Host ("│ $text │") -ForegroundColor Yellow
+    Write-Host ("└" + ("─" * $len) + "┘") -ForegroundColor Yellow
+    Write-Host ("") -ForegroundColor Yellow
+}
+
+function Send-LogToServer {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$Server
+        [string]$Server,     # IP/Hostname (ex.: 192.168.0.2 ou Servidor)
+        [switch]$Simulado    # Modo simulado: não efetua a cópia
     )
+
+    # Diretório local de logs (baseado na data atual)
+	$agora = Get-Date
+	$ano   = $agora.Year
+	$mes   = $agora.Month
+	$mesNome = (Get-Culture).DateTimeFormat.MonthNames[$mes - 1]
+	$mesNomeFormatado = (Get-Culture).TextInfo.ToTitleCase($mesNome)
+	$mesFormatado = "{0:D2}. {1}" -f $mes, $mesNomeFormatado
+	$diretorioLogLocal = "C:\Guardian\Logs\$ano\$mesFormatado"
+
+
+    # Seleciona o .log mais recente
+    $arquivoMaisRecente = Get-ChildItem -Path $diretorioLogLocal -File -Filter '*.log' -ErrorAction SilentlyContinue |
+                          Sort-Object LastWriteTime -Descending |
+                          Select-Object -First 1
+
+    if (-not $arquivoMaisRecente) {
+        Write-Host "Nenhum arquivo .log encontrado em: $diretorioLogLocal" -ForegroundColor Yellow
+        Send-LogAlert  "Nenhum arquivo .log encontrado em: $diretorioLogLocal"
+        return
+    }
+
+    # Monta caminhos de destino
+    $servidorHost   = $Server
+    $servidorBase   = "\$servidorHost\TI"
+    $destinoServidor = "$servidorBase\$ano\$mesFormatado"
+    $caminhoFinalServidor = Join-Path -Path $destinoServidor -ChildPath "$($env:COMPUTERNAME).log"
 
     Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
 
-    # ------------------------------------------------------------------
-    # 1. Validação da base local
-    # ------------------------------------------------------------------
-    $baseLogs = "C:\Guardian\Logs"
-
-    if (-not (Test-Path $baseLogs)) {
-        Write-Host "Base de logs inexistente: $baseLogs" -ForegroundColor Yellow
-        return
-    }
-
-    # ------------------------------------------------------------------
-    # 2. Ano mais recente
-    # ------------------------------------------------------------------
-    $anoDir = Get-ChildItem $baseLogs -Directory |
-              Sort-Object Name -Descending |
-              Select-Object -First 1
-
-    if (-not $anoDir) {
-        Write-Host "Nenhum diretório de ano encontrado." -ForegroundColor Yellow
-        return
-    }
-
-    # ------------------------------------------------------------------
-    # 3. Mês mais recente
-    # ------------------------------------------------------------------
-    $mesDir = Get-ChildItem $anoDir.FullName -Directory |
-              Sort-Object Name -Descending |
-              Select-Object -First 1
-
-    if (-not $mesDir) {
-        Write-Host "Nenhum diretório de mês encontrado." -ForegroundColor Yellow
-        return
-    }
-
-    # ------------------------------------------------------------------
-    # 4. Log mais recente
-    # ------------------------------------------------------------------
-    $log = Get-ChildItem $mesDir.FullName -Filter *.log -File |
-           Sort-Object LastWriteTime -Descending |
-           Select-Object -First 1
-
-    if (-not $log) {
-        Write-Host "Nenhum arquivo .log encontrado." -ForegroundColor Yellow
-        return
-    }
-
-    # ------------------------------------------------------------------
-    # 5. Validação DNS (leve, não bloqueante)
-    # ------------------------------------------------------------------
+    # Verificação rápida de disponibilidade (ping curto)
+    $servidorOnline = $false
     try {
-        [void][System.Net.Dns]::GetHostEntry($Server)
-    } catch {
-        Write-Host "[AVISO] DNS não validado para '$Server'. Tentando SMB mesmo assim..." -ForegroundColor Yellow
-    }
+        $servidorOnline = Test-Connection -ComputerName $servidorHost -Count 1 -Quiet -TimeoutSeconds 1
+    } catch { $servidorOnline = $false }
 
-    # ------------------------------------------------------------------
-    # 6. Validação SMB real
-    # ------------------------------------------------------------------
-    $destinoBase = "\\$Server\TI"
-
-    if (-not (Test-Path $destinoBase)) {
-        $msg = "[ALERTA] Compartilhamento '$destinoBase' não acessível."
+    if (-not $servidorOnline) {
+        $msg = "[ALERTA] Servidor de Arquivos '$servidorHost' não foi encontrado."
         Show-PrettyWarning $msg
-
-        if (Get-Command Send-LogAlert -ErrorAction SilentlyContinue) {
-            Send-LogAlert $msg
-        }
+        Write-Report ""
+        Send-LogAlert  $msg
         return
     }
 
-    # ------------------------------------------------------------------
-    # 7. Aguarda o log SER FECHADO (anti-arquivo cortado)
-    # ------------------------------------------------------------------
-    Write-Host "Aguardando finalização real do arquivo de log..." -ForegroundColor Yellow
-
-    if (-not (Wait-FileUnlocked -Path $log.FullName -TimeoutSeconds 20)) {
-        Write-Host "ERRO: log ainda em uso após timeout." -ForegroundColor Red
-        return
-    }
-
-    # ------------------------------------------------------------------
-    # 8. Estrutura no servidor
-    # ------------------------------------------------------------------
-    $destinoFinal = Join-Path $destinoBase "$($anoDir.Name)\$($mesDir.Name)"
-    $arquivoDestino = Join-Path $destinoFinal "$($env:COMPUTERNAME).log"
-
+    # Verificação leve do compartilhamento base
     try {
-        if (-not (Test-Path $destinoFinal)) {
-            New-Item -ItemType Directory -Path $destinoFinal -Force | Out-Null
+        if (-not ([System.IO.Directory]::Exists($servidorBase))) {
+            $msg = "[ALERTA] Servidor de Arquivos '$servidorHost' não foi encontrado."
+            Show-PrettyWarning $msg
+            Write-Report ""
+            Send-LogAlert  $msg
+            return
         }
     } catch {
-        Write-Host "Erro ao criar diretório no servidor." -ForegroundColor Red
+        $msg = "Falha ao validar compartilhamento ($servidorBase)."
+        Show-PrettyWarning $msg
+        Write-Report ""
+        Send-LogAlert  "$msg Detalhe: $($_.Exception.Message)"
         return
     }
 
-    # ------------------------------------------------------------------
-    # 9. Cópia FINAL (arquivo completo)
-    # ------------------------------------------------------------------
+    # Garante a estrutura de destino
     try {
-        Copy-Item -Path $log.FullName -Destination $arquivoDestino -Force
-        Write-Host "Log copiado COMPLETO: $arquivoDestino" -ForegroundColor Green
-
-        if (Get-Command Send-LogAlert -ErrorAction SilentlyContinue) {
-            Send-LogAlert "Log enviado com sucesso: $arquivoDestino"
+        if (-not ([System.IO.Directory]::Exists($destinoServidor))) {
+            [void][System.IO.Directory]::CreateDirectory($destinoServidor)
         }
-
     } catch {
-        Write-Host "Erro ao copiar log: $($_.Exception.Message)" -ForegroundColor Red
+        $msg = "Erro ao criar a pasta de destino no servidor: $($_.Exception.Message)"
+        Write-Host $msg -ForegroundColor Red
+        Send-LogAlert  $msg
+        return
+    }
+
+    # Simulado vs Cópia real
+    if ($Simulado) {
+        Write-Host "SIMULAÇÃO: copiaria '$($arquivoMaisRecente.FullName)' para '$caminhoFinalServidor'." -ForegroundColor Cyan
+        Send-LogAlert  "SIMULAÇÃO: cópia de '$($arquivoMaisRecente.FullName)' para '$caminhoFinalServidor'."
+        return
+    }
+
+    try {
+        Copy-Item -Path $arquivoMaisRecente.FullName -Destination $caminhoFinalServidor -Force -ErrorAction Stop
+        $okMsg = "Log '$($arquivoMaisRecente.Name)' enviado para '$caminhoFinalServidor'."
+        Write-Host $okMsg -ForegroundColor Green
+        Send-LogAlert  $okMsg
+    } catch {
+        $errMsg = "Erro ao copiar para o servidor: $($_.Exception.Message)"
+        Write-Host $errMsg -ForegroundColor Red
+        Send-LogAlert  $errMsg
     }
 }
