@@ -72,13 +72,14 @@ function Send-LogToServer {
 
     # Verificação leve do compartilhamento base
     try {
-        if (-not ([System.IO.Directory]::Exists($servidorBase))) {
-            $msg = "[ALERTA] Servidor de Arquivos '$servidorHost' não foi encontrado."
-            Show-PrettyWarning $msg
-            Write-Report ""
-            Send-LogAlert  $msg
-            return
-        }
+        
+    if (-not (Test-Path $servidorBase)) {
+        $msg = "[ALERTA] Compartilhamento '$servidorBase' não acessível."
+        Show-PrettyWarning $msg
+        Send-LogAlert $msg
+    return
+    }
+
     } catch {
         $msg = "Falha ao validar compartilhamento ($servidorBase)."
         Show-PrettyWarning $msg
