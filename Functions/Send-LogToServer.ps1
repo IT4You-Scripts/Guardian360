@@ -4,7 +4,7 @@
 if (-not (Get-Command Send-LogAlert -ErrorAction SilentlyContinue)) {
     function Send-LogAlert {
         param([string]$Text)
-        # Fallback silencioso – não quebra execução
+        # fallback silencioso
     }
 }
 
@@ -12,12 +12,12 @@ function Send-LogToServer {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$Server,     # Hostname ou IP
+        [string]$Server,
         [switch]$Simulado
     )
 
     # ===============================
-    # Diretório local de logs
+    # LOG LOCAL
     # ===============================
     $agora = Get-Date
     $ano   = $agora.Year
@@ -27,16 +27,15 @@ function Send-LogToServer {
     $mesFormatado = "{0:D2}. {1}" -f $mes, $mesNomeFormatado
     $diretorioLogLocal = "C:\Guardian\Logs\$ano\$mesFormatado"
 
-    # Seleciona o .log mais recente
-    $arquivoMaisRecente = Get-ChildItem `
+    $arquivo = Get-ChildItem `
         -Path $diretorioLogLocal `
-        -File `
         -Filter '*.log' `
+        -File `
         -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
 
-    if (-not $arquivoMaisRecente) {
+    if (-not $arquivo) {
         $msg = "Nenhum arquivo .log encontrado em: $diretorioLogLocal"
         Write-Host $msg -ForegroundColor Yellow
         Send-LogAlert $msg
@@ -44,73 +43,43 @@ function Send-LogToServer {
     }
 
     # ===============================
-    # Caminhos remotos
+    # DESTINO
     # ===============================
-    $servidorHost    = $Server
-    $servidorBase    = "\\$servidorHost\TI"
-    $destinoServidor = "$servidorBase\$ano\$mesFormatado"
-
-    # NOME FINAL SEM TIMESTAMP
-    $nomeFinalLog = "$($env:COMPUTERNAME).log"
+    $destinoBase = "\\$Server\TI\$ano\$mesFormatado"
+    $nomeFinal   = "$($env:COMPUTERNAME).log"
 
     Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
 
     # ===============================
-    # Validação LEVE de nome (não trava)
-    # ===============================
-    try {
-        [void][System.Net.Dns]::GetHostEntry($servidorHost)
-    } catch {
-        Write-Host "[AVISO] Não foi possível validar o nome '$servidorHost' via DNS. Tentando SMB mesmo assim..." -ForegroundColor Yellow
-    }
-
-    # ===============================
-    # Simulação
+    # SIMULAÇÃO
     # ===============================
     if ($Simulado) {
-        $msg = "SIMULAÇÃO: '$($arquivoMaisRecente.FullName)' -> '$destinoServidor\$nomeFinalLog'"
+        $msg = "SIMULAÇÃO: '$($arquivo.FullName)' -> '$destinoBase\$nomeFinal'"
         Write-Host $msg -ForegroundColor Cyan
         Send-LogAlert $msg
         return
     }
 
-    # ===============================
-    # Robocopy (arquivo → arquivo)
-    # ===============================
-    $argumentos = @(
-        "`"$($arquivoMaisRecente.FullName)`"",
-        "`"$destinoServidor\$nomeFinalLog`"",
-        "/R:1",     # 1 retry
-        "/W:1",     # espera 1s
-        "/NFL",     # sem lista de arquivos
-        "/NDL",     # sem lista de diretórios
-        "/NJH",     # sem header
-        "/NJS",     # sem summary
-        "/NC",      # sem classe
-        "/NS"       # sem tamanho
-    ) -join ' '
-
     try {
-        $process = Start-Process `
-            -FilePath "robocopy.exe" `
-            -ArgumentList $argumentos `
-            -Wait `
-            -NoNewWindow `
-            -PassThru
-
-        # ExitCode < 8 = sucesso no Robocopy
-        if ($process.ExitCode -ge 8) {
-            throw "Robocopy falhou (ExitCode $($process.ExitCode))"
+        # Garante pasta
+        if (-not (Test-Path $destinoBase)) {
+            New-Item -ItemType Directory -Path $destinoBase -Force | Out-Null
         }
 
-        $okMsg = "Log '$nomeFinalLog' enviado com sucesso para '$destinoServidor'."
+        # CÓPIA COM RENOMEAÇÃO (CORRETO)
+        Copy-Item `
+            -Path $arquivo.FullName `
+            -Destination "$destinoBase\$nomeFinal" `
+            -Force `
+            -ErrorAction Stop
+
+        $okMsg = "Log '$nomeFinal' enviado com sucesso para '$destinoBase'."
         Write-Host $okMsg -ForegroundColor Green
         Send-LogAlert $okMsg
 
     } catch {
-        $errMsg = "Erro ao enviar log via Robocopy: $($_.Exception.Message)"
+        $errMsg = "Erro ao enviar log: $($_.Exception.Message)"
         Write-Host $errMsg -ForegroundColor Red
         Send-LogAlert $errMsg
-        return
     }
 }
