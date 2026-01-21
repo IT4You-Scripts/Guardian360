@@ -2,68 +2,94 @@
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$Server,
-        [switch]$Simulado
+        [string]$Server
     )
-
-    # Diretório local de logs
-    $agora = Get-Date
-    $ano   = $agora.Year
-    $mes   = $agora.Month
-    $mesNome = (Get-Culture).DateTimeFormat.MonthNames[$mes - 1]
-    $mesNomeFormatado = (Get-Culture).TextInfo.ToTitleCase($mesNome)
-    $mesFormatado = "{0:D2}. {1}" -f $mes, $mesNomeFormatado
-    $diretorioLogLocal = "C:\Guardian\Logs\$ano\$mesFormatado"
-
-    # Log mais recente
-    $logOriginal = Get-ChildItem -Path $diretorioLogLocal -File -Filter '*.log' |
-                   Sort-Object LastWriteTime -Descending |
-                   Select-Object -First 1
-
-    if (-not $logOriginal) {
-        Write-Host "[AVISO] Nenhum log encontrado." -ForegroundColor Yellow
-        return
-    }
-
-    # 🔒 CLONE FECHADO (PONTO-CHAVE)
-    $logTemp = Join-Path $env:TEMP "$($env:COMPUTERNAME).log"
-    Copy-Item -Path $logOriginal.FullName -Destination $logTemp -Force
-
-    # Destino
-    $destinoServidor = "\\$Server\TI\$ano\$mesFormatado"
-    $nomeFinalLog    = "$($env:COMPUTERNAME).log"
 
     Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
 
-    if ($Simulado) {
-        Write-Host "SIMULAÇÃO: $logTemp -> $destinoServidor\$nomeFinalLog" -ForegroundColor Cyan
+    # Base local
+    $baseLogs = "C:\Guardian\Logs"
+
+    if (-not (Test-Path $baseLogs)) {
+        Write-Host "Base de logs inexistente: $baseLogs" -ForegroundColor Yellow
         return
     }
 
-    # Robocopy APENAS do clone
-    $argumentos = @(
-        "`"$([System.IO.Path]::GetDirectoryName($logTemp))`"",
-        "`"$destinoServidor`"",
-        "`"$([System.IO.Path]::GetFileName($logTemp))`"",
-        "/R:1",
-        "/W:1",
-        "/NFL",
-        "/NDL",
-        "/NJH",
-        "/NJS",
-        "/NC",
-        "/NS"
-    ) -join ' '
+    # Ano mais recente
+    $anoDir = Get-ChildItem $baseLogs -Directory |
+              Sort-Object Name -Descending |
+              Select-Object -First 1
 
-    $proc = Start-Process robocopy.exe -ArgumentList $argumentos -Wait -NoNewWindow -PassThru
+    if (-not $anoDir) { return }
 
-    if ($proc.ExitCode -ge 8) {
-        Write-Host "[ERRO] Falha ao enviar log (ExitCode $($proc.ExitCode))" -ForegroundColor Red
+    # Mês mais recente
+    $mesDir = Get-ChildItem $anoDir.FullName -Directory |
+              Sort-Object Name -Descending |
+              Select-Object -First 1
+
+    if (-not $mesDir) { return }
+
+    # Log mais recente
+    $log = Get-ChildItem $mesDir.FullName -Filter *.log -File |
+           Sort-Object LastWriteTime -Descending |
+           Select-Object -First 1
+
+    if (-not $log) {
+        Write-Host "Nenhum log encontrado." -ForegroundColor Yellow
         return
     }
 
-    # Limpeza
-    Remove-Item $logTemp -Force -ErrorAction SilentlyContinue
+    # Validação DNS leve (não bloqueante)
+    try {
+        [void][System.Net.Dns]::GetHostEntry($Server)
+    } catch {
+        Write-Host "[AVISO] DNS não validado para '$Server'. Tentando SMB mesmo assim..." -ForegroundColor Yellow
+    }
 
-    Write-Host "Log enviado com sucesso: $nomeFinalLog" -ForegroundColor Green
+    # Caminhos remotos
+    $destinoBase = "\\$Server\TI"
+    $destinoFinal = Join-Path $destinoBase "$($anoDir.Name)\$($mesDir.Name)"
+    $nomeFinal = "$($env:COMPUTERNAME).log"
+    $arquivoDestino = Join-Path $destinoFinal $nomeFinal
+
+    # Validação SMB real
+    if (-not (Test-Path $destinoBase)) {
+        $msg = "[ALERTA] Compartilhamento '$destinoBase' não acessível."
+        Show-PrettyWarning $msg
+        if (Get-Command Send-LogAlert -ErrorAction SilentlyContinue) {
+            Send-LogAlert $msg
+        }
+        return
+    }
+
+    # Aguarda log finalizar escrita
+    Write-Host "Aguardando finalização do arquivo de log..." -ForegroundColor Yellow
+
+    if (-not (Wait-FileUnlocked -Path $log.FullName -TimeoutSeconds 20)) {
+        Write-Host "ERRO: Log ainda em uso após timeout." -ForegroundColor Red
+        return
+    }
+
+    # Garante estrutura no servidor
+    try {
+        if (-not (Test-Path $destinoFinal)) {
+            New-Item -ItemType Directory -Path $destinoFinal -Force | Out-Null
+        }
+    } catch {
+        Write-Host "Erro ao criar diretório no servidor." -ForegroundColor Red
+        return
+    }
+
+    # Cópia FINAL
+    try {
+        Copy-Item -Path $log.FullName -Destination $arquivoDestino -Force
+        Write-Host "Log copiado COMPLETO: $arquivoDestino" -ForegroundColor Green
+
+        if (Get-Command Send-LogAlert -ErrorAction SilentlyContinue) {
+            Send-LogAlert "Log enviado com sucesso: $arquivoDestino"
+        }
+
+    } catch {
+        Write-Host "Erro ao copiar log: $($_.Exception.Message)" -ForegroundColor Red
+    }
 }
