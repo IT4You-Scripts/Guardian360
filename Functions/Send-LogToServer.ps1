@@ -50,7 +50,7 @@ function Send-LogToServer {
 
     # Monta caminhos de destino
     $servidorHost   = $Server
-    $servidorBase   = "\$servidorHost\TI"
+    $servidorBase   = "\\$servidorHost\TI"
     $destinoServidor = "$servidorBase\$ano\$mesFormatado"
     $caminhoFinalServidor = Join-Path -Path $destinoServidor -ChildPath "$($env:COMPUTERNAME).log"
 
