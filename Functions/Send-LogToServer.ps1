@@ -10,7 +10,7 @@
     # ===== CREDENCIAIS (AES) =====
     $keyPath  = "C:\Guardian\chave.key"
     $credPath = "C:\Guardian\credenciais.xml"
-    $usuario  = "SERVIDOR\Administrador"  # <<< AJUSTE AQUI
+    $usuario  = "SERVIDOR\Administrador"
 
     if (-not (Test-Path $keyPath) -or -not (Test-Path $credPath)) {
         Write-Host "Credenciais AES não encontradas." -ForegroundColor Red
@@ -52,12 +52,10 @@
     Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
 
     try {
-        # Limpa drive se existir
         if (Get-PSDrive $drive -ErrorAction SilentlyContinue) {
             Remove-PSDrive $drive -Force
         }
 
-        # Mapeia com credencial AES
         New-PSDrive `
             -Name $drive `
             -PSProvider FileSystem `
@@ -65,12 +63,10 @@
             -Credential $credential `
             -ErrorAction Stop | Out-Null
 
-        # Cria estrutura no servidor
         if (-not (Test-Path $destino)) {
             New-Item -ItemType Directory -Path $destino -Force | Out-Null
         }
 
-        # Cópia final (simples e direta)
         Copy-Item `
             -Path $arquivo.FullName `
             -Destination "$destino\$final" `
