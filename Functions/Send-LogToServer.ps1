@@ -2,7 +2,7 @@
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$Server,     # IP ou Hostname
+        [string]$Server,     # Hostname (recomendado)
         [switch]$Simulado
     )
 
@@ -33,18 +33,13 @@
     $destinoServidor = "$servidorBase\$ano\$mesFormatado"
     $nomeFinalLog    = "$($env:COMPUTERNAME).log"
 
-    Write-Host "Centralizando log no servidor (modo blindado)..." -ForegroundColor Cyan
+    Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
 
-    # Teste rápido de rede (evita travamento)
+    # Validação LEVE de nome (sem ICMP / sem travar)
     try {
-        if (-not (Test-Connection -ComputerName $servidorHost -Count 1 -Quiet -TimeoutSeconds 1)) {
-            throw "Servidor inacessível"
-        }
+        [void][System.Net.Dns]::GetHostEntry($servidorHost)
     } catch {
-        $msg = "[ALERTA] Servidor de Arquivos '$servidorHost' não respondeu ao ping."
-        Show-PrettyWarning $msg
-        Send-LogAlert $msg
-        return
+        Write-Host "[AVISO] Não foi possível validar o nome '$servidorHost' via DNS. Tentando SMB mesmo assim..." -ForegroundColor Yellow
     }
 
     # Simulação
@@ -55,7 +50,7 @@
         return
     }
 
-    # Comando Robocopy (à prova de travamento SMB)
+    # Argumentos Robocopy (blindado)
     $argumentos = @(
         "`"$($arquivoMaisRecente.Directory.FullName)`"",
         "`"$destinoServidor`"",
@@ -94,4 +89,3 @@
         return
     }
 }
-
