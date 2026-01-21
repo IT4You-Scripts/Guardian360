@@ -80,7 +80,7 @@
 
         $okMsg = "Log '$($arquivoMaisRecente.Name)' enviado com sucesso para '$destinoServidor'."
         Write-Host $okMsg -ForegroundColor Green
-        Send-LogAlert $okMsg
+        #send-LogAlert $okMsg
 
     } catch {
         $errMsg = "Erro ao enviar log via Robocopy: $($_.Exception.Message)"
