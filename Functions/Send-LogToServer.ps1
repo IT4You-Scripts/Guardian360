@@ -2,7 +2,9 @@
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$Server
+        [string]$Server,
+
+        [switch]$Simulado   # <-- MANTIDO por compatibilidade
     )
 
     Write-Host "Centralizando log no servidor..." -ForegroundColor Cyan
@@ -47,10 +49,9 @@
     }
 
     # Caminhos remotos
-    $destinoBase = "\\$Server\TI"
+    $destinoBase  = "\\$Server\TI"
     $destinoFinal = Join-Path $destinoBase "$($anoDir.Name)\$($mesDir.Name)"
-    $nomeFinal = "$($env:COMPUTERNAME).log"
-    $arquivoDestino = Join-Path $destinoFinal $nomeFinal
+    $arquivoDestino = Join-Path $destinoFinal "$($env:COMPUTERNAME).log"
 
     # Validação SMB real
     if (-not (Test-Path $destinoBase)) {
@@ -62,7 +63,7 @@
         return
     }
 
-    # Aguarda log finalizar escrita
+    # Aguarda o log ser FECHADO
     Write-Host "Aguardando finalização do arquivo de log..." -ForegroundColor Yellow
 
     if (-not (Wait-FileUnlocked -Path $log.FullName -TimeoutSeconds 20)) {
@@ -80,7 +81,13 @@
         return
     }
 
-    # Cópia FINAL
+    # Simulação (mantida apenas por compatibilidade)
+    if ($Simulado) {
+        Write-Host "SIMULAÇÃO: '$($log.FullName)' -> '$arquivoDestino'" -ForegroundColor Cyan
+        return
+    }
+
+    # Cópia FINAL (arquivo completo)
     try {
         Copy-Item -Path $log.FullName -Destination $arquivoDestino -Force
         Write-Host "Log copiado COMPLETO: $arquivoDestino" -ForegroundColor Green
