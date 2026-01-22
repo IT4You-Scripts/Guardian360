@@ -1,10 +1,17 @@
-﻿function Send-LogToServer {
+﻿
+function Send-LogToServer {
     param([Parameter(Mandatory)][string]$Server)
 
     $user = "guardian"
     $pass = "guardian360"
 
     try {
+        # Verifica se o servidor responde ao ping
+        if (-not (Test-Connection -ComputerName $Server -Count 1 -Quiet -ErrorAction SilentlyContinue)) {
+            Show-Header -Text "[ALERTA] Servidor $Server não está acessível (ping falhou)." -Color $Red
+            return
+        }
+
         # Localiza log mais recente
         $agora = Get-Date
         $ano   = $agora.Year
@@ -14,14 +21,14 @@
         $logLocal = "C:\Guardian\Logs\$ano\$mesFmt"
 
         if (-not (Test-Path $logLocal)) {
-            Show-Header -Text "[ALERTA] Diretório de logs não encontrado: $logLocal"
+            Show-Header -Text "[ALERTA] Diretório de logs não encontrado: $logLocal" -Color $Yellow
             return
         }
 
         $arquivoLog = Get-ChildItem $logLocal -Filter '*.log' -File |
                       Sort-Object LastWriteTime -Descending | Select-Object -First 1
         if (-not $arquivoLog) {
-            Show-Header -Text "[ALERTA] Nenhum arquivo .log encontrado em $logLocal"
+            Show-Header -Text "[ALERTA] Nenhum arquivo .log encontrado em $logLocal" -Color $Yellow
             return
         }
 
@@ -40,12 +47,13 @@
         # Copia log
         Copy-Item $arquivoLog.FullName -Destination $destinoFile -Force
 
-        Show-Header -Text "Log enviado com sucesso para:`n$destinoFile"
+        Show-Header -Text "Log enviado com sucesso para:$destinoFile" -Color $Green
 
         # Desconecta o mapeamento
         net use "\\$Server\TI" /delete | Out-Null
     }
     catch {
-        Show-Header -Text "[ALERTA] Erro ao copiar log para o servidor:`n$($_.Exception.Message)"
+        Show-Header -Text "[ALERTA] Erro ao copiar log para o servidor:`n$($_.Exception.Message)" -Color $Red
     }
 }
+

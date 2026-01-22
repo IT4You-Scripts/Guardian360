@@ -230,15 +230,18 @@ function Get-StepLabel {
 $pss = Get-Variable -Name PSStyle -ErrorAction SilentlyContinue
 $hasStyle = ($null -ne $pss -and $null -ne $pss.Value)
 
+
 if ($hasStyle) {
   $Cyan   = $pss.Value.Foreground.Cyan
   $Green  = $pss.Value.Foreground.Green
   $Yellow = $pss.Value.Foreground.Yellow
   $Gray   = $pss.Value.Foreground.BrightBlack
+  $Red    = $pss.Value.Foreground.Red   # <-- Adicione esta linha
   $Reset  = $pss.Value.Reset
 } else {
-  $Cyan=''; $Green=''; $Yellow=''; $Gray=''; $Reset=''
+  $Cyan=''; $Green=''; $Yellow=''; $Gray=''; $Red=''; $Reset=''
 }
+
 
 function Write-Report {
   param([string]$Text)
@@ -286,13 +289,27 @@ function Write-Log {
   }
 }
 
+#function Show-Header {
+#  param([string]$Text)
+#  $bar = '─' * ($Text.Length + 2)
+#  Write-Host ("{0}┌{1}┐{2}" -f $Cyan, $bar, $Reset)
+#  Write-Host ("{0}│ {1} │{2}" -f $Cyan, $Text, $Reset)
+#  Write-Host ("{0}└{1}┘{2}" -f $Cyan, $bar, $Reset)
+#}
+
+
 function Show-Header {
-  param([string]$Text)
-  $bar = '─' * ($Text.Length + 2)
-  Write-Host ("{0}┌{1}┐{2}" -f $Cyan, $bar, $Reset)
-  Write-Host ("{0}│ {1} │{2}" -f $Cyan, $Text, $Reset)
-  Write-Host ("{0}└{1}┘{2}" -f $Cyan, $bar, $Reset)
+    param(
+        [string]$Text,
+        [string]$Color = $Cyan  # Cor padrão é a mesma que você já usa
+    )
+
+    $bar = '─' * ($Text.Length + 2)
+    Write-Host ("{0}┌{1}┐{2}" -f $Color, $bar, $Reset)
+    Write-Host ("{0}│ {1} │{2}" -f $Color, $Text, $Reset)
+    Write-Host ("{0}└{1}┘{2}" -f $Color, $bar, $Reset)
 }
+
 
 function Show-Phase {
   param([int]$Id,[string]$Title)
