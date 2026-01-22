@@ -2,8 +2,8 @@
 function Send-LogToServer {
     param([Parameter(Mandatory)][string]$Server)
 
-    $user = "guardian"
-    $pass = "guardian360"
+    #$user = "guardian"
+    #$pass = "guardian360"
 
     try {
         # Verifica se o servidor responde ao ping
@@ -37,7 +37,7 @@ function Send-LogToServer {
         $destinoFile = Join-Path $destinoDir "$($env:COMPUTERNAME).log"
 
         # Mapeia temporariamente usando o usuário guardian
-        net use "\\$Server\TI" /user:$user $pass /persistent:no | Out-Null
+        #net use "\\$Server\TI" /user:$user $pass /persistent:no | Out-Null
 
         # Cria pasta de destino se não existir
         if (-not (Test-Path $destinoDir)) {
@@ -50,7 +50,7 @@ function Send-LogToServer {
         Show-Header -Text "Log enviado com sucesso para:$destinoFile" -Color $Green
 
         # Desconecta o mapeamento
-        net use "\\$Server\TI" /delete | Out-Null
+        #net use "\\$Server\TI" /delete | Out-Null
     }
     catch {
         Show-Header -Text "[ALERTA] Erro ao copiar log para o servidor:`n$($_.Exception.Message)" -Color $Red
