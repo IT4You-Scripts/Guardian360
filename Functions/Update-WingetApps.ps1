@@ -3,59 +3,84 @@ function Update-WingetApps {
     [CmdletBinding()]
     param()
 
-    Write-Log 'Iniciando atualização de aplicativos via Winget (modo confiável)...' 'INFO'
+    Show-Header -Text "Iniciando atualização seletiva de programas via Winget..." -Color $Cyan
+    Write-Log 'Iniciando atualização seletiva de programas via Winget...' 'INFO'
 
+    # Verifica se o Winget está disponível
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Show-Header -Text "Winget não está disponível. Etapa ignorada." -Color $Yellow
         Write-Log 'Winget não está disponível. Etapa ignorada.' 'WARN'
         return
     }
 
-    # Blacklist por ID (winget respeita melhor que nome)
-    $blacklistedIds = @(
-        'QGIS.QGIS',
-        'TeamViewer.TeamViewer',
-        'SiberSystems.GoodSync',
-        'OpenVPNTechnologies.OpenVPN'
-    )
+    # Lista de programas bloqueados (Blacklist)
+    $blacklistedIds = @('QGIS.QGIS','TeamViewer.TeamViewer','SiberSystems.GoodSync','OpenVPNTechnologies.OpenVPN')
 
-    foreach ($id in $blacklistedIds) {
-        Write-Log ("Winget: bloqueando atualizações para {0}" -f $id) 'DEBUG'
-    }
-
-    try {
-        # Atualiza tudo
-        $process = Start-Process winget `
-            -ArgumentList @(
-                'upgrade',
-                '--all',
-                '--accept-source-agreements',
-                '--accept-package-agreements',
-                '--scope=machine',
-                '--silent',
-                '--disable-interactivity'
-            ) `
-            -NoNewWindow `
-            -Wait `
-            -PassThru
-    } catch {
-        Write-Log ("Falha ao executar winget upgrade --all: {0}" -f $_.Exception.Message) 'WARN'
-        return
-    }
-
-    # Pós-processamento: aplica pin apenas se o pacote existir
+    # Aplicando bloqueio (pin)
+    Show-Header -Text "Aplicando bloqueio (pin) nos programas da blacklist..." -Color $Yellow
     foreach ($id in $blacklistedIds) {
         try {
-            $exists = winget list --id $id 2>$null
-            if ($exists) {
+            if (winget list --id $id 2>$null) {
                 winget pin add --id $id --blocking --force --accept-source-agreements 2>$null | Out-Null
-                Write-Log ("Winget: pacote fixado (pin) para impedir upgrades futuros -> {0}" -f $id) 'INFO'
+                Write-Host "- A atualização deste programa foi bloqueada: $id"
             } else {
-                Write-Log ("Pacote {0} não encontrado. Pin ignorado." -f $id) 'WARN'
+                Write-Host "⚠ programa $id não encontrado. Pin ignorado." -ForegroundColor Yellow
             }
         } catch {
-            Write-Log ("Falha ao aplicar pin em {0}: {1}" -f $id, $_.Exception.Message) 'WARN'
+            Write-Host "✖ Falha ao aplicar pin em $id" -ForegroundColor Red
         }
     }
 
-    Write-Log 'Atualização de aplicativos via Winget finalizada.' 'INFO'
+    # Verificando programas com atualização disponível
+    Show-Header -Text "Verificando programas com atualização disponível..." -Color $Cyan
+    $updatesRaw = winget upgrade --source winget --accept-source-agreements | Out-String
+    $updates = @()
+
+    foreach ($line in ($updatesRaw -split "`n")) {
+        $parts = $line -split '\s{2,}'
+        if ($parts.Count -ge 3 -and $parts[0] -notmatch 'Id|^-+$' -and $parts[0].Trim() -ne '') {
+            $updates += [PSCustomObject]@{
+                Id      = $parts[0].Trim()
+                Nome    = $parts[1].Trim()
+                Versao  = $parts[2].Trim()
+            }
+        }
+    }
+
+    if ($updates.Count -eq 0) {
+        Show-Header -Text "Nenhum programa com atualização disponível." -Color $Yellow
+        Write-Log 'Nenhum programa com atualização disponível.' 'WARN'
+        return
+    }
+
+    # Filtra programas não bloqueados
+    $permitidos = $updates | Where-Object { $blacklistedIds -notcontains $_.Id }
+
+    if (-not $permitidos -or $permitidos.Count -eq 0) {
+        Show-Header -Text "Nenhum programa permitido para atualização." -Color $Yellow
+        Write-Log 'Nenhum programa permitido para atualização.' 'WARN'
+        return
+    }
+
+    # Atualizando programas permitidos
+    Show-Header -Text "Atualizando programas permitidos..." -Color $Cyan
+    $atualizados = @()
+    foreach ($pkg in $permitidos) {
+        if ($pkg.Id -and $pkg.Id -ne '-') {
+            try {
+                Write-Host "→ Atualizando: $($pkg.Nome)" -ForegroundColor Cyan
+                winget upgrade --id $pkg.Id --accept-source-agreements --accept-package-agreements --silent --disable-interactivity
+                $atualizados += $pkg.Nome
+            } catch {
+                Write-Host "✖ Falha ao atualizar: $($pkg.Nome)" -ForegroundColor Red
+            }
+        }
+    }
+
+    # Resumo final
+    Show-Header -Text "Atualização concluída!" -Color $Green
+    Show-Header -Text "programas atualizados: $($atualizados -join ', ')" -Color $Cyan
+    Show-Header -Text "programas bloqueados: $($blacklistedIds -join ', ')" -Color $Yellow
+    Write-Log ("Atualização concluída. Programas atualizados: {0}" -f ($atualizados -join ', ')) 'INFO'
+    Write-Log ("Programas bloqueados: {0}" -f ($blacklistedIds -join ', ')) 'INFO'
 }
