@@ -11,11 +11,11 @@
 		Fase 2	- Integridade do sistema
 		Fase 3	- Otimizações estruturais
 		Fase 4	- Limpeza de arquivos temporários
-		Fase 5	- Atualizações controladas
-		Fase 6	- Pós-atualização / Componentes
-		Fase 7	- Otimização de Armazenamento
-		Fase 8	- Segurança (Varredura contra malwares)
-		Fase 9	- Gestão (Centralização de logs no Servidor de Arquivos)
+		Fase 5	- Atualizações do Windows
+    Fase 6	- Atualizações dos programas inatalados
+    Fase 7	- Pós-atualização / Componentes
+		Fase 8	- Otimização de Armazenamento
+		Fase 9	- Segurança (Varredura contra malwares)
 	Valida os arquivos de backup gerados pelo programa Macrium Reflect
 
 .PARAMETER FileServer
@@ -44,11 +44,11 @@
     - Compatível com o sistema operacional Microsoft Windows
 
 .AUTHOR
-    IT4You Ltda
+    Tato, IT4You Ltda
 .VERSION
-    1.6
+    1.3
 .LASTUPDATED
-    12/01/2026
+    22/01/2026
 #>
 
 
@@ -707,20 +707,21 @@ $hasHDD = ($hddList.Count -gt 0)
         @{ Name='Clear-AllRecycleBins';      Action={ Clear-AllRecycleBins } }
         #@{ Name='Clear-RecentFilesHistory';  Action={ Clear-RecentFilesHistory } }
       )},
-    @{ Id=5; Title='Atualizações Controladas'; Steps=@(
+    @{ Id=5; Title='Atualizações do Windows'; Steps=@(
         @{ Name='Update-WindowsOS'; Action={ if($hasInet){ Update-WindowsOS } else { Write-Log 'Sem internet: pulando Update-WindowsOS' 'WARN' } } },
-        @{ Name='Update-MicrosoftStore'; Action={ if($hasInet){ Update-MicrosoftStore } else { Write-Log 'Sem internet: pulando Update-MicrosoftStore' 'WARN' } } },
-        @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
-        
+        @{ Name='Update-MicrosoftStore'; Action={ if($hasInet){ Update-MicrosoftStore } else { Write-Log 'Sem internet: pulando Update-MicrosoftStore' 'WARN' } } }
       )},
-    @{ Id=6; Title='Pós-atualização / Componentes'; Steps=@(
+    @{ Id=6; Title='Atualizações dos programas instalados'; Steps=@(
+        @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
+      )},
+    @{ Id=7; Title='Pós-atualização / Componentes'; Steps=@(
         @{ Name='Remove-OldUpdateFiles'; Action={ Remove-OldUpdateFiles } }
       )},
-    @{ Id=7; Title='Otimização de Armazenamento'; Steps=@(
+    @{ Id=8; Title='Otimização de Armazenamento'; Steps=@(
         @{ Name='Optimize-SSD'; Action={ if($hasSSD){ Optimize-SSD } else { Write-Log 'Nenhum SSD detectado: pulando Optimize-SSD' 'INFO' } } },
         @{ Name='Optimize-HDD'; Action={ if($hasHDD){ Optimize-HDD } else { Write-Log 'Nenhum HDD detectado: pulando Optimize-HDD' 'INFO' } } }
       )},
-    @{ Id=8; Title='Segurança'; Steps=@(
+    @{ Id=9; Title='Segurança'; Steps=@(
         @{ Name='Scan-AntiMalware';       Action={ Scan-AntiMalware } }        
       )}
   )
