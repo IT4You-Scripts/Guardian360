@@ -211,6 +211,7 @@ $StepDescriptions = @{
   'Clear-RecentFilesHistory' = 'Limpeza do histórico de arquivos recentes'
   'Update-WindowsOS'         = 'Atualização do Windows'
   'Update-MicrosoftStore'    = 'Atualização da Loja da Microsoft'
+  'Block-AppUpdates'         = 'Bloqueia atualização do QGIS (Firewall)'
   'Update-WingetApps'        = 'Atualização dos programas instalados via Winget'
   'Remove-OldUpdateFiles'    = 'Limpeza dos arquivos temporários dos componentes do Windows'
   'Optimize-SSD'             = 'Otimização de todos os SSDs disponíveis'
@@ -712,6 +713,7 @@ $hasHDD = ($hddList.Count -gt 0)
         @{ Name='Update-MicrosoftStore'; Action={ if($hasInet){ Update-MicrosoftStore } else { Write-Log 'Sem internet: pulando Update-MicrosoftStore' 'WARN' } } }
       )},
     @{ Id=6; Title='Atualizações dos programas instalados'; Steps=@(
+        @{ Name='Block-AppUpdates';  Action={ Block-AppUpdates } },
         @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
       )},
     @{ Id=7; Title='Pós-atualização / Componentes'; Steps=@(

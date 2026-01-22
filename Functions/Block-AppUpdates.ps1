@@ -1,4 +1,4 @@
-﻿# Bloqueia as atualizações de alguns programas como QGIS, GoodSync, MiniTool, TeamViewer...
+﻿# Cria regras no Firewall do Windows para bloquear atualização do QGIS 
 function Block-AppUpdates {
     [CmdletBinding()]
     param (
@@ -166,5 +166,5 @@ function Block-AppUpdates {
         }
     }
 
-    Write-Host "Processo concluído. Verifique as regras de firewall criadas."
+    #Write-Host "Processo concluído. Verifique as regras de firewall criadas."
 }
