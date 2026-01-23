@@ -951,19 +951,10 @@ if ($FileServer -and $FileServer.Trim() -ne '') {
   Write-Log ("FALHA GERAL (capturada): {0}" -f $_.ToString()) 'ERROR'
 } finally {
 
- # $argJsonPath = "C:\Guardian\guardian_arg.json"
- # if (Test-Path $argJsonPath) {
- #     try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue } catch {}
- # }
-
- 
-$argJsonPath = "C:\Guardian\guardian_arg.json"
-if (Test-Path $argJsonPath) {
-    try {
-        Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue > $null 2>&1
-    } catch {}
-}
-
+  $argJsonPath = "C:\Guardian\guardian_arg.json"
+  if (Test-Path $argJsonPath) {
+      try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue } catch {}
+  }
 
   Disable-QuickEditProtection
   Disable-ConsoleAppearance
