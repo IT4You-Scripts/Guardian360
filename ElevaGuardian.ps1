@@ -1,5 +1,4 @@
-﻿
-# ElevaGuardian.ps1
+﻿# ElevaGuardian.ps1
 # Executa Guardian.ps1 em PowerShell 7 usando credenciais criptografadas (AES)
 # Responsável por elevação, contexto de execução e repasse seguro de parâmetros
 
@@ -45,6 +44,7 @@ function Fail {
     Start-Sleep -Seconds 5
     exit 1
 }
+
 
 
 #region BootstrapUpgrade Guardian360 a partir do GitHub
@@ -123,7 +123,6 @@ foreach ($File in $Files) {
 #endregion
 
 
-
 # -------------------------------
 # Validações iniciais
 # -------------------------------
@@ -152,21 +151,36 @@ try {
     $cred     = [System.Management.Automation.PSCredential]::new($user,$secure)
 } catch { Fail "Não foi possível abrir as credenciais. Verifique chave AES." }
 
+# =========================================================
+# >>> PATCH JSON IPC (ARGUMENTOS ROBUSTOS)
+# =========================================================
+
+$argJsonPath = "C:\Guardian\guardian_arg.json"
+
+$argsObj = @{
+    FileServer    = $FileServer
+    Cliente       = $Cliente
+    ExecutaFases  = $ExecutaFases
+    PulaFases     = $PulaFases
+    LogLevel      = $LogLevel
+    Simulado      = [bool]$Simulado
+}
+
+try {
+    $argsObj | ConvertTo-Json -Depth 5 | Set-Content -Path $argJsonPath -Encoding UTF8
+}
+catch {
+    Fail "Falha ao criar guardian_arg.json: $($_.Exception.Message)"
+}
+
+# =========================================================
+
 # -------------------------------
 # Montagem segura do comando
 # -------------------------------
+# NÃO repassar mais argumentos pela linha de comando
 $argString = "-ExecutionPolicy Bypass -NoProfile -File `"$ScriptPath`""
 if ($NonInteractive) { $argString += " -NonInteractive" }
-if ($ExecutaFases)   { $argString += " -ExecutaFases $($ExecutaFases -join ',')" }
-if ($PulaFases)      { $argString += " -PulaFases $($PulaFases -join ',')" }
-if ($LogLevel)       { $argString += " -LogLevel $LogLevel" }
-if ($Simulado)       { $argString += " -Simulado" }
-if ($FileServer)     { $argString += " -FileServer $FileServer" }
-#if ($Cliente)        { $argString += " -Cliente `"$Cliente`"" }
-if ($Cliente) {
-    $safeCliente = $Cliente.Replace('"','\"')
-    $argString += " -Cliente `"$safeCliente`""
-}
 
 # -------------------------------
 # Configuração da janela
@@ -193,6 +207,7 @@ try {
         -PassThru
 
     Show-Header "Guardian iniciado com sucesso. PID: $($proc.Id)" -Color Green
-} catch {
+}
+catch {
     Fail "Falha ao iniciar Guardian.ps1: $($_.Exception.Message)"
 }

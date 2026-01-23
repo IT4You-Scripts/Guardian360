@@ -62,9 +62,26 @@ param(
   [string]$Cliente       # Nome do nosso Cliente (preferencialmente, nome da Empresa onde ele trabalha)
 )
 
+
+
+$argJsonPath = "C:\Guardian\guardian_arg.json"
+
+if (Test-Path $argJsonPath) {
+    $jsonArgs = Get-Content $argJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+
+    if (-not $FileServer)   { $FileServer   = $jsonArgs.FileServer }
+    if (-not $Cliente)      { $Cliente      = $jsonArgs.Cliente }
+    if (-not $ExecutaFases) { $ExecutaFases = $jsonArgs.ExecutaFases }
+    if (-not $PulaFases)    { $PulaFases    = $jsonArgs.PulaFases }
+    if (-not $LogLevel)     { $LogLevel     = $jsonArgs.LogLevel }
+    if (-not $Simulado)     { $Simulado     = $jsonArgs.Simulado }
+}
+
+
 if ([string]::IsNullOrWhiteSpace($Cliente)) {
     $Cliente = 'Cliente não identificado'
 }
+
 
 
 # --- BLOCO DE ELEVAÇÃO E DETECÇÃO DO POWERSHELL 7 ---
@@ -915,10 +932,14 @@ Start-Sleep -Milliseconds 500
 
 
 #region Envio do Log para Servidor de Arquivos
-if ($PSBoundParameters.ContainsKey('FileServer')) {
+if ($FileServer -and $FileServer.Trim() -ne '') {
+    Write-Log ("Enviando log para o servidor: {0}" -f $FileServer) 'INFO'
     Send-LogToServer -Server $FileServer
+} else {
+    Write-Log "Nenhum servidor informado: pulando envio do log." 'INFO'
 }
 #endregion
+
 
 
 
@@ -929,6 +950,12 @@ if ($PSBoundParameters.ContainsKey('FileServer')) {
 } catch {
   Write-Log ("FALHA GERAL (capturada): {0}" -f $_.ToString()) 'ERROR'
 } finally {
+
+  $argJsonPath = "C:\Guardian\guardian_arg.json"
+  if (Test-Path $argJsonPath) {
+      try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue } catch {}
+  }
+
   Disable-QuickEditProtection
   Disable-ConsoleAppearance
   Stop-Logging
