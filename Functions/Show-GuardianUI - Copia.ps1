@@ -15,23 +15,7 @@ function Show-GuardianUI {
     $window.Width = 1100
     $window.Height = 800
     $window.WindowStartupLocation = 'CenterScreen'
-    #$window.Background = 'Black'
-
-# Fundo com imagem
-$bgPath = "C:\Guardian\Assets\Images\guardian_bg.png"
-
-if (Test-Path $bgPath) {
-    $bgImage = New-Object Windows.Media.Imaging.BitmapImage([Uri]$bgPath)
-    $bgBrush = New-Object Windows.Media.ImageBrush($bgImage)
-    $bgBrush.Stretch = 'Fill'   # Fill / Uniform / UniformToFill
-    $window.Background = $bgBrush
-}
-else {
     $window.Background = 'Black'
-}
-
-
-
     $window.Topmost = $true
 
     # Força a abertura no monitor principal

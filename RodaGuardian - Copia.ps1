@@ -1,14 +1,11 @@
-﻿# ElevaGuardian.ps1
-# Executa Guardian.ps1 em PowerShell 7 usando credenciais criptografadas (AES)
-# Responsável por elevação, contexto de execução e repasse seguro de parâmetros
-
+﻿
+# RodaGuardian.ps1
 [CmdletBinding()]
 param (
-    # Infraestrutura
+    # Caminho do PowerShell 7
     [string]$PwshPath = (Get-Command pwsh).Source,
+    # Caminho do script principal Guardian
     [string]$ScriptPath = 'C:\Guardian\Guardian.ps1',
-    [string]$CredPath   = 'C:\Guardian\credenciais.xml',
-    [string]$KeyPath    = 'C:\Guardian\chave.key',
 
     # Opções de janela
     [switch]$NoWindow,
@@ -18,17 +15,23 @@ param (
     # Parâmetros para Guardian.ps1
     [int[]]$ExecutaFases,
     [int[]]$PulaFases,
-    [ValidateSet('INFO','WARN','ERROR','DEBUG')] [string]$LogLevel,
+
+    [ValidateSet('INFO','WARN','ERROR','DEBUG')]
+    [string]$LogLevel,
     [switch]$Simulado,
     [string]$FileServer,
     [string]$Cliente
 )
 
 # -------------------------------
-# Funções auxiliares
+# Função para cabeçalho estilizado
 # -------------------------------
 function Show-Header {
-    param([string]$Text,[ConsoleColor]$Color='Cyan')
+    param(
+        [string]$Text,
+        [ConsoleColor]$Color = 'Cyan'
+    )
+
     $bar = '─' * ($Text.Length + 2)
     Write-Host ""
     Write-Host ("┌$bar┐") -ForegroundColor $Color
@@ -37,15 +40,16 @@ function Show-Header {
     Write-Host ""
 }
 
+# -------------------------------
+# Função de falha controlada
+# -------------------------------
 function Fail {
-    param([string]$Message)
+    param ([string]$Message)
     Show-Header $Message -Color Red
     Write-Host "O script será encerrado em 5 segundos..." -ForegroundColor Yellow
     Start-Sleep -Seconds 5
     exit 1
 }
-
-
 
 #region BootstrapUpgrade Guardian360 a partir do GitHub
 $ErrorActionPreference = "Stop"
@@ -83,8 +87,6 @@ $Files = @(
     @{ Url = "$BaseUrl/Guardian.ps1";                            Path = "$BasePath\Guardian.ps1" },
     @{ Url = "$BaseUrl/Prepara.ps1";                             Path = "$BasePath\Prepara.ps1" },
     @{ Url = "$BaseUrl/Assets/Images/logotipo.png";              Path = "$BasePath\Assets\Images\logotipo.png" },
-    @{ Url = "$BaseUrl/Assets/Images/guardian_bg.png";           Path = "$BasePath\Assets\Images\guardian_bg.png" },
-    @{ Url = "$BaseUrl/Assets/Images/guardian_end_bg.png";       Path = "$BasePath\Assets\Images\guardian_end_bg.png" },
     @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1";          Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
     @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1";      Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
     @{ Url = "$BaseUrl/Functions/Clear-BrowserCache.ps1";        Path = "$BasePath\Functions\Clear-BrowserCache.ps1" },
@@ -124,65 +126,29 @@ foreach ($File in $Files) {
 }
 #endregion
 
+# -------------------------------
+# Validações
+# -------------------------------
+if (-not (Test-Path -LiteralPath $PwshPath))   { Fail "PowerShell 7 não encontrado em: $PwshPath" }
+if (-not (Test-Path -LiteralPath $ScriptPath)) { Fail "Guardian.ps1 não encontrado em: $ScriptPath" }
+
+# Desbloqueia o script alvo
+try { Unblock-File -Path $ScriptPath -ErrorAction SilentlyContinue } catch {}
+
+# Diretório de trabalho
+$workDir = Split-Path -Path $ScriptPath -Parent
 
 # -------------------------------
-# Validações iniciais
+# Montagem segura dos argumentos
 # -------------------------------
-try { $PwshPath   = (Resolve-Path $PwshPath).Path } catch { Fail "PowerShell 7 não encontrado em: $PwshPath" }
-try { $ScriptPath = (Resolve-Path $ScriptPath).Path } catch { Fail "Guardian.ps1 não encontrado em: $ScriptPath" }
-try { $CredPath   = (Resolve-Path $CredPath).Path } catch { Fail "Credenciais não encontradas em: $CredPath" }
-try { $KeyPath    = (Resolve-Path $KeyPath).Path } catch { Fail "Chave AES não encontrada em: $KeyPath" }
-
-# -------------------------------
-# Leitura das credenciais AES
-# -------------------------------
-try {
-    [xml]$xml = Get-Content -LiteralPath $CredPath -Raw
-    $user = $xml.Credenciais.UserName
-    $enc  = $xml.Credenciais.EncryptedPassword
-} catch { Fail "Falha ao ler credenciais: $($_.Exception.Message)" }
-
-if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($enc)) {
-    Fail "Credenciais incompletas (UserName / EncryptedPassword)."
-}
-
-try {
-    $keyBytes = [IO.File]::ReadAllBytes($KeyPath)
-    $secure   = ConvertTo-SecureString -String $enc -Key $keyBytes
-    if ($user -notlike '*\*' -and $user -notlike '*@*') { $user = "$env:COMPUTERNAME\$user" }
-    $cred     = [System.Management.Automation.PSCredential]::new($user,$secure)
-} catch { Fail "Não foi possível abrir as credenciais. Verifique chave AES." }
-
-# =========================================================
-# >>> PATCH JSON IPC (ARGUMENTOS ROBUSTOS)
-# =========================================================
-
-$argJsonPath = "C:\Guardian\guardian_arg.json"
-
-$argsObj = @{
-    FileServer    = $FileServer
-    Cliente       = $Cliente
-    ExecutaFases  = $ExecutaFases
-    PulaFases     = $PulaFases
-    LogLevel      = $LogLevel
-    Simulado      = [bool]$Simulado
-}
-
-try {
-    $argsObj | ConvertTo-Json -Depth 5 | Set-Content -Path $argJsonPath -Encoding UTF8
-}
-catch {
-    Fail "Falha ao criar guardian_arg.json: $($_.Exception.Message)"
-}
-
-# =========================================================
-
-# -------------------------------
-# Montagem segura do comando
-# -------------------------------
-# NÃO repassar mais argumentos pela linha de comando
-$argString = "-ExecutionPolicy Bypass -NoProfile -File `"$ScriptPath`""
-if ($NonInteractive) { $argString += " -NonInteractive" }
+$argList = @('-ExecutionPolicy','Bypass','-NoProfile','-File',$ScriptPath)
+if ($NonInteractive) { $argList += '-NonInteractive' }
+if ($ExecutaFases)   { $argList += '-ExecutaFases'; $argList += ($ExecutaFases -join ',') }
+if ($PulaFases)      { $argList += '-PulaFases'; $argList += ($PulaFases -join ',') }
+if ($LogLevel)       { $argList += '-LogLevel'; $argList += $LogLevel }
+if ($Simulado)       { $argList += '-Simulado' }
+if ($FileServer)     { $argList += '-FileServer'; $argList += $FileServer }
+if ($Cliente)        { $argList += '-Cliente'; $argList += "`"$Cliente`"" }
 
 # -------------------------------
 # Configuração da janela
@@ -190,26 +156,19 @@ if ($NonInteractive) { $argString += " -NonInteractive" }
 $winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } else { 'Normal' }
 
 # -------------------------------
-# Log do comando final
+# Log do comando final para debug
 # -------------------------------
 Show-Header "Comando final:" -Color Yellow
-Write-Host "$PwshPath $argString" -ForegroundColor Cyan
+Write-Host "$PwshPath $($argList -join ' ')" -ForegroundColor Cyan
 
 # -------------------------------
 # Execução do Guardian
 # -------------------------------
+Push-Location $workDir
 try {
-    $proc = Start-Process `
-        -FilePath $PwshPath `
-        -ArgumentList $argString `
-        -Credential $cred `
-        -WorkingDirectory (Split-Path $ScriptPath -Parent) `
-        -WindowStyle $winStyle `
-        -UseNewEnvironment `
-        -PassThru
-
-    Show-Header "Guardian iniciado com sucesso. PID: $($proc.Id)" -Color Green
+    & $PwshPath @argList
+    Show-Header "Guardian executado com sucesso!" -Color Green
+} catch {
+    Fail "Falha ao iniciar o Guardian.ps1: $($_.Exception.Message)"
 }
-catch {
-    Fail "Falha ao iniciar Guardian.ps1: $($_.Exception.Message)"
-}
+Pop-Location
