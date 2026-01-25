@@ -121,7 +121,15 @@ foreach ($File in $Files) {
             -ErrorAction Stop
     }
     catch {
-        Fail "Falha ao atualizar: $($File.Path)"
+
+        # Se for imagem, só avisa
+        if ($File.Path -match "\.png$") {
+            Write-Host "Aviso: Falha ao baixar imagem $($File.Path)" -ForegroundColor DarkYellow
+            continue
+        }
+
+        # Se for script, aí sim aborta
+        Fail "Falha crítica ao atualizar: $($File.Path)"
     }
 }
 
