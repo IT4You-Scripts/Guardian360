@@ -188,30 +188,56 @@ $logFile     = Join-Path $logDir ("{0}_{1}.log" -f $computer, $stamp)
 
 
 
-# === BLOQUEIO DE EXECUÇÃO SE HOUVER LOG < 24h ===
-$baseLogDir  = Join-Path $root 'Logs'
-$year        = Get-Date -Format 'yyyy'
-$monthNumber = Get-Date -Format 'MM'
-$monthName   = (Get-Culture).DateTimeFormat.GetMonthName([int]$monthNumber)
-$monthFolder = ("{0}. {1}" -f $monthNumber, (Get-Culture).TextInfo.ToTitleCase($monthName.ToLower()))
-$logDir      = Join-Path (Join-Path $baseLogDir $year) $monthFolder
-$computer    = $env:COMPUTERNAME.ToUpper()
-
+# === VERIFICAÇÃO DE EXECUÇÃO RECENTE (<24h) ===
 if (Test-Path $logDir) {
     $ultimoLog = Get-ChildItem $logDir -Filter "$computer*.log" -ErrorAction SilentlyContinue |
                  Sort-Object LastWriteTime -Descending |
                  Select-Object -First 1
 
     if ($ultimoLog) {
-        $horas = (New-TimeSpan -Start $ultimoLog.LastWriteTime -End (Get-Date)).TotalHours
+        $horas = (New-TimeSpan $ultimoLog.LastWriteTime (Get-Date)).TotalHours
 
         if ($horas -lt 24) {
-            # SAÍDA TOTALMENTE SILENCIOSA
+
+            Clear-Host
+
+            # Header manual (sem depender da função)
+            $text = "Guardian executado há menos de 24 horas"
+            $bar  = '─' * ($text.Length + 2)
+            Write-Host "┌$bar┐" -ForegroundColor Cyan
+            Write-Host "│ $text │" -ForegroundColor Cyan
+            Write-Host "└$bar┘" -ForegroundColor Cyan
+
+            Write-Host ""
+            Write-Host "Última execução: $($ultimoLog.LastWriteTime)"
+            $ts = New-TimeSpan $ultimoLog.LastWriteTime (Get-Date)
+
+function Format-HumanTime($ts) {
+    if ($ts.TotalDays -ge 1) {
+        return "{0} dia(s) {1}h {2}m" -f [int]$ts.TotalDays, $ts.Hours, $ts.Minutes
+    }
+    elseif ($ts.TotalHours -ge 1) {
+        return "{0}h {1}m" -f $ts.Hours, $ts.Minutes
+    }
+    else {
+        return "{0} min" -f [int]$ts.TotalMinutes
+    }
+}
+
+$tempoHumano = Format-HumanTime $ts
+Write-Host "Tempo decorrido: $tempoHumano"
+
+            Write-Host ""
+            Write-Host "Encerrando manutenção para evitar execução redundante..."
+            Write-Host ""
+
+            Start-Sleep 3
             exit 0
         }
     }
 }
-# ================================================
+# =============================================
+
 
 
 
