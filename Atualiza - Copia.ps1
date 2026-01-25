@@ -1,3 +1,4 @@
+
 #region BootstrapUpgrade Guardian360 a partir do GitHub
 
 $ErrorActionPreference = "Stop"
@@ -51,7 +52,7 @@ foreach ($Folder in $Folders) {
     }
 }
 
-# Arquivos a serem gerenciados pelo updater
+# Arquivos a serem copiados pelo Script
 $Files = @(
     @{ Url = "$BaseUrl/Atualiza.ps1";                            Path = "$BasePath\Atualiza.ps1" },
     @{ Url = "$BaseUrl/CriaCredenciais.ps1";                     Path = "$BasePath\CriaCredenciais.ps1" },
@@ -85,30 +86,7 @@ $Files = @(
     @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1";         Path = "$BasePath\Functions\Update-WingetApps.ps1" }
 )
 
-# -------------------------------
-# LIMPEZA BRUTAL (só arquivos gerenciados)
-# -------------------------------
-Show-Header "Limpando arquivos antigos do Guardian..." -Color Yellow
-
-foreach ($File in $Files) {
-    try {
-        if (Test-Path $File.Path) {
-
-            # Remove atributo ReadOnly
-            attrib -R $File.Path 2>$null
-
-            # Remove arquivo silenciosamente
-            Remove-Item $File.Path -Force -ErrorAction SilentlyContinue
-        }
-    }
-    catch {
-        Write-Host "Aviso: Não foi possível remover $($File.Path)" -ForegroundColor DarkYellow
-    }
-}
-
-# -------------------------------
-# DOWNLOAD ATUALIZADO
-# -------------------------------
+# Execução principal (atualização)
 Show-Header "Atualizando Guardian 360..." -Color Cyan
 
 foreach ($File in $Files) {
@@ -117,7 +95,6 @@ foreach ($File in $Files) {
             -Uri "$($File.Url)$NoCache" `
             -OutFile $File.Path `
             -UseBasicParsing `
-            -Headers @{ "Cache-Control"="no-cache" } `
             -ErrorAction Stop
     }
     catch {
@@ -125,7 +102,7 @@ foreach ($File in $Files) {
     }
 }
 
-# Final OK
+# Se chegou até aqui, tudo certo
 Show-Header "Atualização concluída com sucesso!" -Color Green
 exit 0
 
