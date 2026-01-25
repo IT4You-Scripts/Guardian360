@@ -188,31 +188,18 @@ $logFile     = Join-Path $logDir ("{0}_{1}.log" -f $computer, $stamp)
 
 
 
-# === BLOQUEIO DE EXECUÇÃO SE HOUVER LOG < 24h ===
-$baseLogDir  = Join-Path $root 'Logs'
-$year        = Get-Date -Format 'yyyy'
-$monthNumber = Get-Date -Format 'MM'
-$monthName   = (Get-Culture).DateTimeFormat.GetMonthName([int]$monthNumber)
-$monthFolder = ("{0}. {1}" -f $monthNumber, (Get-Culture).TextInfo.ToTitleCase($monthName.ToLower()))
-$logDir      = Join-Path (Join-Path $baseLogDir $year) $monthFolder
-$computer    = $env:COMPUTERNAME.ToUpper()
-
+# === Verificação de execução recente (último log) ===
 if (Test-Path $logDir) {
-    $ultimoLog = Get-ChildItem $logDir -Filter "$computer*.log" -ErrorAction SilentlyContinue |
-                 Sort-Object LastWriteTime -Descending |
-                 Select-Object -First 1
-
+    $ultimoLog = Get-ChildItem -Path $logDir -Filter "*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($ultimoLog) {
-        $horas = (New-TimeSpan -Start $ultimoLog.LastWriteTime -End (Get-Date)).TotalHours
-
-        if ($horas -lt 24) {
-            # SAÍDA TOTALMENTE SILENCIOSA
-            exit 0
+        $horasDesdeUltimoLog = (New-TimeSpan -Start $ultimoLog.LastWriteTime -End (Get-Date)).TotalHours
+        if ($horasDesdeUltimoLog -lt 48) {
+            #Write-Host "Última execução foi há $([math]::Round($horasDesdeUltimoLog,2)) horas. Saindo sem executar nada." -ForegroundColor Yellow
+            #exit 0
         }
     }
 }
 # ================================================
-
 
 
 
