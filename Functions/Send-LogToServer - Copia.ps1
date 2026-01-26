@@ -33,15 +33,8 @@ function Send-LogToServer {
         }
 
         # Destino SMB
-        $destinoDir  = "\\$Server\TI\Vistorias\$ano\$mesFmt"
+        $destinoDir  = "\\$Server\TI\$ano\$mesFmt"
         $destinoFile = Join-Path $destinoDir "$($env:COMPUTERNAME).log"
-
-        
-        # Cria pasta de destino se não existir (incluindo Vistorias)
-        if (-not (Test-Path $destinoDir)) {
-            New-Item -Path $destinoDir -ItemType Directory -Force | Out-Null
-        }
-
 
         # Primeira tentativa: copiar usando credenciais salvas
         try {
