@@ -170,48 +170,6 @@ Set-ExecutionPolicy RemoteSigned -Force
 Show-Header "Políticas restauradas" -Color Green
 $PolicyStatus = "OK"
 
-
-
-# ===============================
-# Modo totalmente silencioso
-# ===============================
-$ErrorActionPreference = "SilentlyContinue"
-$ProgressPreference    = "SilentlyContinue"
-
-# ===============================
-# Remove pasta legado
-# ===============================
-if (Test-Path "C:\IT4You") {
-    Remove-Item "C:\IT4You" -Recurse -Force
-}
-
-# ===============================
-# Remove qualquer tarefa com "Manutenção Automatizada" no nome
-# ===============================
-Get-ScheduledTask | Where-Object {
-    $_.TaskName -like "*Manutenção Automatizada*"
-} | ForEach-Object {
-
-    # Normaliza TaskPath (Scheduler usa "\" como raiz)
-    $path = $_.TaskPath.TrimEnd("\")
-    if ($path -eq "") {
-        $fullTask = "\$($_.TaskName)"
-    }
-    else {
-        $fullTask = "$path\$($_.TaskName)"
-    }
-
-    # Remove via schtasks (mais confiável que Unregister-ScheduledTask)
-    schtasks /Delete /TN "$fullTask" /F > $null 2>&1
-}
-
-
-
-
-
-
-
-
 # ==========================
 # Resumo Final
 # ==========================
