@@ -7,7 +7,7 @@
 .DESCRIPTION
     Este script orquestra um conjunto de funções organizadas em etapas cronológicas para:
 	Executa funções específicas para cada fase:
-		Fase 1	- Invetário de Hardware e Software
+		Fase 1	- Inventário de Hardware e Software
 		Fase 2	- Integridade do sistema
 		Fase 3	- Otimizações estruturais
 		Fase 4	- Limpeza de arquivos temporários
