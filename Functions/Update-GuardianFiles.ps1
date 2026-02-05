@@ -58,7 +58,7 @@ function Update-GuardianFiles {
         # Baixar versão nova sem sobrescrever a atual
         @{ Url = "$BaseUrl/RodaGuardian.ps1";                        Path = "$BasePath\RodaGuardian.new" },
         @{ Url = "$BaseUrl/ElevaGuardian.ps1";                       Path = "$BasePath\ElevaGuardian.new" },
-        @{ Url = "$BaseUrl/Update-GuardianFiles.ps1";                Path = "$BasePath\Update-GuardianFiles.new" },
+        @{ Url = "$BaseUrl/Functions/Update-GuardianFiles.ps1";      Path = "$BasePath\Functions\Update-GuardianFiles.new" },
         
         # Baixar versão nova sobrescrevendo as atuais
         @{ Url = "$BaseUrl/Atualiza.ps1";                            Path = "$BasePath\Atualiza.ps1" },
@@ -142,7 +142,7 @@ function Update-GuardianFiles {
 $AtomicTargets = @(
     @{ New = "$BasePath\RodaGuardian.new";                    Final = "$BasePath\RodaGuardian.ps1" },
     @{ New = "$BasePath\ElevaGuardian.new";                   Final = "$BasePath\ElevaGuardian.ps1" },
-    @{ New = "$BasePath\Update-GuardianFiles.new";            Final = "$BasePath\Update-GuardianFiles.ps1" }
+    @{ New = "$BasePath\Functions\Update-GuardianFiles.new";  Final = "$BasePath\Functions\Update-GuardianFiles.ps1" }
 )
 
 foreach ($item in $AtomicTargets) {

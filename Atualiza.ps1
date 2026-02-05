@@ -142,7 +142,7 @@ function Update-GuardianFiles {
 $AtomicTargets = @(
     @{ New = "$BasePath\RodaGuardian.new";                    Final = "$BasePath\RodaGuardian.ps1" },
     @{ New = "$BasePath\ElevaGuardian.new";                   Final = "$BasePath\ElevaGuardian.ps1" },
-    @{ New = "$BasePath\Update-GuardianFiles.new";            Final = "$BasePath\Update-GuardianFiles.ps1" }
+    @{ New = "$BasePath\Functions\Update-GuardianFiles.new";  Final = "$BasePath\Functions\Update-GuardianFiles.ps1" }
 )
 
 foreach ($item in $AtomicTargets) {
