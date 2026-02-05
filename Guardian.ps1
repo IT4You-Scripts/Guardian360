@@ -1093,7 +1093,7 @@ if ($FileServer -and $FileServer.Trim() -ne '') {
     }
 
 
-    #& "C:\Guardian\Functions\Optimize-JsonReport.ps1" -Pasta "C:\Guardian\Json"
+    & "C:\Guardian\Functions\Optimize-JsonReport.ps1" -Pasta "C:\Guardian\Json"
 
     Disable-QuickEditProtection
     Disable-ConsoleAppearance
