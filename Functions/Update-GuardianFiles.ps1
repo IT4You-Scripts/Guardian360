@@ -92,9 +92,9 @@ function Update-GuardianFiles {
         @{ Url = "$BaseUrl/Functions/Write-JsonResult.ps1";          Path = "$BasePath\Functions\Write-JsonResult.ps1" }
     )
 
-    # -------------------------------
+    # --------------------------------------------------------------
     # Limpeza dos atributos Read-Only (caso existam)
-    # -------------------------------
+    # --------------------------------------------------------------
     Show-Header "Baixando arquivos do Guardian 360..." -Color Yellow
 
     foreach ($File in $Files) {
