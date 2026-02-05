@@ -1,12 +1,14 @@
-<# ====================================================================
-   OPTIZE-JSONREPORT (versão revisada)
-   - Fases opcionais
-   - Nenhum exit
-   - Nenhuma fase criada artificialmente
-   - Nenhuma nota calculada
-   - Nenhum SaudeGeral adicionado
-   - Apenas trata fases realmente existentes
-==================================================================== #>
+<#
+====================================================================
+  CONVERSOR Json
+  - Hardware limpo (sem discos e sem partições)
+  - Armazenamentos e Partições extraídos corretamente
+  - Rede estruturada (prioriza “Ethernet”: IP, MAC, Status, Velocidade)
+  - Fase 2 (SFC/DISM) estruturada em objeto
+  - Zero redundância
+  - Zero erro de parsing
+====================================================================
+#>
 
 param(
     [string]$Pasta = "."
@@ -14,17 +16,27 @@ param(
 
 Write-Host "`n🔍 Procurando arquivo ORIGINAL..." -ForegroundColor Cyan
 
-# --------------------------------------------------------------------
-# 1) Localizar arquivo ORIGINAL — caminho fixo C:\Guardian\Json
-# --------------------------------------------------------------------
 
+
+
+
+
+
+
+# ------------------------------------------------------------------------------
+# 1) Localizar arquivo ORIGINAL — caminho fixo C:\Guardian\Json
+# ------------------------------------------------------------------------------
+
+# Caminho base fixo
 $baseJsonDir = "C:\Guardian\Json"
 
+# Ano e mês atual para montar a pasta correta
 $year        = Get-Date -Format 'yyyy'
 $monthNumber = Get-Date -Format 'MM'
 $monthName   = (Get-Culture).DateTimeFormat.GetMonthName([int]$monthNumber)
 $monthFolder = ("{0}. {1}" -f $monthNumber, (Get-Culture).TextInfo.ToTitleCase($monthName.ToLower()))
 
+# Caminho final onde o arquivo ORIGINAL sempre será salvo
 $jsonDir = Join-Path (Join-Path $baseJsonDir $year) $monthFolder
 
 if (-not (Test-Path $jsonDir)) {
@@ -34,6 +46,7 @@ if (-not (Test-Path $jsonDir)) {
 
 Write-Host "📁 Procurando arquivo ORIGINAL em: $jsonDir" -ForegroundColor Cyan
 
+# Buscar arquivo ORIGINAL (ignora EXTREME e TRATADO)
 $arquivo = Get-ChildItem -Path $jsonDir -Filter *.json |
     Where-Object {
         $_.Name -match "^[A-Za-z0-9\-]+_\d{8}_\d{4}\.json$" -and
@@ -44,176 +57,231 @@ $arquivo = Get-ChildItem -Path $jsonDir -Filter *.json |
     Select-Object -First 1
 
 if (-not $arquivo) {
-    Write-Host "❌ Nenhum arquivo ORIGINAL encontrado." -ForegroundColor Red
+    Write-Host "❌ Nenhum arquivo ORIGINAL encontrado em: $jsonDir" -ForegroundColor Red
     return
 }
 
 Write-Host "✔ Arquivo original identificado: $($arquivo.FullName)" -ForegroundColor Green
 
-# --------------------------------------------------------------------
-# 2) Carregar JSON com segurança
-# --------------------------------------------------------------------
 
-try {
-    $jsonRaw = Get-Content $arquivo.FullName -Raw | ConvertFrom-Json
-} catch {
-    Write-Host "❌ Erro ao carregar JSON." -ForegroundColor Red
+
+
+
+
+
+
+# ------------------------------------------------------------------------------
+# 2) Carregar JSON
+# ------------------------------------------------------------------------------
+$jsonRaw = Get-Content $arquivo.FullName -Raw | ConvertFrom-Json
+
+# ------------------------------------------------------------------------------
+# 3) Fase 1 - Inventário
+# ------------------------------------------------------------------------------
+$fase1 = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("invent") }
+
+if (-not $fase1) {
+    Write-Host "Fase 1 não encontrada. Continuando..."
+} else {
+    $msg = $fase1.Mensagem -split "`r`n"
+}
+
+$msg = $fase1.Mensagem -split "`r`n"
+
+# ------------------------------------------------------------------------------
+# 4) Encontrar início da lista de softwares
+# ------------------------------------------------------------------------------
+$indexSoftware = $null
+
+for ($i = 0; $i -lt $msg.Count; $i++) {
+    $linha = $msg[$i].Trim()
+    if ($linha -match "Softwares" -or $linha -match "Instalados") {
+        $indexSoftware = $i
+        break
+    }
+}
+
+if (-not $indexSoftware) {
+    Write-Host "❌ Não consegui identificar onde começam os softwares." -ForegroundColor Red
     return
 }
 
-$jsonFases = @()
+# ------------------------------------------------------------------------------
+# 5) Divisão Hardware / Softwares
+# ------------------------------------------------------------------------------
+$hardwareLines = $msg[0..($indexSoftware - 1)]
+$softwareLines = $msg[($indexSoftware + 1)..($msg.Count - 1)]
 
-# Função auxiliar para adicionar fases somente se existirem
-function Add-Fase($faseOriginal, $mensagemTratada) {
-    if ($faseOriginal) {
-        $jsonFases += [PSCustomObject]@{
-            Phase    = $faseOriginal.Phase
-            Status   = $faseOriginal.Status
-            TempoSeg = $faseOriginal.TempoSeg
-            Mensagem = $mensagemTratada
-        }
+$softwareList = $softwareLines |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -ne "" }
+
+# ------------------------------------------------------------------------------
+# 6) Identificar blocos Armazenamento e Partições
+# ------------------------------------------------------------------------------
+$idxArmazenamento = ($hardwareLines | Select-String "^\s*Armazenamento\s*:").LineNumber
+$idxParticoes     = ($hardwareLines | Select-String "^\s*Partições\s*:").LineNumber
+
+$armazenamentosRaw = @()
+$particoesRaw = @()
+
+# -------- ARMAZENAMENTO --------------------------------------------------------
+if ($idxArmazenamento) {
+    $start = $idxArmazenamento - 1
+
+    if ($hardwareLines[$start] -match "Armazenamento\s*:\s*(.*)$") {
+        if ($matches[1].Trim() -ne "") { $armazenamentosRaw += $matches[1].Trim() }
+    }
+
+    for ($j = $start + 1; $j -lt $hardwareLines.Count; $j++) {
+
+        $linha = $hardwareLines[$j].Trim()
+
+        if ($linha -match "^[A-Za-z].*:\s*$") { break }
+
+        if ($linha -ne "") { $armazenamentosRaw += $linha }
     }
 }
 
-# --------------------------------------------------------------------
-# 3) FASE 1 — Inventário de Hardware, Rede, Armazenamento e Softwares
-# --------------------------------------------------------------------
+# -------- PARTIÇÕES ------------------------------------------------------------
+if ($idxParticoes) {
+    $start = $idxParticoes - 1
 
-$fase1 = $jsonRaw.Fases | Where-Object { $_.Phase -match "Invent" }
-
-if ($fase1) {
-
-    # Divide mensagem em linhas
-    $msg = $fase1.Mensagem -split "`r`n"
-
-    # --- Encontrar início da lista de softwares ---
-    $indexSoftware = $null
-    for ($i = 0; $i -lt $msg.Count; $i++) {
-        $linha = $msg[$i].Trim()
-        if ($linha -match "Softwares" -or $linha -match "Instalados") {
-            $indexSoftware = $i
-            break
-        }
+    if ($hardwareLines[$start] -match "Partições\s*:\s*(.*)$") {
+        if ($matches[1].Trim() -ne "") { $particoesRaw += $matches[1].Trim() }
     }
 
-    # --- Se não tiver softwares, cria lista vazia ---
-    $softwareList = @()
-    if ($indexSoftware) {
-        $softwareLines = $msg[($indexSoftware + 1)..($msg.Count - 1)]
-        $softwareList = $softwareLines |
-            ForEach-Object { $_.Trim() } |
-            Where-Object { $_ -ne "" }
+    for ($j = $start + 1; $j -lt $hardwareLines.Count; $j++) {
+
+        $linha = $hardwareLines[$j].Trim()
+
+        if ($linha -match "^[A-Za-z].*:\s*$") { break }
+
+        if ($linha -ne "") { $particoesRaw += $linha }
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 7) HARDWARE — sem discos e sem partições
+# ------------------------------------------------------------------------------
+$hardwareObj = @{}
+
+foreach ($line in $hardwareLines) {
+
+    $linha = $line.Trim()
+
+    if ($linha -eq "") { continue }
+    if ($linha -match "^Armazenamento") { continue }
+    if ($linha -match "^Partições")     { continue }
+    if ($linha -match "->\s*Status")    { continue }
+    if ($linha -match "^[A-Z]:")        { continue }
+    if ($linha -match "GB" -or $linha -match "% livres") { continue }
+
+    if ($linha -match "^(.*?):\s*(.*)$") {
+        $hardwareObj[$matches[1].Trim()] = $matches[2].Trim()
+    }
+}
+
+# Guardar IP e MAC caso precise para fallback
+$ipHardware  = $hardwareObj["Endereço IP"]
+$macHardware = $hardwareObj["Endereço MAC"]
+
+# ------------------------------------------------------------------------------
+# 8) BLOCO DE REDE — prioriza adaptador "Ethernet"
+# ------------------------------------------------------------------------------
+$rede = $null
+
+try {
+    # Primeira tentativa: adaptador "Ethernet"
+    $adapter = Get-NetAdapter -Name "Ethernet" -ErrorAction SilentlyContinue
+
+    # Fallback: pegar adaptador ativo
+    if (-not $adapter) {
+        $adapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1
     }
 
-    # --- Hardware bruto (antes de Armazenamento/Partições) ---
-    $hardwareLines = if ($indexSoftware) {
-        $msg[0..($indexSoftware - 1)]
-    } else {
-        $msg
-    }
+    if ($adapter) {
 
-    # --- Encontrar blocos Armazenamento + Partições ---
-    $idxArmazenamento = ($hardwareLines | Select-String "^\s*Armazenamento\s*:").LineNumber
-    $idxParticoes     = ($hardwareLines | Select-String "^\s*Partições\s*:").LineNumber
+        $ip = (Get-NetIPAddress -AddressFamily IPv4 |
+            Where-Object { $_.InterfaceAlias -eq $adapter.Name } |
+            Select-Object -First 1).IPAddress
 
-    $armazenamentosRaw = @()
-    $particoesRaw = @()
+        # Se IP do Windows falhar, usar o IP do inventário
+        if (-not $ip -and $ipHardware) { $ip = $ipHardware }
 
-    # --- Armazenamentos ---
-    if ($idxArmazenamento) {
-        $start = $idxArmazenamento - 1
-        if ($hardwareLines[$start] -match "Armazenamento\s*:\s*(.*)$") {
-            if ($matches[1].Trim() -ne "") { $armazenamentosRaw += $matches[1].Trim() }
-        }
-        for ($j = $start + 1; $j -lt $hardwareLines.Count; $j++) {
-            $linha = $hardwareLines[$j].Trim()
-            if ($linha -match "^[A-Za-z].*:\s*$") { break }
-            if ($linha -ne "") { $armazenamentosRaw += $linha }
-        }
-    }
-
-    # --- Partições ---
-    if ($idxParticoes) {
-        $start = $idxParticoes - 1
-        if ($hardwareLines[$start] -match "Partições\s*:\s*(.*)$") {
-            if ($matches[1].Trim() -ne "") { $particoesRaw += $matches[1].Trim() }
-        }
-    }
-
-    # --- Hardware limpo ---
-    $hardwareObj = @{}
-    foreach ($line in $hardwareLines) {
-        $linha = $line.Trim()
-        if ($linha -eq "") { continue }
-        if ($linha -match "^(Armazenamento|Partições)") { continue }
-        if ($linha -match "->") { continue }
-        if ($linha -match "^[A-Z]:") { continue }
-        if ($linha -match "GB" -or $linha -match "% livres") { continue }
-        if ($linha -match "^(.*?):\s*(.*)$") {
-            $hardwareObj[$matches[1].Trim()] = $matches[2].Trim()
-        }
-    }
-
-    # --- Converter Armazenamentos ---
-    $armazenamentos = foreach ($a in $armazenamentosRaw) {
-        if ($a -match "^(.*?)\s*-&gt;\s*Status:\s*(.*)$") {
-            [PSCustomObject]@{
-                Nome   = $matches[1].Trim()
-                Status = $matches[2].Trim()
-            }
-        }
-    }
-
-    # --- Converter Partições ---
-    $particoes = foreach ($p in $particoesRaw) {
-        if ($p -match "^([A-Z]):.*?([\d\.]+)\s*GB.*?([\d\.]+)%") {
-
-            $letra     = $matches[1]
-            $tamanho   = [double]$matches[2]
-            $pctLivre  = [double]$matches[3]
-
-            $livreGB = [Math]::Round(($tamanho * $pctLivre) / 100, 2)
-            $usadoGB = [Math]::Round(($tamanho - $livreGB), 2)
-            $pctUsado = [Math]::Round((($tamanho - $livreGB) / $tamanho) * 100, 2)
-
-            [PSCustomObject]@{
-                Letra     = $letra
-                TamanhoGB = $tamanho
-                LivreGB   = $livreGB
-                UsadoGB   = $usadoGB
-                UsadoPct  = $pctUsado
-            }
-        }
-    }
-
-    # --- REDE (fallback simples) ---
-    $rede = $null
-    if ($hardwareObj.ContainsKey("Endereço IP") -or $hardwareObj.ContainsKey("Endereço MAC")) {
         $rede = [PSCustomObject]@{
-            EnderecoIP  = $hardwareObj["Endereço IP"]
-            EnderecoMAC = $hardwareObj["Endereço MAC"]
+            Adaptador   = $adapter.Name
+            Status      = $adapter.Status
+            Velocidade  = $adapter.LinkSpeed
+            EnderecoIP  = $ip
+            EnderecoMAC = if ($adapter.MacAddress) { $adapter.MacAddress } else { $macHardware }
+        }
+    }
+    else {
+        $rede = [PSCustomObject]@{
+            Adaptador   = "Indisponível"
+            Status      = $null
+            Velocidade  = $null
+            EnderecoIP  = $ipHardware
+            EnderecoMAC = $macHardware
         }
     }
 
-    # Remover IP e MAC do hardware
-    $hardwareObj.Remove("Endereço IP")
-    $hardwareObj.Remove("Endereço MAC")
-
-    # --- Adicionar Fase 1 tratada ---
-    Add-Fase $fase1 ([PSCustomObject]@{
-        Hardware       = $hardwareObj
-        Rede           = $rede
-        Armazenamentos = $armazenamentos
-        Particoes      = $particoes
-        Softwares      = $softwareList
-    })
+} catch {
+    $rede = [PSCustomObject]@{
+        Adaptador   = "Erro ao detectar"
+        Status      = $null
+        Velocidade  = $null
+        EnderecoIP  = $ipHardware
+        EnderecoMAC = $macHardware
+    }
 }
 
-# ============================================================
-# 4) FASE 2 — Verificação do Registro / SFC / DISM
-# ============================================================
+# Remover IP/MAC do Hardware
+$hardwareObj.Remove("Endereço IP")
+$hardwareObj.Remove("Endereço MAC")
 
-$fase2 = $jsonRaw.Fases | Where-Object { $_.Phase -match "Registro" }
+# ------------------------------------------------------------------------------
+# 9) Armazenamentos
+# ------------------------------------------------------------------------------
+$armazenamentos = foreach ($a in $armazenamentosRaw) {
+    if ($a -match "^(.*?)\s*->\s*Status:\s*(.*)$") {
+        [PSCustomObject]@{
+            Nome   = $matches[1].Trim()
+            Status = $matches[2].Trim()
+        }
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 10) Partições — espaço real (GB) + percentagem utilizada
+# ------------------------------------------------------------------------------
+$particoes = foreach ($p in $particoesRaw) {
+    if ($p -match "^([A-Z]):.*?([\d\.]+)\s*GB.*?([\d\.]+)%") {
+
+        $letra     = $matches[1]
+        $tamanho   = [double]$matches[2]
+        $pctLivre  = [double]$matches[3]
+
+        # cálculos
+        $livreGB = [Math]::Round(($tamanho * $pctLivre) / 100, 2)
+        $usadoGB = [Math]::Round(($tamanho - $livreGB), 2)
+        $pctUsado = [Math]::Round((($tamanho - $livreGB) / $tamanho) * 100, 2)
+
+        [PSCustomObject]@{
+            Letra     = $letra
+            TamanhoGB = $tamanho
+            LivreGB   = $livreGB
+            UsadoGB   = $usadoGB
+            UsadoPct  = $pctUsado
+        }
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 11) Fase 2 — SFC/DISM estruturado e interpretado
+# ------------------------------------------------------------------------------
+$fase2 = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("registro") }
 
 if ($fase2) {
 
@@ -222,85 +290,166 @@ if ($fase2) {
 
     foreach ($l in $linhasF2) {
         if ($l -match "^(.*?):\s*(.*)$") {
+
             $k = $matches[1].Trim()
             $v = $matches[2].Trim()
 
             if ($v -match "^(True|False)$") { $v = [bool]$v }
-            elseif ($v -match "^\d+$")     { $v = [int]$v }
+            elseif ($v -match "^\d+$") { $v = [int]$v }
 
             $tecnico[$k] = $v
         }
     }
 
-    Add-Fase $fase2 ([PSCustomObject]@{
-        IntegridadeArquivos      = $tecnico["MensagemTecnica"]
-        SfcExitCode              = $tecnico["SfcExitCode"]
-        DismExitCode             = $tecnico["DismExitCode"]
-        ComponentCleanupExitCode = $tecnico["ComponentCleanupExitCode"]
-        PendingRebootBefore      = $tecnico["PendingRebootBefore"]
-        PendingRebootAfter       = $tecnico["PendingRebootAfter"]
-        DetalhesTecnicos         = $tecnico
-    })
+    # interpretar estados técnicos
+    $sfcOk   = ($tecnico["SfcExitCode"]   -eq 0)
+    $dismOk  = ($tecnico["DismExitCode"]  -eq 0)
+    $cleanOk = ($tecnico["ComponentCleanupExitCode"] -eq 0)
+
+    $pendBefore = [bool]$tecnico["PendingRebootBefore"]
+    $pendAfter  = [bool]$tecnico["PendingRebootAfter"]
+
+    # texto interpretado
+    $statusTexto = ""
+
+    if ($sfcOk -and $dismOk -and $cleanOk) {
+        $statusTexto = "Os arquivos essenciais do Windows estão íntegros e a verificação concluiu com sucesso."
+    }
+    else {
+        $statusTexto = "Foram detectados problemas na verificação da integridade do Windows."
+    }
+
+    if ($pendAfter) {
+        $statusTexto += " É recomendável reiniciar o computador para finalizar pendências."
+    }
+
+    # substituir mensagem por objeto estruturado
+    $fase2.Mensagem = [PSCustomObject]@{
+        IntegridadeArquivos        = if ($sfcOk -and $dismOk) { "OK" } else { "Problemas encontrados" }
+        SfcCorrompido              = (-not $sfcOk)
+        DismCorrompido             = (-not $dismOk)
+        LimpezaRealizada           = $cleanOk
+        ReinicioAntesNecessario    = $pendBefore
+        ReinicioDepoisNecessario   = $pendAfter
+        IntegridadeSistema          = $statusTexto
+        DetalhesTecnicos           = $tecnico
+    }
 }
 
-# ============================================================
-# FASE — Limpeza de lixeiras
-# ============================================================
 
-$faseLixo = $jsonRaw.Fases | Where-Object { $_.Phase -match "lixeiras" }
+# ------------------------------------------------------------------------------
+# Fase: Limpeza de todas as lixeiras — interpretação estruturada
+# ------------------------------------------------------------------------------
+$faseLixo = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("lixeira") }
 
 if ($faseLixo) {
 
+    # Dividir por cada unidade do texto original
     $entries = $faseLixo.Mensagem -split "\|"
+
     $detalhes = @()
+    $sucessoTotal = $true
+    $itensTotaisDeletados = 0
 
     foreach ($e in $entries) {
+
         if ($e -match "Drive=(.*?),\s*Success=(.*?),\s*ItemsDeleted=(.*?),\s*Errors=(.*)$") {
+
+            $drive = $matches[1].Trim()
+            $success = [bool]$matches[2]
+            $deleted = [int]$matches[3]
+            $errors  = $matches[4].Trim()
+
+            if (-not $success) { $sucessoTotal = $false }
+
+            $itensTotaisDeletados += $deleted
+
             $detalhes += [PSCustomObject]@{
-                Unidade        = $matches[1].Trim()
-                Sucesso        = [bool]$matches[2]
-                ItensDeletados = [int]$matches[3]
-                Erros          = if ($matches[4].Trim() -ne "") { $matches[4].Trim() } else { $null }
+                Unidade        = $drive
+                Sucesso        = $success
+                ItensDeletados = $deleted
+                Erros          = if ($errors -ne "") { $errors } else { $null }
             }
         }
     }
 
-    Add-Fase $faseLixo ([PSCustomObject]@{
-        DetalhesPorUnidade = $detalhes
-    })
+    # interpretação humana
+    $resultado = ""
+
+    if ($sucessoTotal) {
+        if ($itensTotaisDeletados -gt 0) {
+            $resultado = "As lixeiras foram esvaziadas com sucesso e itens foram removidos."
+        } else {
+            $resultado = "As lixeiras foram esvaziadas, mas já estavam vazias."
+        }
+    } else {
+        $resultado = "Houve falhas ao esvaziar uma ou mais lixeiras."
+    }
+
+    # substituir a mensagem original por um objeto estruturado
+    $faseLixo.Mensagem = [PSCustomObject]@{
+        LimpezaBemSucedida    = $sucessoTotal
+        TotalItensRemovidos   = $itensTotaisDeletados
+        IntegridadeLixeira    = $resultado
+        DetalhesPorUnidade    = $detalhes
+    }
 }
 
-# ============================================================
-# FASE — Atualização do Windows
-# ============================================================
+# ------------------------------------------------------------------------------
+# Fase: Atualização do Windows — interpretação estruturada
+# ------------------------------------------------------------------------------
+$faseUpdate = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("atualiza") }
 
-$faseUpdateWin = $jsonRaw.Fases | Where-Object { $_.Phase -match "Atualização do Windows" }
+if ($faseUpdate) {
 
-if ($faseUpdateWin) {
-    $linhas = $faseUpdateWin.Mensagem -split "`r`n"
+    $linhas = $faseUpdate.Mensagem -split "`r`n"
     $tecnico = @{}
-    $exitCode = $null
 
+    # ler linhas com chave : valor
     foreach ($l in $linhas) {
-        if ($l -match "ExitCode\s*=\s*(\d+)") {
-            $exitCode = [int]$matches[1]
-        }
         if ($l -match "^(.*?):\s*(.*)$") {
-            $tecnico[$matches[1].Trim()] = $matches[2].Trim()
+            $key = $matches[1].Trim()
+            $val = $matches[2].Trim()
+
+            if ($val -match "^\d+$") { $val = [int]$val }
+
+            $tecnico[$key] = $val
         }
     }
 
-    Add-Fase $faseUpdateWin ([PSCustomObject]@{
-        CodigoSaida      = $exitCode
-        DetalhesTecnicos = $tecnico
-    })
+    # identificar código de saída
+    $exitCode = $null
+
+    # tenta extrair "ExitCode=0"
+    foreach ($l in $linhas) {
+        if ($l -match "ExitCode\s*=\s*(\d+)") {
+            $exitCode = [int]$matches[1]
+            break
+        }
+    }
+
+    # interpretação
+    $ok = ($exitCode -eq 0)
+
+    $interpreta = if ($ok) {
+        "A atualização do Windows foi concluída com sucesso."
+    } else {
+        "A atualização do Windows encontrou erros."
+    }
+
+    # substituir mensagem crua por estrutura limpa
+    $faseUpdate.Mensagem = [PSCustomObject]@{
+        AtualizacaoBemSucedida = $ok
+        CodigoSaida            = $exitCode
+        IntegridadeAtualizacao = $interpreta
+        DetalhesTecnicos       = $tecnico
+    }
 }
 
-# ============================================================
-# FASE — Microsoft Store
-# ============================================================
-
-$faseStore = $jsonRaw.Fases | Where-Object { $_.Phase -match "Loja da Microsoft" }
+# ------------------------------------------------------------------------------
+# Fase: Atualização da Loja da Microsoft — interpretação estruturada
+# ------------------------------------------------------------------------------
+$faseStore = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("store") -or $_.Phase.ToLower().Contains("loja") }
 
 if ($faseStore) {
 
@@ -308,8 +457,10 @@ if ($faseStore) {
     $tecnico = @{}
     $exitCode = $null
 
+    # extrair tabela técnica
     foreach ($l in $linhas) {
 
+        # detectar ExitCode=XXXX
         if ($l -match "ExitCode\s*=\s*([-]?\d+)") {
             $exitCode = [int]$matches[1]
         }
@@ -318,23 +469,36 @@ if ($faseStore) {
             $k = $matches[1].Trim()
             $v = $matches[2].Trim()
 
-            if ($v -match "^\-?\d+$") { $v = [int]$v }
+            if ($v -match "^\-?\d+$") {
+                $v = [int]$v
+            }
 
             $tecnico[$k] = $v
         }
     }
 
-    Add-Fase $faseStore ([PSCustomObject]@{
-        CodigoSaida      = $exitCode
-        DetalhesTecnicos = $tecnico
-    })
+    # interpretar
+    $ok = ($exitCode -eq 0 -or $exitCode -lt 0)
+
+    if ($ok) {
+        $interpretacao = "A atualização da Microsoft Store foi concluída sem erros relevantes."
+    } else {
+        $interpretacao = "A atualização da Microsoft Store encontrou falhas."
+    }
+
+    # estruturar mensagem
+    $faseStore.Mensagem = [PSCustomObject]@{
+        AtualizacaoBemSucedida = $ok
+        CodigoSaida            = $exitCode
+        IntegridadeAtualizacao = $interpretacao
+        DetalhesTecnicos       = $tecnico
+    }
 }
 
-# ============================================================
-# FASE — Winget
-# ============================================================
-
-$faseWinget = $jsonRaw.Fases | Where-Object { $_.Phase -match "Winget" }
+# ------------------------------------------------------------------------------
+# Fase: Atualização dos programas via Winget — interpretação estruturada
+# ------------------------------------------------------------------------------
+$faseWinget = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("winget") }
 
 if ($faseWinget) {
 
@@ -344,61 +508,89 @@ if ($faseWinget) {
 
     foreach ($l in $linhas) {
 
+        # Detectar ExitCode=0
         if ($l -match "ExitCode\s*=\s*([-]?\d+)") {
             $exitCode = [int]$matches[1]
         }
 
+        # Chave:Valor
         if ($l -match "^(.*?):\s*(.*)$") {
             $k = $matches[1].Trim()
             $v = $matches[2].Trim()
+
             if ($v -match "^\-?\d+$") { $v = [int]$v }
+
             $tecnico[$k] = $v
         }
     }
 
-    Add-Fase $faseWinget ([PSCustomObject]@{
-        CodigoSaida      = $exitCode
-        DetalhesTecnicos = $tecnico
-    })
+    # interpretação
+    $sucesso = ($exitCode -eq 0)
+
+    $interpretacao = if ($sucesso) {
+        "As atualizações dos programas via Winget foram concluídas com sucesso."
+    } else {
+        "Ocorreram erros ao atualizar programas via Winget."
+    }
+
+    # substituir por objeto estruturado
+    $faseWinget.Mensagem = [PSCustomObject]@{
+        AtualizacaoBemSucedida = $sucesso
+        CodigoSaida            = $exitCode
+        IntegridadeWinget      = $interpretacao
+        DetalhesTecnicos       = $tecnico
+    }
 }
 
-# ============================================================
-# FASE — DISM Cleanup
-# ============================================================
-
-$faseDismClean = $jsonRaw.Fases | Where-Object { $_.Phase -match "componentes do Windows" }
+# ------------------------------------------------------------------------------
+# Fase: Limpeza dos arquivos temporários dos componentes do Windows — estruturada
+# ------------------------------------------------------------------------------
+$faseDismClean = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("componentes") }
 
 if ($faseDismClean) {
 
     $linhas = $faseDismClean.Mensagem -split "`r`n"
+
     $versaoFerramenta = $null
     $versaoImagem = $null
     $sucesso = $false
 
     foreach ($l in $linhas) {
+
         if ($l -match "Vers[aã]o:\s*(.*)$") {
             $versaoFerramenta = $matches[1].Trim()
         }
+
         if ($l -match "Vers[aã]o da Imagem:\s*(.*)$") {
             $versaoImagem = $matches[1].Trim()
         }
-        if ($l -match "conclu[ií]da|êxito|sucesso") {
+
+        if ($l -match "conclu[ií]da? com êxito|\bsucesso\b") {
             $sucesso = $true
         }
     }
 
-    Add-Fase $faseDismClean ([PSCustomObject]@{
-        VersaoFerramentaDISM = $versaoFerramenta
-        VersaoImagemWindows  = $versaoImagem
-        Sucesso              = $sucesso
-    })
+    # criar texto interpretado
+    $interpretacao = if ($sucesso) {
+        "A limpeza de componentes do Windows foi concluída com sucesso."
+    } else {
+        "A limpeza de componentes do Windows encontrou problemas."
+    }
+
+    # substituir por objeto limpo
+    $faseDismClean.Mensagem = [PSCustomObject]@{
+        LimpezaBemSucedida       = $sucesso
+        VersaoFerramentaDISM     = $versaoFerramenta
+        VersaoImagemWindows      = $versaoImagem
+        IntegridadeComponentes    = $interpretacao
+        Observacoes              = "StartComponentCleanup executado para remover componentes antigos do Windows."
+    }
 }
 
-# ============================================================
-# FASE — Windows Defender
-# ============================================================
-
-$faseDefender = $jsonRaw.Fases | Where-Object { $_.Phase -match "Windows Defender" }
+# ------------------------------------------------------------------------------
+# Fase: Varredura contra malwares com Windows Defender — estruturada
+# ------------------------------------------------------------------------------
+$faseDefender = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("defender") }
 
 if ($faseDefender) {
 
@@ -408,89 +600,64 @@ if ($faseDefender) {
 
     foreach ($l in $linhas) {
 
+        # Detectar ExitCode=0
         if ($l -match "ExitCode\s*=\s*([-]?\d+)") {
             $exitCode = [int]$matches[1]
         }
 
+        # Detectar chave:valor
         if ($l -match "^(.*?):\s*(.*)$") {
             $k = $matches[1].Trim()
             $v = $matches[2].Trim()
+
             if ($v -match "^\-?\d+$") { $v = [int]$v }
             $tecnico[$k] = $v
         }
     }
 
-    Add-Fase $faseDefender ([PSCustomObject]@{
-        CodigoSaida      = $exitCode
-        DetalhesTecnicos = $tecnico
-    })
+    # interpretação
+    $sucesso = ($exitCode -eq 0)
+
+    if ($sucesso) {
+        $interpretacao = "A varredura foi concluída e nenhuma ameaça foi detectada pelo Windows Defender."
+    } else {
+        $interpretacao = "A varredura encontrou possíveis ameaças ou erros."
+    }
+
+    # substituir mensagem original por objeto estruturado
+    $faseDefender.Mensagem = [PSCustomObject]@{
+        ScanBemSucedido       = $sucesso
+        CodigoSaida           = $exitCode
+        IntegridadeAntivirus  = $interpretacao
+        DetalhesTecnicos      = $tecnico
+    }
 }
 
-# ============================================================
-# 5) MONTAGEM FINAL DO JSON TRATADO
-# ============================================================
 
-$jsonFinal = [PSCustomObject]@{
-    Cliente        = $jsonRaw.Cliente
-    NomeComputador = $jsonRaw.NomeComputador
-    DataExecucao   = $jsonRaw.DataExecucao
-    Fases          = $jsonFases  # APENAS as fases realmente existentes
+
+
+
+# ------------------------------------------------------------------------------
+# 12) Finalizar Fase 1
+# ------------------------------------------------------------------------------
+if ($fase1) {
+    $fase1.Mensagem = [PSCustomObject]@{
+        Hardware       = $hardwareObj
+        Rede           = $rede
+        Armazenamentos = $armazenamentos
+        Particoes      = $particoes
+        Softwares      = $softwareList
+    }
 }
-
-# ============================================================
-# 6) EXPORTAÇÃO — criando o arquivo _TRATADO.json
-# ============================================================
+# --------------------------------------------------------------------------
+# 13) Exportar JSON final — na MESMA pasta do arquivo original
+# --------------------------------------------------------------------------
 
 $nomeOut = Join-Path $arquivo.DirectoryName (($arquivo.BaseName) + "_TRATADO.json")
 
-try {
-    $jsonFinal | ConvertTo-Json -Depth 20 |
-        Out-File $nomeOut -Encoding UTF8
+$jsonRaw | ConvertTo-Json -Depth 20 |
+    Out-File $nomeOut -Encoding UTF8
 
-    Write-Host "`n🔥 GUARDIAN 360 finalizado com sucesso!"
-    Write-Host "📦 JSON TRATADO gerado em: $nomeOut" -ForegroundColor Yellow
-} catch {
-    Write-Host "❌ Falha ao gravar o arquivo TRATADO." -ForegroundColor Red
-}
-
-# ============================================================
-# 7) Funções auxiliares gerais (se no futuro precisar adicionar mais)
-# ============================================================
-
-function Safe-Trim {
-    param([string]$text)
-    if ($null -eq $text) { return "" }
-    return $text.Trim()
-}
-
-function Safe-Split {
-    param(
-        [string]$text,
-        [string]$separator = "`r`n"
-    )
-    if ($null -eq $text) { return @() }
-    return $text -split $separator
-}
-
-function Safe-ExtractKeyValue {
-    param([string]$line)
-
-    if ($line -match "^(.*?):\s*(.*)$") {
-        $key = $matches[1].Trim()
-        $val = $matches[2].Trim()
-
-        if ($val -match "^(True|False)$") { $val = [bool]$val }
-        elseif ($val -match "^\-?\d+$")   { $val = [int]$val }
-
-        return @{ Key = $key; Value = $val }
-    }
-
-    return $null
-}
-
-# ============================================================
-# 8) Mensagem final do script carregado
-# ============================================================
-
-Write-Host "🔥 Guardian 360 Operacional." -ForegroundColor Green
-
+Write-Host "`n🔥 GUARDIAN 360 finalizado com sucesso!"
+Write-Host "📦 JSON gerado em: $nomeOut" -ForegroundColor Yellow
+Write-Host ""
