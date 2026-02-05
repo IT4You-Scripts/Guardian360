@@ -5,8 +5,8 @@ function Get-SystemInventory {
         function Write-Log { param([string]$Message) }
     }
 
-    Write-Host "Iniciando coleta de informações do inventário de Hardware e Software..." -ForegroundColor Cyan
-    Write-Host ""
+    #Write-Host "Iniciando coleta de informações do inventário de Hardware e Software..." -ForegroundColor Cyan
+    #Write-Host ""
 
     try {
         # 1. Cache de instâncias CIM com validação individual
@@ -267,7 +267,7 @@ function Get-SystemInventory {
         }
 
         # 10. Exibição e Log (Dual Output)
-        Write-Host "Informações do Inventário" -ForegroundColor Green
+        #Write-Host "Informações do Inventário" -ForegroundColor Green
         $Criar_Inventario_Sistema | Format-List
 
         Write-Log "Informações do Inventário"
@@ -289,8 +289,8 @@ function Get-SystemInventory {
             Write-Log $msgResumo
         }
 
-        Write-Host ""
-        Write-Host "Coleta concluída com Sucesso!" -ForegroundColor Green
+        #Write-Host ""
+        #Write-Host "Coleta concluída com Sucesso!" -ForegroundColor Green
 
     } catch {
         $msgErro = "ERRO CRÍTICO: $_"
