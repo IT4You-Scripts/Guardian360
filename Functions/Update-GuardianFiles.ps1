@@ -95,7 +95,7 @@ function Update-GuardianFiles {
     # -------------------------------
     # Limpeza dos atributos Read-Only (caso existam)
     # -------------------------------
-    Show-Header "Limpando arquivos antigos do Guardian..." -Color Yellow
+    Show-Header "Atualizando arquivos do Guardian 360..." -Color Yellow
 
     foreach ($File in $Files) {
         try {
