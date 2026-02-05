@@ -1,33 +1,27 @@
-﻿# Limpa as lixeiras ($Recycle.Bin) de TODOS os usuários em TODAS as unidades fixas
-# Sem prompts. Requer PowerShell em modo Administrador.
-function Clear-AllRecycleBins {
+﻿function Clear-AllRecycleBins {
     [CmdletBinding()]
     param()
 
-    # Verificação de privilégio elevado
     try {
+        # Verificação de privilégios
         $id = [Security.Principal.WindowsIdentity]::GetCurrent()
         $p  = New-Object Security.Principal.WindowsPrincipal($id)
         if (-not $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
             throw 'Esta função requer execução como Administrador (elevado).'
         }
-    } catch {
-        Write-Error "Falha ao verificar privilégios: $($_.Exception.Message)"
-        return
-    }
 
-    Write-Host "Iniciando limpeza das lixeiras de TODOS os usuários em unidades locais..." -ForegroundColor Cyan
+        Write-Host "Iniciando limpeza das lixeiras de TODOS os usuários em unidades locais..." -ForegroundColor Cyan
 
-    $results = @()
+        $results = @()
 
-    try {
-        # Unidades fixas (DriveType=3)
+        # Unidades fixas
         $drives = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DriveType = 3" |
                   Where-Object { $_.DeviceID -match '^[A-Z]:$' }
 
         if (-not $drives) {
             Write-Host "Nenhuma unidade fixa encontrada." -ForegroundColor Yellow
-            return
+            Write-Log "Nenhuma unidade fixa encontrada para limpeza de lixeira."
+            return "Nenhuma unidade fixa encontrada."
         }
 
         foreach ($d in $drives) {
@@ -41,23 +35,18 @@ function Clear-AllRecycleBins {
 
             try {
                 if (Test-Path -LiteralPath $recycleRoot) {
-                    # Coleta itens antes para contagem
                     $items = @(Get-ChildItem -LiteralPath $recycleRoot -Force -ErrorAction SilentlyContinue)
-                    $preCount = $items.Count
 
                     foreach ($item in $items) {
                         try {
-                            # Tentativa direta
                             Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop
                             $itemsDeleted++
                         } catch {
-                            # Remove atributos e tenta novamente
                             try { attrib -r -s -h -a $item.FullName 2>$null } catch {}
                             try {
                                 Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop
                                 $itemsDeleted++
                             } catch {
-                                # Último recurso: .NET
                                 try {
                                     if (Test-Path -LiteralPath $item.FullName) {
                                         if ($item.PSIsContainer) {
@@ -74,22 +63,15 @@ function Clear-AllRecycleBins {
                         }
                     }
 
-                    # Verifica se esvaziou
                     $postItems = @(Get-ChildItem -LiteralPath $recycleRoot -Force -ErrorAction SilentlyContinue)
-                    if ($postItems.Count -eq 0) {
-                        Write-Host "  → Lixeira de $drive limpa." -ForegroundColor Green
-                        $success = $true
-                    } else {
-                        Write-Warning "  → Itens remanescentes em $drive (alguns podem estar em uso)."
-                        $success = ($errors.Count -eq 0)
-                    }
+                    $success = ($postItems.Count -eq 0 -or $errors.Count -eq 0)
                 } else {
                     Write-Host "  → Pasta não encontrada: $recycleRoot" -ForegroundColor DarkYellow
                     $success = $true
                 }
             } catch {
                 $errors += "Erro ao processar ${recycleRoot}: $($_.Exception.Message)"
-                Write-Error "Falha em ${recycleRoot}: $($_.Exception.Message)"
+                throw
             }
 
             $results += [pscustomobject]@{
@@ -101,9 +83,18 @@ function Clear-AllRecycleBins {
         }
 
         Write-Host "Limpeza concluída." -ForegroundColor Green
-    } catch {
-        Write-Error "Erro inesperado: $($_.Exception.Message)"
-    }
+        Write-Log "Limpeza de todas as lixeiras concluída."
 
-    return $results
+        # 🔥 retorna mensagem técnica rica
+        $msg = ($results | ForEach-Object {
+            "Drive=$($_.Drive), Success=$($_.Success), ItemsDeleted=$($_.ItemsDeleted), Errors=$($_.Errors)"
+        }) -join " | "
+
+        return $msg
+    }
+    catch {
+        Write-Host "Falha durante limpeza das lixeiras." -ForegroundColor Red
+        Write-Log "Erro em Clear-AllRecycleBins: $_"
+        throw $_
+    }
 }

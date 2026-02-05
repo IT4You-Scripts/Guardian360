@@ -4,14 +4,22 @@
 
     Write-Host ""
 
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Show-Header -Text "Winget não está disponível. Etapa ignorada." -Color $Yellow
-        return
-    }
-
-    Write-Host "-Atualizando aplicativos via Winget..."
-
     try {
+
+        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+
+            Show-Header -Text "Winget não está disponível. Phase ignorada." -Color $Yellow
+            Write-Log "Winget não encontrado. Phase ignorada." "WARN"
+
+            return [PSCustomObject]@{
+                MensagemTecnica = "Winget não encontrado. Phase ignorada."
+                ExitCode        = $null
+            }
+        }
+
+        Write-Host "- Atualizando aplicativos via Winget..."
+        Write-Log  "Iniciando atualização de aplicativos via Winget." "INFO"
+
         $wingetArgs = @(
             "upgrade", "--all",
             "--accept-source-agreements",
@@ -20,17 +28,32 @@
             "--disable-interactivity"
         )
 
-        $process = Start-Process winget -ArgumentList $wingetArgs -NoNewWindow -Wait -PassThru
+        $process = Start-Process winget `
+            -ArgumentList $wingetArgs `
+            -NoNewWindow `
+            -Wait `
+            -PassThru
+
         Write-Host ""
 
-        if ($process.ExitCode -eq 0) {
-            #Show-Header -Text "Winget concluído com sucesso." -Color $Green
-        }
-        else {
+        if ($process.ExitCode -ne 0) {
+
             Show-Header -Text "Winget terminou com código $($process.ExitCode)." -Color $Yellow
+            Write-Log ("Winget terminou com código inesperado: {0}" -f $process.ExitCode) "WARN"
         }
 
-    } catch {
+        Write-Log "Winget finalizado." "INFO"
+
+        return [PSCustomObject]@{
+            MensagemTecnica = "Winget finalizado. ExitCode=$($process.ExitCode)"
+            ExitCode        = $process.ExitCode
+        }
+    }
+    catch {
+
         Show-Header -Text "Falha ao executar atualização completa: $_" -Color $Red
+        Write-Log ("Falha ao executar atualização completa: {0}" -f $_) "ERROR"
+
+        throw
     }
 }

@@ -1,8 +1,10 @@
-﻿# Limpa o cache dos navegadores
-function Clear-BrowserCache {
-    Write-Host "Iniciando limpeza de cache dos navegadores..." -ForegroundColor Cyan
+﻿function Clear-BrowserCache {
+    [CmdletBinding()]
+    param()
 
     try {
+        Write-Host "Iniciando limpeza de cache dos navegadores..." -ForegroundColor Cyan
+
         # 1. Encerra os navegadores em execução
         $browsers = @("chrome", "msedge", "firefox")
         $running = Get-Process -Name $browsers -ErrorAction SilentlyContinue
@@ -36,9 +38,14 @@ function Clear-BrowserCache {
 
         Write-Host "Cache dos navegadores limpo com sucesso." -ForegroundColor Green
         Write-Log "Cache dos navegadores limpo."
+
+        # 🔥 Retorna mensagem técnica para o Guardian
+        return "Cache dos navegadores limpo com sucesso."
     }
     catch {
         Write-Host "Não foi possível limpar o cache dos navegadores." -ForegroundColor Red
         Write-Log "Erro ao limpar cache dos navegadores: $_"
+
+        throw $_
     }
 }

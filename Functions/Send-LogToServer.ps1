@@ -1,14 +1,26 @@
-﻿
-function Send-LogToServer {
+﻿function Send-LogToServer {
+    [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Server)
+
+    # Cronômetro
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
     $user = "guardian"
     $pass = "guardian360"
 
     try {
-        # Verifica se o servidor responde ao ping
+        # Verifica acessibilidade do servidor
         if (-not (Test-Connection -ComputerName $Server -Count 1 -Quiet -ErrorAction SilentlyContinue)) {
+
             Show-Header -Text "[ALERTA] Servidor $Server não está acessível (ping falhou)." -Color $Red
+
+            $sw.Stop()
+            if (Get-Command Write-JsonResult -ErrorAction SilentlyContinue) {
+                Write-JsonResult -Phase "Send-LogToServer" `
+                                 -Sucesso $false `
+                                 -Tempo $sw.Elapsed `
+                                 -Mensagem "Servidor $Server inacessível (ping falhou)."
+            }
             return
         }
 
@@ -21,14 +33,33 @@ function Send-LogToServer {
         $logLocal = "C:\Guardian\Logs\$ano\$mesFmt"
 
         if (-not (Test-Path $logLocal)) {
+
             Show-Header -Text "[ALERTA] Diretório de logs não encontrado: $logLocal" -Color $Yellow
+
+            $sw.Stop()
+            if (Get-Command Write-JsonResult -ErrorAction SilentlyContinue) {
+                Write-JsonResult -Phase "Send-LogToServer" `
+                                 -Sucesso $false `
+                                 -Tempo $sw.Elapsed `
+                                 -Mensagem "Diretório de logs não encontrado: $logLocal"
+            }
             return
         }
 
         $arquivoLog = Get-ChildItem $logLocal -Filter '*.log' -File |
                       Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
         if (-not $arquivoLog) {
+
             Show-Header -Text "[ALERTA] Nenhum arquivo .log encontrado em $logLocal" -Color $Yellow
+
+            $sw.Stop()
+            if (Get-Command Write-JsonResult -ErrorAction SilentlyContinue) {
+                Write-JsonResult -Phase "Send-LogToServer" `
+                                 -Sucesso $false `
+                                 -Tempo $sw.Elapsed `
+                                 -Mensagem "Nenhum arquivo .log encontrado em $logLocal"
+            }
             return
         }
 
@@ -36,44 +67,77 @@ function Send-LogToServer {
         $destinoDir  = "\\$Server\TI\Vistorias\$ano\$mesFmt"
         $destinoFile = Join-Path $destinoDir "$($env:COMPUTERNAME).log"
 
-        
-        # Cria pasta de destino se não existir (incluindo Vistorias)
+        # Cria diretório no servidor
         if (-not (Test-Path $destinoDir)) {
             New-Item -Path $destinoDir -ItemType Directory -Force | Out-Null
         }
 
-
-        # Primeira tentativa: copiar usando credenciais salvas
+        # Primeira tentativa (credenciais salvas)
         try {
             Copy-Item $arquivoLog.FullName -Destination $destinoFile -Force -ErrorAction Stop
-            Show-Header -Text "Log enviado com sucesso para: $destinoFile (usando credenciais salvas)" -Color $Green
+
+            Show-Header -Text "Log enviado com sucesso para: $destinoFile (credenciais salvas)" -Color $Green
+
+            $sw.Stop()
+            if (Get-Command Write-JsonResult -ErrorAction SilentlyContinue) {
+                Write-JsonResult -Phase "Send-LogToServer" `
+                                 -Sucesso $true `
+                                 -Tempo $sw.Elapsed `
+                                 -Mensagem "Log enviado com sucesso usando credenciais salvas."
+            }
         }
         catch {
-            Show-Header -Text "[INFO] Falha na cópia com credenciais salvas. Tentando com credenciais guardian..." -Color $Yellow
+            Show-Header -Text "[INFO] Falha com credenciais salvas. Tentando guardian..." -Color $Yellow
 
             try {
-                # Mapeia temporariamente usando usuário guardian
+                # Mapeia \\Server\TI
                 net use "\\$Server\TI" /user:$user $pass /persistent:no | Out-Null
 
-                # Cria pasta de destino se não existir (agora autenticado)
                 if (-not (Test-Path $destinoDir)) {
                     New-Item -Path $destinoDir -ItemType Directory -Force | Out-Null
                 }
 
-                # Copia log com credenciais guardian
                 Copy-Item $arquivoLog.FullName -Destination $destinoFile -Force -ErrorAction Stop
-                Show-Header -Text "Log enviado com sucesso para: $destinoFile (usando credenciais guardian)" -Color $Green
+
+                Show-Header -Text "Log enviado com sucesso para: $destinoFile (credenciais guardian)" -Color $Green
+
+                $sw.Stop()
+                if (Get-Command Write-JsonResult -ErrorAction SilentlyContinue) {
+                    Write-JsonResult -Phase "Send-LogToServer" `
+                                     -Sucesso $true `
+                                     -Tempo $sw.Elapsed `
+                                     -Mensagem "Log enviado via credenciais guardian."
+                }
             }
             catch {
-                Show-Header -Text "[ERRO] Falha ao copiar log mesmo após tentar com credenciais guardian.`n$($_.Exception.Message)" -Color $Red
+                Show-Header -Text "[ERRO] Falha ao copiar log mesmo com guardian.`n$($_.Exception.Message)" -Color $Red
+
+                $sw.Stop()
+                $erro = $_ | Format-List * -Force | Out-String
+
+                if (Get-Command Write-JsonResult -ErrorAction SilentlyContinue) {
+                    Write-JsonResult -Phase "Send-LogToServer" `
+                                     -Sucesso $false `
+                                     -Tempo $sw.Elapsed `
+                                     -Mensagem $erro
+                }
             }
             finally {
-                # Desconecta o mapeamento
                 net use "\\$Server\TI" /delete | Out-Null
             }
         }
     }
     catch {
         Show-Header -Text "[ALERTA] Erro inesperado: $($_.Exception.Message)" -Color $Red
+
+        $sw.Stop()
+        $erro = $_ | Format-List * -Force | Out-String
+
+        if (Get-Command Write-JsonResult -ErrorAction SilentlyContinue) {
+            Write-JsonResult -Phase "Send-LogToServer" `
+                             -Sucesso $false `
+                             -Tempo $sw.Elapsed `
+                             -Mensagem $erro
+        }
     }
 }

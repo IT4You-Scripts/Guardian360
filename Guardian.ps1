@@ -173,7 +173,7 @@ $funcDir = Join-Path $root 'Functions'
 
 # Início: Ajuste Mínimo de Pasta/Arquivo de Log
 $baseLogDir  = Join-Path $root 'Logs'
-$stamp       = Get-Date -Format 'yyyyMMdd_HHmmss'
+$stamp       = Get-Date -Format 'yyyyMMdd_HHmm'
 $year        = Get-Date -Format 'yyyy'
 $monthNumber = Get-Date -Format 'MM'
 $monthName   = (Get-Culture).DateTimeFormat.GetMonthName([int]$monthNumber)
@@ -232,7 +232,7 @@ Write-Host "Tempo decorrido: $tempoHumano"
             Write-Host ""
 
             Start-Sleep 3
-            exit 0
+            #exit 0
         }
     }
 }
@@ -249,6 +249,12 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 
 # Resultados agregados
 $global:Results = New-Object System.Collections.Generic.List[object]
+
+# Lista global segura — garante que nunca será substituída por array fixo
+if (-not $global:Results -or $global:Results.GetType().Name -ne 'List`1') {
+    $global:Results = New-Object 'System.Collections.Generic.List[Object]'
+}
+
 
 # Log Conciso: controla escrita no arquivo
 $global:ConciseLog = $true
@@ -275,6 +281,8 @@ $StepDescriptions = @{
   'Scan-AntiMalware'         = 'Varredura contra malwares com Windows Defender'
   'Confirm-MacriumBackup'    = 'Validação dos arquivos de backup do Macrium Reflect'
   'Send-LogToServer'         = 'Verificação e centralização do log no Servidor de Arquivos (opcional com -FileServer)'
+  'Write-JsonResult'         = 'Atualiza arquivo Json' 
+  'Optimize-JsonReport'      = 'Otimiza e trata arquivo Json' 
 }
 function Get-StepLabel {
   param([string]$Name)
@@ -345,6 +353,8 @@ function Write-Log {
     default { Write-Host (""  -f $Gray,   $Reset, $Message) }
   }
 }
+
+
 
 #function Show-Header {
 #  param([string]$Text)
@@ -653,33 +663,71 @@ if (-not (Get-Variable -Name ConsoleAppearance_AtExitHandler -Scope Script -Erro
 }
 #endregion
 
+
+
 function Invoke-GuardianStep {
-  param(
-    [Parameter(Mandatory)][string]$Title,
-    [Parameter(Mandatory)][scriptblock]$Action
-  )
-  $label = Get-StepLabel $Title
-  Write-Log ("Iniciando: {0}" -f $Title) 'INFO'
-  Show-StepStart -Name $label
-  $sw = [Diagnostics.Stopwatch]::StartNew()
-  $ok = $true
-  $global:CurrentStepTitle = $Title
-  try {
-    if ($Simulado) {
-      Write-Log ("SIMULADO: ação não executada para '{0}'." -f $Title) 'DEBUG'
-    } else {
-      & $Action
+    param(
+        [Parameter(Mandatory)][string]$Title,
+        [Parameter(Mandatory)][scriptblock]$Action,
+        [Parameter(Mandatory=$false)][string]$Mensagem
+    )
+
+    $label = Get-StepLabel $Title
+    Write-Log ("Iniciando: {0}" -f $Title) 'INFO'
+    Show-StepStart -Name $label
+
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $ok = $true
+    $global:CurrentStepTitle = $Title
+    $stepOutput = $null
+
+    try {
+        if ($Simulado) {
+            Write-Log ("SIMULADO: ação não executada para '{0}'." -f $Title) 'DEBUG'
+        }
+        else {
+            # 🔴 CAPTURA TUDO que a função produzir
+            $stepOutput = & $Action 2>&1 | Out-String
+        }
     }
-  } catch {
-    $ok = $false
-    Write-Log ("Etapa '{0}' registrou erro: {1}" -f $Title, $_.ToString()) 'ERROR'
-  } finally {
-    $global:CurrentStepTitle = $null
-  }
-  $sw.Stop()
-  $global:Results.Add([pscustomobject]@{ Etapa=$label; EtapaTecnica=$Title; Sucesso=$ok; Tempo=$sw.Elapsed })
-  Show-StepEnd -Name $label -Elapsed $sw.Elapsed -Ok:$ok
+    catch {
+        $ok = $false
+        Write-Log ("Etapa '{0}' registrou erro: {1}" -f $Title, $_.ToString()) 'ERROR'
+        $Mensagem = $_.ToString()
+    }
+    finally {
+        $global:CurrentStepTitle = $null
+    }
+
+    $sw.Stop()
+
+    # 🔴 Se não veio mensagem manual mas houve saída da função
+    if (-not $Mensagem -and $stepOutput) {
+        $Mensagem = $stepOutput.Trim()
+    }
+
+    # Proteção contra corrupção do global:Results
+    if ($null -eq $global:Results -or $global:Results.GetType().Name -ne 'List`1') {
+        $safeCopy = @($global:Results)
+        $global:Results = New-Object 'System.Collections.Generic.List[Object]'
+        foreach ($i in $safeCopy) { $global:Results.Add($i) }
+    }
+
+    # Registro da etapa
+    $global:Results.Add([pscustomobject]@{
+        Etapa        = $label
+        EtapaTecnica = $Title
+        Sucesso      = $ok
+        Tempo        = $sw.Elapsed
+        Mensagem     = $Mensagem
+    })
+
+    Show-StepEnd -Name $label -Elapsed $sw.Elapsed -Ok:$ok
 }
+
+
+
+
 
 # 1) Pré-requisitos para o Script poder rodar corretamente (sem prompts)
 Test-AdminOrExit
@@ -713,7 +761,8 @@ try {
     'Scan-AntiMalware.ps1',
     'Confirm-MacriumBackup.ps1',
     'Send-LogToServer.ps1',
-    'Show-GuardianEndUI.ps1'
+    'Show-GuardianEndUI.ps1',
+    'Write-JsonResult.ps1'
   )
   foreach ($ff in $functionFiles) {
     $path = Join-Path $funcDir $ff
@@ -895,63 +944,126 @@ foreach ($phase in $Phases) {
 }
 
 
+#===========================================================================================================================================================
 
 
 
+# 6) Resumo final seguro
+Write-Host ""
+Write-Host "=================================================================================================" -ForegroundColor DarkGray
+Write-Host ""
+Show-Header -Text 'Resumo da Manutenção Automatizada'
+Write-Host ""
 
-  # 6) Resumo final
-  Write-Host ""
-  Write-Host "=================================================================================================" -ForegroundColor DarkGray
-  Write-Host ""
-  Show-Header -Text 'Resumo da Manutenção Automatizada'
-  Write-Host ""
+# Descobre o comprimento máximo do rótulo para alinhamento
+$maxLabel = 0
+foreach ($r in $global:Results) { 
+    $label = if ($r.PSObject.Properties['Etapa']) { $r.Etapa } `
+             elseif ($r.PSObject.Properties['Phase']) { $r.Phase } `
+             else { 'Desconhecida' }
+    if ($label.Length -gt $maxLabel) { $maxLabel = $label.Length }
+}
+Write-Report ""
+Write-Report "Resumo da Manutenção Automatizada"
+Write-Report ""
 
-  #Write-Host ("Cliente: {0}{1}{2}" -f $Cyan, $Cliente, $Reset)
-  #Write-Host ""
-  
-  $maxLabel = 0
-  foreach ($r in $global:Results) { if ($r.Etapa.Length -gt $maxLabel) { $maxLabel = $r.Etapa.Length } }
+# Inicializa array para JSON
+$jsonResults = @()
 
-  Write-Report ""
-  Write-Report "Resumo da Manutenção Automatizada"
-  Write-Report ""
+foreach ($r in $global:Results) {
 
-  
-  foreach ($r in $global:Results) {
-    $statusPlain = if ($r.Sucesso) { 'OK' } else { 'ALERTA' }
-    $labelPadded = $r.Etapa.PadRight($maxLabel)
-    $elapsedTxt = (Format-Elapsed $r.Tempo)
-    $statusConsole = if ($r.Sucesso) { "{0}OK{1}" -f $Green, $Reset } else { "{0}ALERTA{1}" -f $Yellow, $Reset }
+    # Segurança: valores padrão caso alguma propriedade esteja ausente
+    $etapa    = if ($r.PSObject.Properties['Etapa']) { $r.Etapa } `
+                elseif ($r.PSObject.Properties['Phase']) { $r.Phase } `
+                else { "Etapa desconhecida" }
+
+    $sucesso  = if ($r.PSObject.Properties['Sucesso']) { $r.Sucesso } `
+                elseif ($r.PSObject.Properties['Status'])  { $r.Status -eq 'OK' } `
+                else { $false }
+
+    $tempo    = if ($r.PSObject.Properties['Tempo'])    { $r.Tempo } `
+                elseif ($r.PSObject.Properties['TempoSeg']) { New-TimeSpan -Seconds $r.TempoSeg } `
+                else { New-TimeSpan -Seconds 0 }
+
+    $mensagem = if ($r.PSObject.Properties['Mensagem']) { $r.Mensagem } else { "" }
+
+    $statusPlain = if ($sucesso) { 'OK' } else { 'ALERTA' }
+
+    $labelPadded = $etapa.PadRight($maxLabel)
+    $elapsedTxt  = Format-Elapsed $tempo
+    $statusConsole = if ($sucesso) { "{0}OK{1}" -f $Green, $Reset } else { "{0}ALERTA{1}" -f $Yellow, $Reset }
+
+    # Exibe no console e grava no log
     Write-Host ("- {0}  -> {1} (Tempo: {2})" -f $labelPadded, $statusConsole, $elapsedTxt)
     Write-Report ("- {0}  -> {1} (Tempo: {2})" -f $labelPadded, $statusPlain, $elapsedTxt)
-  }
 
-  Write-Host ""
-  Write-Report ""
-  Confirm-MacriumBackup
+    # Adiciona resultado seguro ao array do JSON
+    $jsonResults += [PSCustomObject]@{
+        Phase    = $etapa        # No JSON final, você mantém Phase
+        Status   = $statusPlain
+        TempoSeg = [math]::Round($tempo.TotalSeconds, 2)
+        Mensagem = $mensagem
+    }
+}
 
 
- 
-# Finalização do Cronômetro do Script
+# Confirma o backup do Macrium (se a função estiver presente)
+if (Get-Command Confirm-MacriumBackup -ErrorAction SilentlyContinue) { Confirm-MacriumBackup }
+
+# Finaliza cronômetro
 $scriptStart.Stop()
 $global:tempoFormatado = Format-Elapsed $scriptStart.Elapsed
 Write-Host ""
-Write-Host ("{0}PS.:{1} Duração total da execução do script de manutenção automatizada: {2}{3}" -f $Gray, $Reset, $tempoFormatado, $Reset)
+Write-Host ("{0}PS.:{1} Duração total da execução: {2}{3}" -f $Gray, $Reset, $global:tempoFormatado, $Reset)
 Write-Report ""
-Write-Report ("Duração total da execução do script de manutenção automatizada: {0}" -f $tempoFormatado)
+Write-Report ("Duração total da execução: {0}" -f $global:tempoFormatado)
 
 Write-Host ""
-Write-Host ("{0}Arquivo de log:{1} {2}" -f $Gray, $Reset, $logFile)
+Write-Host ("{0}Arquivo log: {1} {2}" -f $Gray, $Reset, $logFile)
 Write-Host ""
 Write-Report ""
-Write-Report ("Arquivo de log: {0}" -f $logFile)
+Write-Report ("Arquivo log:  {0}" -f $logFile)
+
+# ============================================================================== 
+# Criação do JSON local seguindo a mesma lógica do log
+$baseJsonDir  = Join-Path $root 'Json'
+$year         = Get-Date -Format 'yyyy'
+$monthNumber  = Get-Date -Format 'MM'
+$monthName    = (Get-Culture).DateTimeFormat.GetMonthName([int]$monthNumber)
+$monthFolder  = ("{0}. {1}" -f $monthNumber, (Get-Culture).TextInfo.ToTitleCase($monthName.ToLower()))
+$jsonDir      = Join-Path (Join-Path $baseJsonDir $year) $monthFolder
+
+# Cria diretório se não existir
+if (-not (Test-Path $jsonDir)) { New-Item -Path $jsonDir -ItemType Directory -Force | Out-Null }
+
+# Nome do arquivo JSON
+$jsonFileName = "{0}_{1:yyyyMMdd_HHmm}.json" -f $env:COMPUTERNAME, (Get-Date)
+$jsonFilePath = Join-Path $jsonDir $jsonFileName
+
+# Monta objeto final seguro
+$jsonObject = [PSCustomObject]@{
+    Cliente            = if ($Cliente) { $Cliente } else { "Não informado" }
+    NomeComputador     = $env:COMPUTERNAME
+    DataExecucao       = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    Fases              = $jsonResults
+}
+
+# Salva JSON com tratamento de erro
+try {
+    $jsonObject | ConvertTo-Json -Depth 5 -Compress | Set-Content -Path $jsonFilePath -Encoding UTF8
+
+    Write-Host ("{0}Arquivo Json:{1} {2}" -f $Gray, $Reset, $jsonFilePath)
+    Write-Report ("Arquivo Json: {0}" -f $jsonFilePath) 'INFO'
+
+} catch {
+    Write-Report ("Falha ao criar JSON: {0}" -f $_.Exception.Message) 'ERROR'
+}
 
 
 Write-Host ""
 Write-Host "=================================================================================================" -ForegroundColor DarkGray
 
 # Fecha a tela gráfica do Guardian ao terminar o script, se estiver aberta
-
 if ($global:GuardianUIWindow) {
     try {
         $global:GuardianUIWindow.Close()
@@ -960,15 +1072,11 @@ if ($global:GuardianUIWindow) {
     }
 }
 
-
-  # Exibe a UI amigável enquanto o script continua rodand
-  Show-GuardianEndUI | Out-Null
-
+# Exibe a UI amigável enquanto o script continua rodando
+Show-GuardianEndUI | Out-Null
 
 # Pausa breve para garantir que a UI feche antes do término do script
 Start-Sleep -Milliseconds 500
-
-
 
 #region Envio do Log para Servidor de Arquivos
 if ($FileServer -and $FileServer.Trim() -ne '') {
@@ -979,32 +1087,19 @@ if ($FileServer -and $FileServer.Trim() -ne '') {
 }
 #endregion
 
-
-
-
-
-
-
-
 } catch {
-  Write-Log ("FALHA GERAL (capturada): {0}" -f $_.ToString()) 'ERROR'
+    Write-Log ("FALHA GERAL (capturada): {0}" -f $_.ToString()) 'ERROR'
 } finally {
 
- # $argJsonPath = "C:\Guardian\guardian_arg.json"
- # if (Test-Path $argJsonPath) {
- #     try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue } catch {}
- # }
+    $argJsonPath = "C:\Guardian\guardian_arg.json"
+    if (Test-Path $argJsonPath) {
+        try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue > $null 2>&1 } catch {}
+    }
 
 
-$argJsonPath = "C:\Guardian\guardian_arg.json"
-if (Test-Path $argJsonPath) {
-    try {
-        Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue > $null 2>&1
-    } catch {}
-}
+    & "C:\Guardian\Functions\Optimize-JsonReport.ps1" -Pasta "C:\Guardian\Json"
 
-
-  Disable-QuickEditProtection
-  Disable-ConsoleAppearance
-  Stop-Logging
+    Disable-QuickEditProtection
+    Disable-ConsoleAppearance
+    Stop-Logging
 }

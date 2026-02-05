@@ -1,61 +1,78 @@
 ﻿function Clear-TempFiles {
-    # Verifica se está executando como Administrador
-    if (-not ([Security.Principal.WindowsPrincipal] `
-        [Security.Principal.WindowsIdentity]::GetCurrent()
-    ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        Write-Host "Execute este script como Administrador para limpeza completa." -ForegroundColor Yellow
-        return
-    }
+    [CmdletBinding()]
+    param()
 
-    Write-Host "Iniciando faxina profunda e limpeza de arquivos temporários..." -ForegroundColor Cyan
-
-    # --- ETAPA 1: DISM ---
     try {
-        Write-Host "Executando DISM: Otimizando base de componentes (WinSxS). Isso pode levar alguns minutos..." -ForegroundColor Yellow
-        Start-Process -FilePath "dism.exe" -ArgumentList "/online /Cleanup-Image /StartComponentCleanup /Quiet" -Wait -NoNewWindow
-        Write-Host "Otimização de componentes concluída!" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Aviso: Não foi possível executar o DISM nesta sessão." -ForegroundColor Yellow
-    }
+        # Verifica se está executando como Administrador
+        $isAdmin = ([Security.Principal.WindowsPrincipal] `
+            [Security.Principal.WindowsIdentity]::GetCurrent()
+        ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
-    # --- ETAPA 2: Limpeza de pastas temporárias ---
-    Write-Host "Limpando pastas temporárias..." -ForegroundColor Yellow
+        if (-not $isAdmin) {
+            Write-Host "Execute este script como Administrador para limpeza completa." -ForegroundColor Yellow
+            Write-Log "Clear-TempFiles: execução sem privilégios administrativos."
+            throw "Permissão insuficiente: requer administrador."
+        }
 
-    $alvos = @(
-        "C:\Windows\Temp\*",
-        "$env:TEMP\*",
-        "C:\Windows\SoftwareDistribution\Download\*",
-        "C:\Users\*\AppData\Local\Temp\*"
-    )
+        Write-Host "Iniciando faxina profunda e limpeza de arquivos temporários..." -ForegroundColor Cyan
 
-    foreach ($caminho in $alvos) {
+        $mensagens = @()
+
+        # --- Phase 1: DISM ---
         try {
-            Remove-Item -Path $caminho -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "Executando DISM (WinSxS)..." -ForegroundColor Yellow
+            Start-Process -FilePath "dism.exe" `
+                -ArgumentList "/online /Cleanup-Image /StartComponentCleanup /Quiet" `
+                -Wait -NoNewWindow
+            $mensagens += "DISM executado com sucesso"
         }
         catch {
-            # falha silenciosa em arquivos bloqueados
+            $mensagens += "DISM não pôde ser executado nesta sessão"
         }
-    }
 
-    # Limpeza opcional de Prefetch (apenas arquivos > 7 dias)
-    try {
-        $prefetchPath = "C:\Windows\Prefetch"
-        if (Test-Path $prefetchPath) {
-            Get-ChildItem -Path $prefetchPath -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } |
-            Remove-Item -Force -ErrorAction SilentlyContinue
+        # --- Phase 2: Limpeza de temporários ---
+        Write-Host "Limpando pastas temporárias..." -ForegroundColor Yellow
+
+        $alvos = @(
+            "C:\Windows\Temp\*",
+            "$env:TEMP\*",
+            "C:\Windows\SoftwareDistribution\Download\*",
+            "C:\Users\*\AppData\Local\Temp\*"
+        )
+
+        foreach ($caminho in $alvos) {
+            try {
+                Remove-Item -Path $caminho -Recurse -Force -ErrorAction SilentlyContinue
+            } catch {}
         }
-    }
-    catch { }
 
-    # --- ETAPA 3: Limpeza de lixeiras ---
-    try {
-        Write-Host "Esvaziando lixeiras de todos os discos..." -ForegroundColor Yellow
-        Clear-RecycleBin -Force -ErrorAction SilentlyContinue
-    }
-    catch { }
+        $mensagens += "Pastas temporárias limpas"
 
-    Write-Host "Limpeza profunda concluída com sucesso!" -ForegroundColor Green
-    Write-Log "Faxina completa realizada: DISM, pastas temporárias e lixeiras."
+        # Prefetch (>7 dias)
+        try {
+            $prefetchPath = "C:\Windows\Prefetch"
+            if (Test-Path $prefetchPath) {
+                Get-ChildItem -Path $prefetchPath -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } |
+                    Remove-Item -Force -ErrorAction SilentlyContinue
+                $mensagens += "Prefetch antigo removido"
+            }
+        } catch {}
+
+        # --- Phase 3: Lixeiras ---
+        try {
+            Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+            $mensagens += "Lixeiras esvaziadas"
+        } catch {}
+
+        Write-Host "Limpeza profunda concluída com sucesso!" -ForegroundColor Green
+        Write-Log "Clear-TempFiles concluído com sucesso."
+
+        return ($mensagens -join " | ")
+    }
+    catch {
+        Write-Host "Erro durante a limpeza de arquivos temporários." -ForegroundColor Red
+        Write-Log "Erro em Clear-TempFiles: $_"
+        throw $_
+    }
 }
