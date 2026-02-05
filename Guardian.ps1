@@ -232,7 +232,7 @@ Write-Host "Tempo decorrido: $tempoHumano"
             Write-Host ""
 
             Start-Sleep 3
-            #exit 0
+            exit 0
         }
     }
 }
