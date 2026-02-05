@@ -41,7 +41,7 @@ $jsonDir = Join-Path (Join-Path $baseJsonDir $year) $monthFolder
 
 if (-not (Test-Path $jsonDir)) {
     Write-Host "❌ Pasta de inventários não encontrada: $jsonDir" -ForegroundColor Red
-    exit
+    return
 }
 
 Write-Host "📁 Procurando arquivo ORIGINAL em: $jsonDir" -ForegroundColor Cyan
@@ -58,7 +58,7 @@ $arquivo = Get-ChildItem -Path $jsonDir -Filter *.json |
 
 if (-not $arquivo) {
     Write-Host "❌ Nenhum arquivo ORIGINAL encontrado em: $jsonDir" -ForegroundColor Red
-    exit
+    return
 }
 
 Write-Host "✔ Arquivo original identificado: $($arquivo.FullName)" -ForegroundColor Green
@@ -78,11 +78,12 @@ $jsonRaw = Get-Content $arquivo.FullName -Raw | ConvertFrom-Json
 # ------------------------------------------------------------------------------
 # 3) Fase 1 - Inventário
 # ------------------------------------------------------------------------------
-$fase1 = $jsonRaw.Fases | Where-Object { $_.Phase -match "Invent" }
+$fase1 = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("invent") }
 
 if (-not $fase1) {
-    Write-Host "❌ Fase 1 não encontrada." -ForegroundColor Red
-    exit
+    Write-Host "Fase 1 não encontrada. Continuando..."
+} else {
+    $msg = $fase1.Mensagem -split "`r`n"
 }
 
 $msg = $fase1.Mensagem -split "`r`n"
@@ -102,7 +103,7 @@ for ($i = 0; $i -lt $msg.Count; $i++) {
 
 if (-not $indexSoftware) {
     Write-Host "❌ Não consegui identificar onde começam os softwares." -ForegroundColor Red
-    exit
+    return
 }
 
 # ------------------------------------------------------------------------------
@@ -280,7 +281,7 @@ $particoes = foreach ($p in $particoesRaw) {
 # ------------------------------------------------------------------------------
 # 11) Fase 2 — SFC/DISM estruturado e interpretado
 # ------------------------------------------------------------------------------
-$fase2 = $jsonRaw.Fases | Where-Object { $_.Phase -match "Registro" }
+$fase2 = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("registro") }
 
 if ($fase2) {
 
@@ -339,7 +340,7 @@ if ($fase2) {
 # ------------------------------------------------------------------------------
 # Fase: Limpeza de todas as lixeiras — interpretação estruturada
 # ------------------------------------------------------------------------------
-$faseLixo = $jsonRaw.Fases | Where-Object { $_.Phase -match "lixeiras" }
+$faseLixo = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("lixeira") }
 
 if ($faseLixo) {
 
@@ -397,7 +398,7 @@ if ($faseLixo) {
 # ------------------------------------------------------------------------------
 # Fase: Atualização do Windows — interpretação estruturada
 # ------------------------------------------------------------------------------
-$faseUpdate = $jsonRaw.Fases | Where-Object { $_.Phase -match "Atualização do Windows" }
+$faseUpdate = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("atualiza") }
 
 if ($faseUpdate) {
 
@@ -448,7 +449,7 @@ if ($faseUpdate) {
 # ------------------------------------------------------------------------------
 # Fase: Atualização da Loja da Microsoft — interpretação estruturada
 # ------------------------------------------------------------------------------
-$faseStore = $jsonRaw.Fases | Where-Object { $_.Phase -match "Loja da Microsoft" }
+$faseStore = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("store") -or $_.Phase.ToLower().Contains("loja") }
 
 if ($faseStore) {
 
@@ -497,7 +498,7 @@ if ($faseStore) {
 # ------------------------------------------------------------------------------
 # Fase: Atualização dos programas via Winget — interpretação estruturada
 # ------------------------------------------------------------------------------
-$faseWinget = $jsonRaw.Fases | Where-Object { $_.Phase -match "Winget" }
+$faseWinget = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("winget") }
 
 if ($faseWinget) {
 
@@ -544,7 +545,7 @@ if ($faseWinget) {
 # ------------------------------------------------------------------------------
 # Fase: Limpeza dos arquivos temporários dos componentes do Windows — estruturada
 # ------------------------------------------------------------------------------
-$faseDismClean = $jsonRaw.Fases | Where-Object { $_.Phase -match "componentes do Windows" }
+$faseDismClean = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("componentes") }
 
 if ($faseDismClean) {
 
@@ -589,7 +590,7 @@ if ($faseDismClean) {
 # ------------------------------------------------------------------------------
 # Fase: Varredura contra malwares com Windows Defender — estruturada
 # ------------------------------------------------------------------------------
-$faseDefender = $jsonRaw.Fases | Where-Object { $_.Phase -match "Windows Defender" }
+$faseDefender = $jsonRaw.Fases | Where-Object { $_.Phase.ToLower().Contains("defender") }
 
 if ($faseDefender) {
 
@@ -633,135 +634,21 @@ if ($faseDefender) {
 }
 
 
-# ------------------------------------------------------------------------------
-# 14) SAÚDE GERAL DO SISTEMA — consolidação de todas as fases (v3.8)
-# ------------------------------------------------------------------------------
 
-# =============== 1. Integridade do Sistema (SFC/DISM) ===============
-$notaIntegridade = 0
-if ($fase2) {
-    if ($fase2.Mensagem.IntegridadeArquivos -eq "OK") {
-        $notaIntegridade = 100
-    } else {
-        $notaIntegridade = 40
-    }
-}
-
-# =============== 2. Atualizações (Windows + Store + Winget) ===============
-$notaAtualizacoes = 0
-$faseUpdateWin = $jsonRaw.Fases | Where-Object { $_.Phase -match "Atualização do Windows" }
-$faseStore     = $jsonRaw.Fases | Where-Object { $_.Phase -match "Loja da Microsoft" }
-$faseWinget    = $jsonRaw.Fases | Where-Object { $_.Phase -match "Winget" }
-
-$okWin   = $faseUpdateWin  -and $faseUpdateWin.Mensagem.AtualizacaoBemSucedida
-$okStore = $faseStore      -and $faseStore.Mensagem.AtualizacaoBemSucedida
-$okWing  = $faseWinget     -and $faseWinget.Mensagem.AtualizacaoBemSucedida
-
-$sucessos = @($okWin, $okStore, $okWing) | Where-Object { $_ -eq $true } | Measure-Object | Select-Object -ExpandProperty Count
-
-switch ($sucessos) {
-    3 { $notaAtualizacoes = 100 }
-    2 { $notaAtualizacoes = 80 }
-    1 { $notaAtualizacoes = 60 }
-    0 { $notaAtualizacoes = 30 }
-}
-
-# =============== 3. Armazenamentos (SSD/HDD) ===============
-$notaArmazenamento = 0
-if ($armazenamentos.Count -gt 0) {
-    $discosOK = ($armazenamentos | Where-Object { $_.Status -match "Saud" }).Count
-    if ($discosOK -eq $armazenamentos.Count) {
-        $notaArmazenamento = 100
-    } elseif ($discosOK -gt 0) {
-        $notaArmazenamento = 70
-    } else {
-        $notaArmazenamento = 30
-    }
-}
-
-# =============== 4. Partições (base UsadoPct) ===============
-$notaParticoes = 100
-
-foreach ($p in $particoes) {
-    if ($p.UsadoPct -gt 95) { $notaParticoes = [Math]::Min($notaParticoes, 10) }
-    elseif ($p.UsadoPct -gt 85) { $notaParticoes = [Math]::Min($notaParticoes, 40) }
-    elseif ($p.UsadoPct -gt 70) { $notaParticoes = [Math]::Min($notaParticoes, 70) }
-    else { $notaParticoes = [Math]::Min($notaParticoes, 100) }
-}
-
-# =============== 5. Segurança (Windows Defender) ===============
-$notaSeguranca = 0
-$faseDefender = $jsonRaw.Fases | Where-Object { $_.Phase -match "Windows Defender" }
-
-if ($faseDefender -and $faseDefender.Mensagem.ScanBemSucedido) {
-    $notaSeguranca = 100
-} else {
-    $notaSeguranca = 40
-}
-
-# =============== 6. Rede (Ethernet priorizada) ===============
-$notaRede = 0
-if ($rede) {
-    switch ($rede.Status) {
-        "Up" { $notaRede = 100 }
-        default { $notaRede = 40 }
-    }
-
-    if ($rede.Velocidade -match "100 Mbps") { $notaRede = 70 }
-    if ($rede.Velocidade -match "10 Mbps")  { $notaRede = 40 }
-}
-
-# =============== 7. Limpezas e Otimizações ===============
-$notaLimpesas = 100  # Se chegou até aqui no script, todas as limpezas foram executadas
-
-# =============== Ponderação final (0–100) ===============
-
-$saudeFinal = `
-($notaIntegridade * 0.30) +
-($notaAtualizacoes * 0.20) +
-($notaArmazenamento * 0.20) +
-($notaParticoes * 0.10) +
-($notaSeguranca * 0.15) +
-($notaRede * 0.03) +
-($notaLimpesas * 0.02)
-
-$saudeFinal = [Math]::Round($saudeFinal)
-
-# Classificação textual
-$classificacao = switch ($saudeFinal) {
-    {$_ -ge 90} { "Excelente" }
-    {$_ -ge 75} { "Boa" }
-    {$_ -ge 50} { "Regular" }
-    default     { "Crítica" }
-}
-
-# Inserir no JSON final
-$jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCustomObject]@{
-    Nota          = $saudeFinal
-    Classificacao = $classificacao
-    Detalhes = [PSCustomObject]@{
-        IntegridadeSistema = $notaIntegridade
-        Atualizacoes       = $notaAtualizacoes
-        Armazenamento      = $notaArmazenamento
-        Particoes          = $notaParticoes
-        Seguranca          = $notaSeguranca
-        Rede               = $notaRede
-        Limpezas           = $notaLimpesas
-    }
-})
 
 
 # ------------------------------------------------------------------------------
 # 12) Finalizar Fase 1
 # ------------------------------------------------------------------------------
-$fase1.Mensagem = [PSCustomObject]@{
-    Hardware       = $hardwareObj
-    Rede           = $rede
-    Armazenamentos = $armazenamentos
-    Particoes      = $particoes
-    Softwares      = $softwareList
+if ($fase1) {
+    $fase1.Mensagem = [PSCustomObject]@{
+        Hardware       = $hardwareObj
+        Rede           = $rede
+        Armazenamentos = $armazenamentos
+        Particoes      = $particoes
+        Softwares      = $softwareList
+    }
 }
-
 # --------------------------------------------------------------------------
 # 13) Exportar JSON final — na MESMA pasta do arquivo original
 # --------------------------------------------------------------------------
