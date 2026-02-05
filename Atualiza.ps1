@@ -88,26 +88,23 @@ $Files = @(
     
 )
 
-# -------------------------------
-# LIMPEZA BRUTAL (só arquivos gerenciados)
-# -------------------------------
-Show-Header "Limpando arquivos antigos do Guardian..." -Color Yellow
+    # -------------------------------
+    # Limpeza dos atributos Read-Only (caso existam)
+    # -------------------------------
+    Show-Header "Limpando arquivos antigos do Guardian..." -Color Yellow
 
-foreach ($File in $Files) {
-    try {
-        if (Test-Path $File.Path) {
+    foreach ($File in $Files) {
+        try {
+            if (Test-Path $File.Path) {
 
-            # Remove atributo ReadOnly
-            attrib -R $File.Path 2>$null
-
-            # Remove arquivo silenciosamente
-            Remove-Item $File.Path -Force -ErrorAction SilentlyContinue
+                # Remove atributo ReadOnly
+                attrib -R $File.Path 2>$null
+            }
+        }
+        catch {
+            Write-Host "Aviso: Não foi possível mudar os atributos dos arquivos $($File.Path)" -ForegroundColor DarkYellow
         }
     }
-    catch {
-        Write-Host "Aviso: Não foi possível remover $($File.Path)" -ForegroundColor DarkYellow
-    }
-}
 
 # -------------------------------
 # DOWNLOAD ATUALIZADO
