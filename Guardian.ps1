@@ -180,7 +180,6 @@ foreach ($File in $Files) {
     }
 }
 
-exit 0
 
 #endregion
 
