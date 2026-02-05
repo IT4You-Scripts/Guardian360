@@ -244,44 +244,39 @@ $hardwareObj.Remove("Endereço MAC")
 # ------------------------------------------------------------------------------
 # 9) Armazenamentos
 # ------------------------------------------------------------------------------
-$armazenamentos = @(
-    foreach ($a in $armazenamentosRaw) {
-        if ($a -match "^(.*?)\s*->\s*Status:\s*(.*)$") {
-            [PSCustomObject]@{
-                Nome   = $matches[1].Trim()
-                Status = $matches[2].Trim()
-            }
+$armazenamentos = foreach ($a in $armazenamentosRaw) {
+    if ($a -match "^(.*?)\s*->\s*Status:\s*(.*)$") {
+        [PSCustomObject]@{
+            Nome   = $matches[1].Trim()
+            Status = $matches[2].Trim()
         }
     }
-)
-
+}
 
 # ------------------------------------------------------------------------------
 # 10) Partições — espaço real (GB) + percentagem utilizada
 # ------------------------------------------------------------------------------
-$particoes = @(
-    foreach ($p in $particoesRaw) {
-        if ($p -match "^([A-Z]):.*?([\d\.]+)\s*GB.*?([\d\.]+)%") {
+$particoes = foreach ($p in $particoesRaw) {
+    if ($p -match "^([A-Z]):.*?([\d\.]+)\s*GB.*?([\d\.]+)%") {
 
-            $letra     = $matches[1]
-            $tamanho   = [double]$matches[2]
-            $pctLivre  = [double]$matches[3]
+        $letra     = $matches[1]
+        $tamanho   = [double]$matches[2]
+        $pctLivre  = [double]$matches[3]
 
-            $livreGB = [Math]::Round(($tamanho * $pctLivre) / 100, 2)
-            $usadoGB = [Math]::Round(($tamanho - $livreGB), 2)
-            $pctUsado = [Math]::Round((($tamanho - $livreGB) / $tamanho) * 100, 2)
+        # cálculos
+        $livreGB = [Math]::Round(($tamanho * $pctLivre) / 100, 2)
+        $usadoGB = [Math]::Round(($tamanho - $livreGB), 2)
+        $pctUsado = [Math]::Round((($tamanho - $livreGB) / $tamanho) * 100, 2)
 
-            [PSCustomObject]@{
-                Letra     = $letra
-                TamanhoGB = $tamanho
-                LivreGB   = $livreGB
-                UsadoGB   = $usadoGB
-                UsadoPct  = $pctUsado
-            }
+        [PSCustomObject]@{
+            Letra     = $letra
+            TamanhoGB = $tamanho
+            LivreGB   = $livreGB
+            UsadoGB   = $usadoGB
+            UsadoPct  = $pctUsado
         }
     }
-)
-
+}
 
 # ------------------------------------------------------------------------------
 # 11) Fase 2 — SFC/DISM estruturado e interpretado
