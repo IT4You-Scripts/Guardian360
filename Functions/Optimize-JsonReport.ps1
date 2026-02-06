@@ -59,6 +59,45 @@ Write-Host "✔ Arquivo original identificado: $($arquivo.FullName)" -Foreground
 # ------------------------------------------------------------------------------
 $jsonRaw = Get-Content $arquivo.FullName -Raw | ConvertFrom-Json
 
+# Blindagem: consolidar fases duplicadas de bloqueio de atualização
+$faseBlockApp = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Block-AppUpdates" } | Select-Object -First 1
+$faseQgis     = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "QGIS" } | Select-Object -First 1
+
+if ($faseBlockApp -or $faseQgis) {
+
+    $mensagens = @()
+    $tempoTotal = 0
+
+    if ($faseBlockApp) {
+        if ($faseBlockApp.Mensagem) { $mensagens += $faseBlockApp.Mensagem }
+        $tempoTotal += $faseBlockApp.TempoSeg
+    }
+
+    if ($faseQgis) {
+        if ($faseQgis.Mensagem) { $mensagens += $faseQgis.Mensagem }
+        $tempoTotal += $faseQgis.TempoSeg
+    }
+
+    $novaFase = [PSCustomObject]@{
+        Phase    = "Regras de Bloqueio no Firewall contra Atualizações"
+        Status   = "OK"
+        TempoSeg = $tempoTotal
+        Mensagem = ($mensagens -join " | ")
+    }
+
+    $jsonRaw.Fases = @($jsonRaw.Fases) | Where-Object {
+        $_ -ne $faseBlockApp -and $_ -ne $faseQgis
+    }
+
+    $jsonRaw.Fases += $novaFase
+}
+
+if (-not $jsonRaw.Fases) {
+    Write-Host "❌ JSON inválido: campo Fases ausente." -ForegroundColor Red
+    exit
+}
+
+
 # --------------------------------------------------------------------------
 # Normalizar Strings com aspas duplas externas
 # --------------------------------------------------------------------------
@@ -89,7 +128,13 @@ if (-not $fase1) {
     exit
 }
 
+if (-not $fase1.Mensagem) {
+    Write-Host "❌ Inventário sem conteúdo." -ForegroundColor Red
+    exit
+}
+
 $msg = $fase1.Mensagem -split "`r`n"
+
 
 # ------------------------------------------------------------------------------
 # Encontrar início da lista de softwares
@@ -749,6 +794,10 @@ $classificacao = switch ($saudeFinal) {
 }
 
 # Inserir no JSON final
+if ($jsonRaw.PSObject.Properties.Name -contains "SaudeGeral") {
+    $jsonRaw.PSObject.Properties.Remove("SaudeGeral")
+}
+
 $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCustomObject]@{
     Nota          = $saudeFinal
     Classificacao = $classificacao

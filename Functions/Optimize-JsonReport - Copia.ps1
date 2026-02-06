@@ -4,9 +4,6 @@
   - Hardware limpo (sem discos e sem partições)
   - Armazenamentos e Partições extraídos corretamente
   - Rede estruturada (prioriza “Ethernet”: IP, MAC, Status, Velocidade)
-  - Fase 2 (SFC/DISM) estruturada em objeto
-  - Zero redundância
-  - Zero erro de parsing
 ====================================================================
 #>
 
@@ -16,15 +13,8 @@ param(
 
 Write-Host "`n🔍 Procurando arquivo ORIGINAL..." -ForegroundColor Cyan
 
-
-
-
-
-
-
-
 # ------------------------------------------------------------------------------
-# 1) Localizar arquivo ORIGINAL — caminho fixo C:\Guardian\Json
+# Localizar arquivo ORIGINAL — caminho fixo C:\Guardian\Json
 # ------------------------------------------------------------------------------
 
 # Caminho base fixo
@@ -64,19 +54,33 @@ if (-not $arquivo) {
 Write-Host "✔ Arquivo original identificado: $($arquivo.FullName)" -ForegroundColor Green
 
 
-
-
-
-
-
-
 # ------------------------------------------------------------------------------
-# 2) Carregar JSON
+# Carregar JSON
 # ------------------------------------------------------------------------------
 $jsonRaw = Get-Content $arquivo.FullName -Raw | ConvertFrom-Json
 
+# --------------------------------------------------------------------------
+# Normalizar Strings com aspas duplas externas
+# --------------------------------------------------------------------------
+function Remove-OuterQuotes {
+    param([string]$s)
+
+    if ($null -eq $s) { return $s }
+
+    if ($s -match '^".*"$') {
+        return $s.Trim('"')
+    }
+
+    return $s
+}
+
+if ($jsonRaw.Cliente) {
+    $jsonRaw.Cliente = Remove-OuterQuotes $jsonRaw.Cliente
+}
+
+
 # ------------------------------------------------------------------------------
-# 3) Fase 1 - Inventário
+# Fase: Coleta do Inventário de Hardware e Software
 # ------------------------------------------------------------------------------
 $fase1 = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Invent" } | Select-Object -First 1
 
@@ -88,7 +92,7 @@ if (-not $fase1) {
 $msg = $fase1.Mensagem -split "`r`n"
 
 # ------------------------------------------------------------------------------
-# 4) Encontrar início da lista de softwares
+# Encontrar início da lista de softwares
 # ------------------------------------------------------------------------------
 $indexSoftware = $null
 
@@ -106,7 +110,7 @@ if (-not $indexSoftware) {
 }
 
 # ------------------------------------------------------------------------------
-# 5) Divisão Hardware / Softwares
+# Divisão Hardware / Softwares
 # ------------------------------------------------------------------------------
 $hardwareLines = $msg[0..($indexSoftware - 1)]
 $softwareLines = $msg[($indexSoftware + 1)..($msg.Count - 1)]
@@ -116,7 +120,7 @@ $softwareList = $softwareLines |
     Where-Object { $_ -ne "" }
 
 # ------------------------------------------------------------------------------
-# 6) Identificar blocos Armazenamento e Partições
+# Identificar blocos Armazenamento e Partições
 # ------------------------------------------------------------------------------
 $idxArmazenamento = ($hardwareLines | Select-String "^\s*Armazenamento\s*:" | Select-Object -First 1).LineNumber
 $idxParticoes     = ($hardwareLines | Select-String "^\s*Partições\s*:" | Select-Object -First 1).LineNumber
@@ -162,7 +166,7 @@ if ($null -ne $idxParticoes) {
 }
 
 # ------------------------------------------------------------------------------
-# 7) HARDWARE — sem discos e sem partições
+# Hardware — sem discos e sem partições
 # ------------------------------------------------------------------------------
 $hardwareObj = @{}
 
@@ -187,7 +191,7 @@ $ipHardware  = $hardwareObj["Endereço IP"]
 $macHardware = $hardwareObj["Endereço MAC"]
 
 # ------------------------------------------------------------------------------
-# 8) BLOCO DE REDE — prioriza adaptador "Ethernet"
+# Adaptador de rede — prioriza adaptador "Ethernet"
 # ------------------------------------------------------------------------------
 $rede = $null
 
@@ -242,7 +246,7 @@ $hardwareObj.Remove("Endereço IP")
 $hardwareObj.Remove("Endereço MAC")
 
 # ------------------------------------------------------------------------------
-# 9) Armazenamentos
+# Armazenamentos
 # ------------------------------------------------------------------------------
 $armazenamentos = @(
     foreach ($a in $armazenamentosRaw) {
@@ -257,7 +261,7 @@ $armazenamentos = @(
 
 
 # ------------------------------------------------------------------------------
-# 10) Partições — espaço real (GB) + percentagem utilizada
+# Partições — Espaço real (GB) + percentagem utilizada
 # ------------------------------------------------------------------------------
 $particoes = @(
     foreach ($p in $particoesRaw) {
@@ -284,7 +288,7 @@ $particoes = @(
 
 
 # ------------------------------------------------------------------------------
-# 11) Fase 2 — SFC/DISM estruturado e interpretado
+# Fase: Integridade do Sistema com SFC/DISM estruturado e interpretado
 # ------------------------------------------------------------------------------
 $fase2 = @($jsonRaw.Fases) |
     Where-Object { $_.Phase -match "Registro" } |
@@ -643,7 +647,7 @@ if ($faseDefender) {
 
 
 # ------------------------------------------------------------------------------
-# 14) SAÚDE GERAL DO SISTEMA — consolidação de todas as fases (v3.8)
+# Saúde Geral do Sistema — Consolidação de todas as fases
 # ------------------------------------------------------------------------------
 
 # =============== 1. Integridade do Sistema (SFC/DISM) ===============
@@ -761,7 +765,7 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
 
 
 # ------------------------------------------------------------------------------
-# 12) Finalizar Fase 1
+# Finalizar Fase do Inventário
 # ------------------------------------------------------------------------------
 $fase1.Mensagem = [PSCustomObject]@{
     Hardware       = $hardwareObj
@@ -772,7 +776,7 @@ $fase1.Mensagem = [PSCustomObject]@{
 }
 
 # --------------------------------------------------------------------------
-# 13) Exportar JSON final — na MESMA pasta do arquivo original
+# Exportar JSON final — No mesmo local do arquivo json original
 # --------------------------------------------------------------------------
 
 $nomeOut = Join-Path $arquivo.DirectoryName (($arquivo.BaseName) + "_TRATADO.json")
