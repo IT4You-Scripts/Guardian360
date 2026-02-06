@@ -689,6 +689,53 @@ if ($faseDefender) {
     }
 }
 
+# ------------------------------------------------------------------------------
+# Verificação de Backups do Macrium Reflect
+# ------------------------------------------------------------------------------
+$macriumInfo = [PSCustomObject]@{
+    ExisteParticaoD   = $false
+    ExistePastaRescue = $false
+    ExistemImagens    = $false
+    DataImagem1       = $null
+    DataImagem2       = $null
+}
+
+try {
+
+    $drive = Get-PSDrive -Name "D" -PSProvider FileSystem -ErrorAction SilentlyContinue
+
+    if ($drive) {
+
+        $macriumInfo.ExisteParticaoD = $true
+
+        $rescuePath = "D:\Rescue"
+
+        if (Test-Path $rescuePath -PathType Container) {
+
+            $macriumInfo.ExistePastaRescue = $true
+
+            $files = Get-ChildItem $rescuePath -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -in ".mrimg", ".mrbak" } |
+                Sort-Object LastWriteTime -Descending
+
+            if ($files.Count -gt 0) {
+
+                $macriumInfo.ExistemImagens = $true
+
+                $macriumInfo.DataImagem1 = $files[0].LastWriteTime
+
+                if ($files.Count -ge 2) {
+                    $macriumInfo.DataImagem2 = $files[1].LastWriteTime
+                }
+            }
+        }
+    }
+
+}
+catch {
+    # silencioso por design — não interfere no inventário
+}
+
 
 # ------------------------------------------------------------------------------
 # Saúde Geral do Sistema — Consolidação de todas as fases
@@ -840,12 +887,9 @@ $fase1.Mensagem = [PSCustomObject]@{
     Rede           = $rede
     Armazenamentos = $armazenamentos
     Particoes      = $particoes
+    BackupMacrium  = $macriumInfo
     Softwares      = $softwareList
 }
-
-
-
-
 
 # --------------------------------------------------------------------------
 # Exportar JSON final — No mesmo local do arquivo json original
