@@ -76,29 +76,12 @@ if (Test-Path $updater) {
 
 
 # -------------------------------
-# Validações iniciais (versão amigável)
+# Validações iniciais
 # -------------------------------
-
-if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
-    Fail "PowerShell 7 não foi localizado neste computador.`n`nInstale o PowerShell 7 antes de executar o Guardian."
-}
-$PwshPath = (Get-Command pwsh).Source
-
-if (-not (Test-Path $ScriptPath)) {
-    Fail "Arquivo principal do Guardian não foi encontrado.`n`nCaminho esperado:`n$ScriptPath"
-}
-$ScriptPath = (Resolve-Path $ScriptPath).Path
-
-if (-not (Test-Path $CredPath)) {
-    Fail "Arquivo de credenciais não encontrado.`n`nO Guardian precisa das credenciais criptografadas para elevação.`n`nLocal esperado:`n$CredPath"
-}
-$CredPath = (Resolve-Path $CredPath).Path
-
-if (-not (Test-Path $KeyPath)) {
-    Fail "Chave AES ausente.`n`nSem a chave não é possível descriptografar as credenciais.`n`nLocal esperado:`n$KeyPath"
-}
-$KeyPath = (Resolve-Path $KeyPath).Path
-
+try { $PwshPath   = (Resolve-Path $PwshPath).Path } catch { Fail "PowerShell 7 não encontrado em: $PwshPath" }
+try { $ScriptPath = (Resolve-Path $ScriptPath).Path } catch { Fail "Guardian.ps1 não encontrado em: $ScriptPath" }
+try { $CredPath   = (Resolve-Path $CredPath).Path } catch { Fail "Credenciais não encontradas em: $CredPath" }
+try { $KeyPath    = (Resolve-Path $KeyPath).Path } catch { Fail "Chave AES não encontrada em: $KeyPath" }
 
 # -------------------------------
 # Leitura das credenciais AES
