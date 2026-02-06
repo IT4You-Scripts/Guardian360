@@ -822,7 +822,7 @@ if ($rede) {
 }
 
 # =============== 7. Limpezas e Otimizações ===============
-$notaLimpesas = 100  # Se chegou até aqui no script, todas as limpezas foram executadas
+$notaLimpezas = 100  # Se chegou até aqui no script, todas as limpezas foram executadas
 
 
 # =============== 8. Backup Macrium ===============
@@ -863,7 +863,7 @@ $saudeFinal = `
 ($notaParticoes * 0.08) +
 ($notaSeguranca * 0.14) +
 ($notaRede * 0.03) +
-($notaLimpesas * 0.02) +
+($notaLimpezas * 0.02) +
 ($notaBackup * 0.10)
 
 
@@ -892,7 +892,7 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
         Particoes          = $notaParticoes
         Seguranca          = $notaSeguranca
         Rede               = $notaRede
-        Limpezas           = $notaLimpesas
+        Limpezas           = $notaLimpezas
         Backup             = $notaBackup
     }
 })
