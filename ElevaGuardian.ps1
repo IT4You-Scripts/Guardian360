@@ -90,7 +90,7 @@ if (-not (Test-Path $ScriptPath)) {
 $ScriptPath = (Resolve-Path $ScriptPath).Path
 
 if (-not (Test-Path $CredPath)) {
-    Fail "Arquivo de credenciais não encontrado.`n`nO Guardian precisa das credenciais criptografadas para elevação.`n`nLocal esperado:`n$CredPath"
+    Fail "Arquivo de credenciais não encontrado. Local esperado:`n$CredPath"
 }
 $CredPath = (Resolve-Path $CredPath).Path
 
