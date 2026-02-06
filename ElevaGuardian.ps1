@@ -85,17 +85,17 @@ if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
 $PwshPath = (Get-Command pwsh).Source
 
 if (-not (Test-Path $ScriptPath)) {
-    Fail "Arquivo principal do Guardian não foi encontrado.`n`nCaminho esperado:`n$ScriptPath"
+    Fail "Arquivo principal do Guardian não foi encontrado. Caminho esperado:$ScriptPath"
 }
 $ScriptPath = (Resolve-Path $ScriptPath).Path
 
 if (-not (Test-Path $CredPath)) {
-    Fail "Arquivo de credenciais não encontrado. Local esperado:`n$CredPath"
+    Fail "Arquivo de credenciais não encontrado. Local esperado:$CredPath"
 }
 $CredPath = (Resolve-Path $CredPath).Path
 
 if (-not (Test-Path $KeyPath)) {
-    Fail "Chave AES ausente.`n`nSem a chave não é possível descriptografar as credenciais.`n`nLocal esperado:`n$KeyPath"
+    Fail "Chave AES ausente.`n`nSem a chave não é possível descriptografar as credenciais. Local esperado:$KeyPath"
 }
 $KeyPath = (Resolve-Path $KeyPath).Path
 
