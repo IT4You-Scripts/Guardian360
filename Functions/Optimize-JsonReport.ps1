@@ -832,10 +832,10 @@ if ($macriumInfo.ExisteParticaoD -eq $false) {
     $notaBackup = 0
 }
 elseif ($macriumInfo.ExistePastaRescue -eq $false) {
-    $notaBackup = 20
+    $notaBackup = 0
 }
 elseif ($macriumInfo.ExistemImagens -eq $false) {
-    $notaBackup = 30
+    $notaBackup = 0
 }
 else {
     if ($macriumInfo.DataImagem1) {
@@ -855,6 +855,7 @@ else {
         $notaBackup = 0
     }
 }
+
 
 
 
