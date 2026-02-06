@@ -690,7 +690,7 @@ if ($faseDefender) {
 }
 
 # ------------------------------------------------------------------------------
-# Verificação de Backups do Macrium Reflect (resiliente a qualquer quantidade)
+# Verificação de Backups do Macrium Reflect
 # ------------------------------------------------------------------------------
 $macriumInfo = [PSCustomObject]@{
     ExisteParticaoD   = $false
@@ -704,36 +704,37 @@ $macriumInfo = [PSCustomObject]@{
 
 try {
 
-    $drive = Get-PSDrive -Name "D" -PSProvider FileSystem -ErrorAction SilentlyContinue
-
-    if ($drive) {
+    if (Test-Path "D:\") {
 
         $macriumInfo.ExisteParticaoD = $true
         $rescuePath = "D:\Rescue"
 
-        if (Test-Path $rescuePath -PathType Container) {
+        if (Test-Path $rescuePath) {
 
             $macriumInfo.ExistePastaRescue = $true
 
-            $files = Get-ChildItem $rescuePath -File -Recurse -ErrorAction SilentlyContinue |
-                Where-Object { $_.Extension -in ".mrimg", ".mrbak" } |
+            $files = @(
+                Get-ChildItem $rescuePath -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $ext = $_.Extension.ToLower().Trim()
+                    $ext -eq ".mrimg" -or $ext -eq ".mrbak"
+                } |
                 Sort-Object LastWriteTime -Descending
+            )
 
-            if ($files) {
+            if ($files.Count -gt 0) {
 
                 $macriumInfo.ExistemImagens = $true
-                $macriumInfo.TotalImagens = $files.Count
+                $macriumInfo.TotalImagens   = $files.Count
 
-                # Guardar todas as datas
-                $macriumInfo.TodasDatas = $files |
-                    Select-Object -ExpandProperty LastWriteTime
+                $macriumInfo.TodasDatas = @(
+                    $files | ForEach-Object { $_.LastWriteTime }
+                )
 
-                # Imagem mais recente
                 if ($files.Count -ge 1) {
                     $macriumInfo.DataImagem1 = $files[0].LastWriteTime
                 }
 
-                # Segunda imagem mais recente
                 if ($files.Count -ge 2) {
                     $macriumInfo.DataImagem2 = $files[1].LastWriteTime
                 }
@@ -742,9 +743,8 @@ try {
     }
 
 }
-catch {
-    # silencioso por design
-}
+catch {}
+
 
 
 
@@ -869,6 +869,62 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
     }
 })
 
+# ------------------------------------------------------------------------------
+# Verificação de Backups do Macrium Reflect
+# ------------------------------------------------------------------------------
+$macriumInfo = [PSCustomObject]@{
+    ExisteParticaoD   = $false
+    ExistePastaRescue = $false
+    ExistemImagens    = $false
+    TotalImagens      = 0
+    DataImagem1       = $null
+    DataImagem2       = $null
+    TodasDatas        = @()
+}
+
+try {
+
+    if (Test-Path "D:\") {
+
+        $macriumInfo.ExisteParticaoD = $true
+        $rescuePath = "D:\Rescue"
+
+        if (Test-Path $rescuePath) {
+
+            $macriumInfo.ExistePastaRescue = $true
+
+            $files = @(
+                Get-ChildItem $rescuePath -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $ext = $_.Extension.ToLower().Trim()
+                    $ext -eq ".mrimg" -or $ext -eq ".mrbak"
+                } |
+                Sort-Object LastWriteTime -Descending
+            )
+
+            if ($files.Count -gt 0) {
+
+                $macriumInfo.ExistemImagens = $true
+                $macriumInfo.TotalImagens   = $files.Count
+
+                $macriumInfo.TodasDatas = @(
+                    $files | ForEach-Object { $_.LastWriteTime }
+                )
+
+                if ($files.Count -ge 1) {
+                    $macriumInfo.DataImagem1 = $files[0].LastWriteTime
+                }
+
+                if ($files.Count -ge 2) {
+                    $macriumInfo.DataImagem2 = $files[1].LastWriteTime
+                }
+            }
+        }
+    }
+
+}
+catch {}
+
 
 # ------------------------------------------------------------------------------
 # Finalizar Fase do Inventário
@@ -901,6 +957,7 @@ $fase1.Mensagem = [PSCustomObject]@{
     BackupMacrium  = $macriumInfo
     Softwares      = $softwareList
 }
+
 
 # --------------------------------------------------------------------------
 # Exportar JSON final — No mesmo local do arquivo json original
