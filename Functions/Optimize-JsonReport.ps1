@@ -824,16 +824,48 @@ if ($rede) {
 # =============== 7. Limpezas e Otimizações ===============
 $notaLimpesas = 100  # Se chegou até aqui no script, todas as limpezas foram executadas
 
+
+# =============== 8. Backup Macrium ===============
+$notaBackup = 0
+
+if ($macriumInfo.ExisteParticaoD -eq $false) {
+    $notaBackup = 0
+}
+elseif ($macriumInfo.ExistePastaRescue -eq $false) {
+    $notaBackup = 20
+}
+elseif ($macriumInfo.ExistemImagens -eq $false) {
+    $notaBackup = 30
+}
+else {
+
+    if ($macriumInfo.DataImagem1) {
+
+        $dias = (New-TimeSpan -Start $macriumInfo.DataImagem1 -End (Get-Date)).Days
+
+        if ($dias -le 7)       { $notaBackup = 100 }
+        elseif ($dias -le 30)  { $notaBackup = 80 }
+        elseif ($dias -le 90)  { $notaBackup = 60 }
+        else                   { $notaBackup = 40 }
+    }
+    else {
+        $notaBackup = 30
+    }
+}
+
+
 # =============== Ponderação final (0–100) ===============
 
 $saudeFinal = `
-($notaIntegridade * 0.30) +
-($notaAtualizacoes * 0.20) +
-($notaArmazenamento * 0.20) +
-($notaParticoes * 0.10) +
-($notaSeguranca * 0.15) +
+($notaIntegridade * 0.27) +
+($notaAtualizacoes * 0.18) +
+($notaArmazenamento * 0.18) +
+($notaParticoes * 0.08) +
+($notaSeguranca * 0.14) +
 ($notaRede * 0.03) +
-($notaLimpesas * 0.02)
+($notaLimpesas * 0.02) +
+($notaBackup * 0.10)
+
 
 $saudeFinal = [Math]::Round($saudeFinal)
 
@@ -861,6 +893,7 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
         Seguranca          = $notaSeguranca
         Rede               = $notaRede
         Limpezas           = $notaLimpesas
+        Backup             = $notaBackup
     }
 })
 
