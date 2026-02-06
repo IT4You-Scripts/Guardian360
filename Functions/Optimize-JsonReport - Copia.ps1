@@ -689,6 +689,59 @@ if ($faseDefender) {
     }
 }
 
+# ------------------------------------------------------------------------------
+# Verificação de Backups do Macrium Reflect
+# ------------------------------------------------------------------------------
+$macriumInfo = [PSCustomObject]@{
+    ExisteParticaoD   = $false
+    ExistePastaRescue = $false
+    ExistemImagens    = $false
+    TotalImagens      = 0
+    DataImagem1       = $null
+    DataImagem2       = $null
+}
+
+try {
+
+    if (Test-Path "D:\") {
+
+        $macriumInfo.ExisteParticaoD = $true
+        $rescuePath = "D:\Rescue"
+
+        if (Test-Path $rescuePath) {
+
+            $macriumInfo.ExistePastaRescue = $true
+
+            $files = @(
+                Get-ChildItem $rescuePath -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $ext = $_.Extension.ToLower().Trim()
+                    $ext -eq ".mrimg" -or $ext -eq ".mrbak"
+                } |
+                Sort-Object LastWriteTime -Descending
+            )
+
+            if ($files.Count -gt 0) {
+
+                $macriumInfo.ExistemImagens = $true
+                $macriumInfo.TotalImagens   = $files.Count
+
+                if ($files.Count -ge 1) {
+                    $macriumInfo.DataImagem1 = $files[0].LastWriteTime
+                }
+
+                if ($files.Count -ge 2) {
+                    $macriumInfo.DataImagem2 = $files[1].LastWriteTime
+                }
+            }
+        }
+    }
+
+}
+catch {}
+
+
+
 
 # ------------------------------------------------------------------------------
 # Saúde Geral do Sistema — Consolidação de todas as fases
@@ -811,6 +864,57 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
     }
 })
 
+# ------------------------------------------------------------------------------
+# Verificação de Backups do Macrium Reflect
+# ------------------------------------------------------------------------------
+$macriumInfo = [PSCustomObject]@{
+    ExisteParticaoD   = $false
+    ExistePastaRescue = $false
+    ExistemImagens    = $false
+    TotalImagens      = 0
+    DataImagem1       = $null
+    DataImagem2       = $null
+}
+
+try {
+
+    if (Test-Path "D:\") {
+
+        $macriumInfo.ExisteParticaoD = $true
+        $rescuePath = "D:\Rescue"
+
+        if (Test-Path $rescuePath) {
+
+            $macriumInfo.ExistePastaRescue = $true
+
+            $files = @(
+                Get-ChildItem $rescuePath -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $ext = $_.Extension.ToLower().Trim()
+                    $ext -eq ".mrimg" -or $ext -eq ".mrbak"
+                } |
+                Sort-Object LastWriteTime -Descending
+            )
+
+            if ($files.Count -gt 0) {
+
+                $macriumInfo.ExistemImagens = $true
+                $macriumInfo.TotalImagens   = $files.Count
+
+                if ($files.Count -ge 1) {
+                    $macriumInfo.DataImagem1 = $files[0].LastWriteTime
+                }
+
+                if ($files.Count -ge 2) {
+                    $macriumInfo.DataImagem2 = $files[1].LastWriteTime
+                }
+            }
+        }
+    }
+
+}
+catch {}
+
 
 # ------------------------------------------------------------------------------
 # Finalizar Fase do Inventário
@@ -840,11 +944,9 @@ $fase1.Mensagem = [PSCustomObject]@{
     Rede           = $rede
     Armazenamentos = $armazenamentos
     Particoes      = $particoes
+    BackupMacrium  = $macriumInfo
     Softwares      = $softwareList
 }
-
-
-
 
 
 # --------------------------------------------------------------------------
