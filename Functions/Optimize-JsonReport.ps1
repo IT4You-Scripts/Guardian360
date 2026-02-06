@@ -224,8 +224,7 @@ foreach ($line in $hardwareLines) {
     if ($linha -match "^Partições")     { continue }
     if ($linha -match "->\s*Status")    { continue }
     if ($linha -match "^[A-Z]:")        { continue }
-    if ($linha -match "GB" -or $linha -match "% livres") { continue }
-
+    if ($linha -match "% livres") { continue }
     if ($linha -match "^(.*?):\s*(.*)$") {
         $hardwareObj[$matches[1].Trim()] = $matches[2].Trim()
     }
@@ -816,13 +815,34 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
 # ------------------------------------------------------------------------------
 # Finalizar Fase do Inventário
 # ------------------------------------------------------------------------------
+# ---------------- SISTEMA ----------------
+$sistemaObj = [PSCustomObject]@{
+    "Nome do Computador"  = $hardwareObj["Nome do Computador"]
+    "Usuário Adm"         = $hardwareObj["Usuário Adm"]
+    "Login ID"            = $hardwareObj["Login ID"]
+    "Sistema Operacional" = $hardwareObj["Sistema Operacional"]
+}
+
+# ---------------- HARDWARE ----------------
+$hardwareFinal = [PSCustomObject]@{
+    "Processador (CPU)"       = $hardwareObj["Processador (CPU)"]
+    "Placa-Mãe"               = $hardwareObj["Placa-Mãe"]
+    "Fabricante e Modelo PC"  = $hardwareObj["Fabricante e Modelo PC"]
+    "Serial Number"           = $hardwareObj["Serial Number"]
+    "Memória RAM Total"       = $hardwareObj["Memória RAM Total"]
+    "Placas de Vídeo"         = $hardwareObj["Placas de Vídeo"]
+}
+
+# ---------------- FINAL ----------------
 $fase1.Mensagem = [PSCustomObject]@{
-    Hardware       = $hardwareObj
+    Sistema        = $sistemaObj
+    Hardware       = $hardwareFinal
     Rede           = $rede
     Armazenamentos = $armazenamentos
     Particoes      = $particoes
     Softwares      = $softwareList
 }
+
 
 
 
