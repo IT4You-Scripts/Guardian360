@@ -838,20 +838,24 @@ elseif ($macriumInfo.ExistemImagens -eq $false) {
     $notaBackup = 30
 }
 else {
-
     if ($macriumInfo.DataImagem1) {
-
         $dias = (New-TimeSpan -Start $macriumInfo.DataImagem1 -End (Get-Date)).Days
 
-        if ($dias -le 7)       { $notaBackup = 100 }
-        elseif ($dias -le 30)  { $notaBackup = 80 }
-        elseif ($dias -le 90)  { $notaBackup = 60 }
-        else                   { $notaBackup = 40 }
+        if ($dias -le 30) {
+            $notaBackup = 100
+        }
+        elseif ($dias -le 90) {
+            $notaBackup = 80
+        }
+        else {
+            $notaBackup = 50
+        }
     }
     else {
-        $notaBackup = 30
+        $notaBackup = 0
     }
 }
+
 
 
 # =============== Ponderação final (0–100) ===============
