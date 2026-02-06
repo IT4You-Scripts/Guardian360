@@ -690,14 +690,16 @@ if ($faseDefender) {
 }
 
 # ------------------------------------------------------------------------------
-# Verificação de Backups do Macrium Reflect
+# Verificação de Backups do Macrium Reflect (resiliente a qualquer quantidade)
 # ------------------------------------------------------------------------------
 $macriumInfo = [PSCustomObject]@{
     ExisteParticaoD   = $false
     ExistePastaRescue = $false
     ExistemImagens    = $false
+    TotalImagens      = 0
     DataImagem1       = $null
     DataImagem2       = $null
+    TodasDatas        = @()
 }
 
 try {
@@ -707,7 +709,6 @@ try {
     if ($drive) {
 
         $macriumInfo.ExisteParticaoD = $true
-
         $rescuePath = "D:\Rescue"
 
         if (Test-Path $rescuePath -PathType Container) {
@@ -718,12 +719,21 @@ try {
                 Where-Object { $_.Extension -in ".mrimg", ".mrbak" } |
                 Sort-Object LastWriteTime -Descending
 
-            if ($files.Count -gt 0) {
+            if ($files) {
 
                 $macriumInfo.ExistemImagens = $true
+                $macriumInfo.TotalImagens = $files.Count
 
-                $macriumInfo.DataImagem1 = $files[0].LastWriteTime
+                # Guardar todas as datas
+                $macriumInfo.TodasDatas = $files |
+                    Select-Object -ExpandProperty LastWriteTime
 
+                # Imagem mais recente
+                if ($files.Count -ge 1) {
+                    $macriumInfo.DataImagem1 = $files[0].LastWriteTime
+                }
+
+                # Segunda imagem mais recente
                 if ($files.Count -ge 2) {
                     $macriumInfo.DataImagem2 = $files[1].LastWriteTime
                 }
@@ -733,8 +743,9 @@ try {
 
 }
 catch {
-    # silencioso por design — não interfere no inventário
+    # silencioso por design
 }
+
 
 
 # ------------------------------------------------------------------------------
