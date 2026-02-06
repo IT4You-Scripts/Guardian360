@@ -825,12 +825,12 @@ $sistemaObj = [PSCustomObject]@{
 
 # ---------------- HARDWARE ----------------
 $hardwareFinal = [PSCustomObject]@{
-    "Processador (CPU)"       = $hardwareObj["Processador"]
+    "Processador"             = $hardwareObj["Processador (CPU)"]
     "Placa-Mãe"               = $hardwareObj["Placa-Mãe"]
     "Fabricante e Modelo PC"  = $hardwareObj["Fabricante e Modelo PC"]
     "Serial Number"           = $hardwareObj["Serial Number"]
     "Memória RAM Total"       = $hardwareObj["Memória RAM Total"]
-    "Placas de Vídeo"         = $hardwareObj["Placa de Vídeo"]
+    "Placa de Vídeo"          = $hardwareObj["Placas de Vídeo"]
 }
 
 # ---------------- FINAL ----------------
