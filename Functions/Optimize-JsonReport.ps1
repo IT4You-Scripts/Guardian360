@@ -726,10 +726,6 @@ try {
                 $macriumInfo.ExistemImagens = $true
                 $macriumInfo.TotalImagens   = $files.Count
 
-                $macriumInfo.TodasDatas = @(
-                    $files | ForEach-Object { $_.LastWriteTime }
-                )
-
                 if ($files.Count -ge 1) {
                     $macriumInfo.DataImagem1 = $files[0].LastWriteTime
                 }
@@ -878,7 +874,6 @@ $macriumInfo = [PSCustomObject]@{
     TotalImagens      = 0
     DataImagem1       = $null
     DataImagem2       = $null
-    TodasDatas        = @()
 }
 
 try {
@@ -905,10 +900,6 @@ try {
 
                 $macriumInfo.ExistemImagens = $true
                 $macriumInfo.TotalImagens   = $files.Count
-
-                $macriumInfo.TodasDatas = @(
-                    $files | ForEach-Object { $_.LastWriteTime }
-                )
 
                 if ($files.Count -ge 1) {
                     $macriumInfo.DataImagem1 = $files[0].LastWriteTime
