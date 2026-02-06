@@ -699,7 +699,6 @@ $macriumInfo = [PSCustomObject]@{
     TotalImagens      = 0
     DataImagem1       = $null
     DataImagem2       = $null
-    TodasDatas        = @()
 }
 
 try {
