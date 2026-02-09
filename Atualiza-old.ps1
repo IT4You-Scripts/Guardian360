@@ -55,10 +55,12 @@ function Update-GuardianFiles {
     # Lista de arquivos oficiais
     # -------------------------------
     $Files = @(
+        # Baixar versão nova sem sobrescrever a atual
         @{ Url = "$BaseUrl/RodaGuardian.ps1";                        Path = "$BasePath\RodaGuardian.new" },
         @{ Url = "$BaseUrl/ElevaGuardian.ps1";                       Path = "$BasePath\ElevaGuardian.new" },
         @{ Url = "$BaseUrl/Functions/Update-GuardianFiles.ps1";      Path = "$BasePath\Functions\Update-GuardianFiles.new" },
-
+        
+        # Baixar versão nova sobrescrevendo as atuais
         @{ Url = "$BaseUrl/Atualiza.ps1";                            Path = "$BasePath\Atualiza.ps1" },
         @{ Url = "$BaseUrl/CriaCredenciais.ps1";                     Path = "$BasePath\CriaCredenciais.ps1" },
         @{ Url = "$BaseUrl/Guardian.ps1";                            Path = "$BasePath\Guardian.ps1" },
@@ -91,11 +93,16 @@ function Update-GuardianFiles {
         @{ Url = "$BaseUrl/Functions/Write-JsonResult.ps1";          Path = "$BasePath\Functions\Write-JsonResult.ps1" }
     )
 
+    # --------------------------------------------------------------
+    # Limpeza dos atributos Read-Only (caso existam)
+    # --------------------------------------------------------------
     Show-Header "Baixando arquivos do Guardian 360..." -Color Yellow
 
     foreach ($File in $Files) {
         try {
             if (Test-Path $File.Path) {
+
+                # Remove atributo ReadOnly
                 attrib -R $File.Path 2>$null
             }
         }
@@ -104,6 +111,9 @@ function Update-GuardianFiles {
         }
     }
 
+    # -------------------------------
+    # DOWNLOAD ATUALIZADO
+    # -------------------------------
     Show-Header "Atualizando Guardian 360..." -Color Cyan
 
     foreach ($File in $Files) {
@@ -117,16 +127,18 @@ function Update-GuardianFiles {
         }
         catch {
 
+            # Se for imagem, só avisa
             if ($File.Path -match "\.png$") {
                 Write-Host "Aviso: Falha ao baixar imagem $($File.Path)" -ForegroundColor DarkYellow
                 continue
             }
 
+            # Se for script, falha crítica
             Fail "Falha crítica ao atualizar: $($File.Path)"
         }
     }
-
-# Atualização dos arquivos que estavam na memória
+  
+# Atualização dos aqruivos que estavam na nmemória
 $AtomicTargets = @(
     @{ New = "$BasePath\RodaGuardian.new";                    Final = "$BasePath\RodaGuardian.ps1" },
     @{ New = "$BasePath\ElevaGuardian.new";                   Final = "$BasePath\ElevaGuardian.ps1" },
@@ -134,31 +146,24 @@ $AtomicTargets = @(
 )
 
 foreach ($item in $AtomicTargets) {
-
     $src = $item.New
     $dst = $item.Final
 
-    if (-not (Test-Path $src)) {
-        continue
-    }
+    if (Test-Path $src) {
 
-    try {
-
-        if (Test-Path $dst) {
-            try {
-                Set-ItemProperty -Path $dst -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
-            }
-            catch {}
+        try {
+            attrib -R $dst 2>$null
+            Move-Item -Force $src $dst
         }
-
-        Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
-    }
-    catch {
-        Write-Host "Aviso: não foi possível atualizar $dst" -ForegroundColor DarkYellow
+        catch {
+            Write-Host "Aviso: não foi possível atualizar $dst" -ForegroundColor DarkYellow
+        }
     }
 }
 
+    # Final OK
     Show-Header "Atualização concluída com sucesso!" -Color Green
 }
+
 
 Update-GuardianFiles
