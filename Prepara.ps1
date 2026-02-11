@@ -1,8 +1,5 @@
 ﻿<#
 Script minimalista + resumo final em quadro cyan
-Sem barra de progresso
-Sem saída do winget / assoc / ftype
-Continua mesmo com falhas e marca no quadro final com ✓/✗
 #>
 
 # Linha de espaçamento solicitada
@@ -198,10 +195,10 @@ function StatusLine {
     param($label, $status)
 
     if ($status -eq "OK") {
-        $txt = "✓ $label OK"
+        $txt = "→ $label OK"
         Write-Host ("║  " + $txt + (" " * ($width - 2 - $txt.Length)) + "║") -ForegroundColor Cyan
     } else {
-        $txt = "✗ $label FALHOU"
+        $txt = "→ $label FALHOU"
         Write-Host ("║  " + $txt + (" " * ($width - 2 - $txt.Length)) + "║") -ForegroundColor Red
     }
 }
@@ -211,12 +208,12 @@ Write-Host $top -ForegroundColor Cyan
 Write-Host ("║  RESUMO FINAL" + (" " * 28) + "║") -ForegroundColor Cyan
 Write-Host ("║" + (" " * $width) + "║") -ForegroundColor Cyan
 
-StatusLine "Winget:          " $WingetStatus
+StatusLine "Winget           " $WingetStatus
 StatusLine "PowerShell 7     " $PowerShellStatus
-StatusLine "PATH:            " $PathStatus
-StatusLine "Alias:           " $AliasStatus
+StatusLine "PATH             " $PathStatus
+StatusLine "Alias            " $AliasStatus
 StatusLine "Associação .ps1  " $AssocStatus
-StatusLine "Políticas:       " $PolicyStatus
+StatusLine "Políticas        " $PolicyStatus
 
 Write-Host ("║" + (" " * $width) + "║") -ForegroundColor Cyan
 Write-Host ("║  Ambiente pronto para o Guardian 360." + (" " * 4) + "║") -ForegroundColor Cyan
