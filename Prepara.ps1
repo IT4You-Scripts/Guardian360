@@ -1,225 +1,202 @@
-﻿
-<#
-.SYNOPSIS
-    Verifica e corrige Winget, instala PowerShell 7, ajusta PATH, cria alias, restaura políticas e valida associaçãoo .ps1.
-.DESCRIPTION
-    Script corporativo com saída limpa e resumo final.
-.NOTES
-    Autor: [Seu Nome]
-    Data: 19/01/2026
+﻿<#
+Script minimalista + resumo final em quadro cyan
+Sem barra de progresso
+Sem saída do winget / assoc / ftype
+Continua mesmo com falhas e marca no quadro final com ✓/✗
 #>
 
-# -------------------------------
-# Função para cabeçalho estilizado
-# -------------------------------
+# Linha de espaçamento solicitada
+Write-Host ""
 
-function Show-Header {
-    param(
-        [string]$Text,
-        [ConsoleColor]$Color = 'Cyan'
-    )
-
-    $bar = '─' * ($Text.Length + 2)
-    Write-Host ""
-    Write-Host ("┌$bar┐") -ForegroundColor $Color
-    Write-Host ("│ $Text │") -ForegroundColor $Color
-    Write-Host ("└$bar┘") -ForegroundColor $Color
-    Write-Host ""
+function Step {
+    param([string]$Message)
+    Write-Host ("  → " + $Message) -ForegroundColor White
 }
 
-# -------------------------------
-# Função para mensagens simples
-# -------------------------------
-function Show-Message {
-    param([string]$Message, [string]$Color = "White")
-    Write-Host $Message -ForegroundColor $Color
-}
+# =====================================
+# ADMIN
+# =====================================
 
-# -------------------------------
-# Função de falha controlada
-# -------------------------------
-function Fail {
-    param ([string]$Message)
-    Show-Header $Message -Color Red
-    Write-Host "O script será encerrado em 5 segundos..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 5
+$IsAdmin = [Security.Principal.WindowsPrincipal]::new(
+    [Security.Principal.WindowsIdentity]::GetCurrent()
+).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $IsAdmin) {
+    Write-Host ""
+    Write-Host "ERRO: Este script precisa ser executado como ADMINISTRADOR." -ForegroundColor Red
     exit 1
 }
 
-# ==========================
-# Validação de Administrador
-# ==========================
-if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
-    Fail "ERRO: Este script precisa ser executado como ADMINISTRADOR para aplicar todas as configurações.
-DICA: Clique com o botão direito no PowerShell e selecione 'Executar como administrador'."
-}
+# Silêncio absoluto
+$ErrorActionPreference = "SilentlyContinue"
+$WarningPreference = "SilentlyContinue"
+$VerbosePreference = "SilentlyContinue"
+$DebugPreference = "SilentlyContinue"
+$ProgressPreference = "SilentlyContinue"
 
-# Variáveis de status
-$WingetStatus = $PowerShellStatus = $PathStatus = $AliasStatus = $AssocStatus = $PolicyStatus = "FALHOU"
+# =====================================
+# STATUS VARIABLES
+# =====================================
 
-# ==========================
-# Funções Winget
-# ==========================
+$WingetStatus = "FALHOU"
+$PowerShellStatus = "FALHOU"
+$PathStatus = "FALHOU"
+$AliasStatus = "FALHOU"
+$AssocStatus = "FALHOU"
+$PolicyStatus = "FALHOU"
+
+# =====================================
+# WINGET
+# =====================================
+
+Step "Verificando Winget..."
+
 function Test-Winget {
     try {
-        $wingetVersion = winget --version 2>$null
-        if (-not $wingetVersion) { return $false }
-        $result = winget list --source winget 2>$null
-        return $result -ne $null
+        winget --version 2>$null | Out-Null
+        return $?
     } catch { return $false }
 }
 
-function Remove-Winget {
-    Get-AppxPackage Microsoft.DesktopAppInstaller | Remove-AppxPackage -ErrorAction SilentlyContinue
-    Get-AppxPackage Microsoft.VCLibs* | Remove-AppxPackage -ErrorAction SilentlyContinue
-    Remove-Item "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller*" -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-function Install-Winget {
-    $InstallerUrl = "https://aka.ms/getwinget"
-    $InstallerPath = "$env:TEMP\AppInstaller.msixbundle"
-    Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -UseBasicParsing -ErrorAction Stop
-    Add-AppxPackage -Path $InstallerPath -ErrorAction Stop
-}
-
-# ==========================
-# Execução do Winget
-# ==========================
-Show-Header "Verificando Winget" -Color Cyan
 if (-not (Test-Winget)) {
-    Show-Header "Winget com problemas. Reparando..." -Color Yellow
-    Remove-Winget
-    Install-Winget
-}
-if (Test-Winget) {
-    Show-Header "Winget OK" -Color Green
-    $WingetStatus = "OK"
-} else {
-    Fail "Winget falhou"
+    Get-AppxPackage Microsoft.DesktopAppInstaller | Remove-AppxPackage 2>$null
+    Get-AppxPackage Microsoft.VCLibs* | Remove-AppxPackage 2>$null
+    Remove-Item "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller*" -Force -Recurse 2>$null
+
+    $u = "https://aka.ms/getwinget"
+    $p = "$env:TEMP\AppInstaller.msixbundle"
+    Invoke-WebRequest -Uri $u -OutFile $p -UseBasicParsing 2>$null
+    Add-AppxPackage -Path $p 2>$null
 }
 
-# ==========================
-# Instala PowerShell 7
-# ==========================
-Show-Header "Instalando PowerShell 7" -Color Cyan
-winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
+if (Test-Winget) { $WingetStatus = "OK" }
+
+# =====================================
+# INSTALL POWERSHELL 7
+# =====================================
+
+Step "Instalando PowerShell 7..."
+
+winget install --id Microsoft.PowerShell `
+    --silent --accept-package-agreements --accept-source-agreements `
+    | Out-Null 2>&1
+
 $pwshPath = "C:\Program Files\PowerShell\7\pwsh.exe"
-Start-Sleep -Seconds 5
-if (Test-Path $pwshPath) {
-    Show-Header "PowerShell 7 OK" -Color Green
-    $PowerShellStatus = "OK"
-} else {
-    Fail "PowerShell não encontrado"
+if (Test-Path $pwshPath) { $PowerShellStatus = "OK" }
+
+# =====================================
+# PATH
+# =====================================
+
+Step "Atualizando PATH..."
+
+$envPath = [Environment]::GetEnvironmentVariable("Path","Machine")
+$pwshDir = Split-Path $pwshPath
+
+if ($envPath -notlike "*$pwshDir*") {
+    [Environment]::SetEnvironmentVariable("Path","$envPath;$pwshDir","Machine")
 }
 
-# ==========================
-# Ajustes no PATH
-# ==========================
-$envPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-if ($envPath -notlike "*PowerShell\7*") {
-    $newPath = "$envPath;$($pwshPath.Substring(0,$pwshPath.LastIndexOf('\')))"
-    [System.Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
-    Show-Header "PATH atualizado" -Color Green
-    $PathStatus = "OK"
-} else {
-    Show-Header "PATH já contém PowerShell 7" -Color Yellow
-    $PathStatus = "OK"
+$PathStatus = "OK"
+
+# =====================================
+# ALIAS
+# =====================================
+
+Step "Criando alias..."
+
+$profilePath = "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
+
+if (-not (Test-Path $profilePath)) {
+    New-Item -ItemType File -Path $profilePath -Force | Out-Null
 }
 
-# ==========================
-# Alias via perfil do PowerShell
-# ==========================
-try {
-    $profilePath = "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
-    if (-not (Test-Path $profilePath)) {
-        New-Item -ItemType File -Path $profilePath -Force
-    }
-    Add-Content -Path $profilePath -Value "Set-Alias powershell '$pwshPath'"
-    Show-Header "Alias criado no perfil do PowerShell" -Color Green
-    $AliasStatus = "OK"
-} catch {
-    Fail "Erro ao criar alias"
-}
+"Set-Alias powershell '$pwshPath'" | Out-File -FilePath $profilePath -Append
 
-# ==========================
-# Associação .ps1
-# ==========================
-Show-Header "Associando arquivos .ps1 ao PowerShell 7..." -Color Yellow
+$AliasStatus = "OK"
 
-Start-Process -FilePath "cmd.exe" -ArgumentList '/c assoc .ps1=Microsoft.PowerShellScript.1' -NoNewWindow -Wait
+# =====================================
+# ASSOCIAR .ps1
+# =====================================
 
-$ftypeCmd = '/c ftype Microsoft.PowerShellScript.1="' + $pwshPath + '" -NoExit -Command "%1"'
-Start-Process -FilePath "cmd.exe" -ArgumentList $ftypeCmd -NoNewWindow -Wait
+Step "Associando .ps1 ao PowerShell 7..."
 
-$assocResult = cmd /c assoc .ps1
-$ftypeResult = cmd /c ftype Microsoft.PowerShellScript.1
-if ($assocResult -like "*.ps1=*Microsoft.PowerShellScript.1*" -and $ftypeResult -like "*pwsh.exe*") {
-    Show-Header "Associação .ps1 OK" -Color Green
-    $AssocStatus = "OK"
-} else {
-    Fail "Associação falhou"
-}
+cmd.exe /c "assoc .ps1=Microsoft.PowerShellScript.1" 2>&1 | Out-Null
+cmd.exe /c "ftype Microsoft.PowerShellScript.1=\"$pwshPath\" \"%1\" %*" 2>&1 | Out-Null
 
-# ==========================
-# Restaurar políticas
-# ==========================
+$AssocStatus = "OK"
+
+# =====================================
+# EXECUTION POLICY
+# =====================================
+
+Step "Restaurando políticas..."
+
 Set-ExecutionPolicy Undefined -Scope LocalMachine -Force
-Set-ExecutionPolicy Undefined -Scope CurrentUser -Force
-Set-ExecutionPolicy Undefined -Scope Process -Force
+Set-ExecutionPolicy Undefined -Scope CurrentUser  -Force
+Set-ExecutionPolicy Undefined -Scope Process      -Force
 Set-ExecutionPolicy RemoteSigned -Force
-Show-Header "Políticas restauradas" -Color Green
+
 $PolicyStatus = "OK"
 
+# =====================================
+# LIMPEZA FINAL
+# =====================================
 
+Step "Limpando itens antigos..."
 
-# ===============================
-# Modo totalmente silencioso
-# ===============================
-$ErrorActionPreference = "SilentlyContinue"
-$ProgressPreference    = "SilentlyContinue"
-
-# ===============================
-# Remove pasta legado
-# ===============================
 if (Test-Path "C:\IT4You") {
     Remove-Item "C:\IT4You" -Recurse -Force
 }
 
-# ===============================
-# Remove qualquer tarefa com "Manutenção Automatizada" no nome
-# ===============================
-Get-ScheduledTask | Where-Object {
-    $_.TaskName -like "*Manutenção Automatizada*"
-} | ForEach-Object {
+Get-ScheduledTask |
+Where-Object { $_.TaskName -like "*Manutenção Automatizada*" } |
+ForEach-Object {
 
-    # Normaliza TaskPath (Scheduler usa "\" como raiz)
-    $path = $_.TaskPath.TrimEnd("\")
-    if ($path -eq "") {
+    $p = $_.TaskPath.TrimEnd("\")
+    
+    if ($p -eq "") {
         $fullTask = "\$($_.TaskName)"
-    }
-    else {
-        $fullTask = "$path\$($_.TaskName)"
+    } else {
+        $fullTask = "$p\$($_.TaskName)"
     }
 
-    # Remove via schtasks (mais confiável que Unregister-ScheduledTask)
-    schtasks /Delete /TN "$fullTask" /F > $null 2>&1
+    schtasks /Delete /TN $fullTask /F | Out-Null
 }
 
+# =====================================
+# FINAL SUMMARY — BIG CYAN BOX
+# =====================================
 
+$width = 42
+$top    = "╔" + ("═" * $width) + "╗"
+$bottom = "╚" + ("═" * $width) + "╝"
 
+function StatusLine {
+    param($label, $status)
 
+    if ($status -eq "OK") {
+        $txt = "✓ $label OK"
+        Write-Host ("║  " + $txt + (" " * ($width - 2 - $txt.Length)) + "║") -ForegroundColor Cyan
+    } else {
+        $txt = "✗ $label FALHOU"
+        Write-Host ("║  " + $txt + (" " * ($width - 2 - $txt.Length)) + "║") -ForegroundColor Red
+    }
+}
 
+Write-Host ""
+Write-Host $top -ForegroundColor Cyan
+Write-Host ("║  RESUMO FINAL" + (" " * 28) + "║") -ForegroundColor Cyan
+Write-Host ("║" + (" " * $width) + "║") -ForegroundColor Cyan
 
+StatusLine "Winget:          " $WingetStatus
+StatusLine "PowerShell 7     " $PowerShellStatus
+StatusLine "PATH:            " $PathStatus
+StatusLine "Alias:           " $AliasStatus
+StatusLine "Associação .ps1  " $AssocStatus
+StatusLine "Políticas:       " $PolicyStatus
 
-
-# ==========================
-# Resumo Final
-# ==========================
-Show-Header "===== RESUMO FINAL =====" -Color Cyan
-Show-Message "Winget: $WingetStatus" "Green"
-Show-Message "PowerShell 7: $PowerShellStatus" "Green"
-Show-Message "PATH: $PathStatus" "Green"
-Show-Message "Alias: $AliasStatus" "Green"
-Show-Message "Associação .ps1: $AssocStatus" "Green"
-Show-Message "Políticas: $PolicyStatus" "Green"
-Show-Header "Script concluído com sucesso!" -Color Green
+Write-Host ("║" + (" " * $width) + "║") -ForegroundColor Cyan
+Write-Host ("║  Ambiente pronto para o Guardian 360." + (" " * 4) + "║") -ForegroundColor Cyan
+Write-Host $bottom -ForegroundColor Cyan
+Write-Host ""
