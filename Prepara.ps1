@@ -75,14 +75,36 @@ if (Test-Winget) { $WingetStatus = "OK" }
 # INSTALL POWERSHELL 7
 # =====================================
 
+function Show-ProgressBar {
+    param([int]$Percent)
+
+    $total = 28
+    $filled = [math]::Floor(($Percent / 100) * $total)
+    $empty  = $total - $filled
+
+    $bar = ("█" * $filled) + ("░" * $empty)
+    Write-Host ("`r[${bar}] ${Percent}% ") -NoNewline -ForegroundColor Cyan
+}
+
 Step "Instalando PowerShell 7..."
+
+Show-ProgressBar -Percent 5
 
 winget install --id Microsoft.PowerShell `
     --silent --accept-package-agreements --accept-source-agreements `
     | Out-Null 2>&1
 
+foreach ($p in 20,40,60,80,100) {
+    Start-Sleep -Milliseconds 250
+    Show-ProgressBar -Percent $p
+}
+
 $pwshPath = "C:\Program Files\PowerShell\7\pwsh.exe"
-if (Test-Path $pwshPath) { $PowerShellStatus = "OK" }
+if (Test-Path $pwshPath) { 
+    $PowerShellStatus = "OK"
+}
+
+Write-Host ""
 
 # =====================================
 # PATH
