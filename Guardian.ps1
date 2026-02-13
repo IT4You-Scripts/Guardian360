@@ -438,9 +438,9 @@ function Initialize-Pwsh7 {
 
 function Start-Logging {
   $dataHoraFormatada = Get-Date -Format "dd/MM/yyyy 'às' HH'h' mm'min'"
-  Write-Log    ("Guardian ({0})" -f $dataHoraFormatada) 'INFO'
+  Write-Log    ("Guardian v1.5 ({0})" -f $dataHoraFormatada) 'INFO'
   Write-Log "____________________________________________________________________________________________________________________________________"
-  Write-Report ("Guardian ({0})" -f $dataHoraFormatada)
+  Write-Report ("Guardian v1.5 ({0})" -f $dataHoraFormatada)
   Write-Report "____________________________________________________________________________________________________________________________________"
 }
 
@@ -732,7 +732,7 @@ Enable-QuickEditProtection
 Enable-ConsoleAppearance -ForceMaximize
 Start-Logging
 Clear-Host
-Show-Header -Text 'Guardian 360 — Manutenção e Otimização'
+Show-Header -Text 'Guardian 360 v1.5 — Manutenção e Otimização'
 
 try {
   # 2) Carregar funções do repositório
