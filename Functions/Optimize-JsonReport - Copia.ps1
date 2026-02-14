@@ -98,27 +98,6 @@ if (-not $jsonRaw.Fases) {
 }
 
 
-# ----------------------------------------------------------------------
-# Normalizar mensagens para string (remove polimorfismo)
-# ----------------------------------------------------------------------
-foreach ($f in $jsonRaw.Fases) {
-
-    if ($null -eq $f.Mensagem) { continue }
-
-    if ($f.Mensagem -isnot [string]) {
-
-        if ($f.Mensagem -is [pscustomobject] -or $f.Mensagem -is [hashtable]) {
-            $f.Mensagem = ($f.Mensagem | ConvertTo-Json -Depth 5)
-        }
-        else {
-            $f.Mensagem = ($f.Mensagem | Out-String).Trim()
-        }
-    }
-}
-
-
-
-
 # --------------------------------------------------------------------------
 # Normalizar Strings com aspas duplas externas
 # --------------------------------------------------------------------------
@@ -170,11 +149,10 @@ for ($i = 0; $i -lt $msg.Count; $i++) {
     }
 }
 
-if ($null -eq $indexSoftware)
- {
+if (-not $indexSoftware) {
     Write-Host "❌ Não consegui identificar onde começam os softwares." -ForegroundColor Red
     exit
- }
+}
 
 # ------------------------------------------------------------------------------
 # Divisão Hardware / Softwares
@@ -184,10 +162,9 @@ $softwareLines = $msg[($indexSoftware + 1)..($msg.Count - 1)]
 
 $softwareList = $softwareLines |
     ForEach-Object { $_.Trim() } |
-    Where-Object { $_ -ne "" } |
-    Sort-Object -Unique
+    Where-Object { $_ -ne "" }
 
-    # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Identificar blocos Armazenamento e Partições
 # ------------------------------------------------------------------------------
 $idxArmazenamento = ($hardwareLines | Select-String "^\s*Armazenamento\s*:" | Select-Object -First 1).LineNumber
@@ -373,10 +350,7 @@ if ($fase2) {
             $k = $matches[1].Trim()
             $v = $matches[2].Trim()
 
-            if ($v -match "^(?i:true|false)$") {
-               $v = ($v.ToLower() -eq "true")
-            }
-
+            if ($v -match "^(True|False)$") { $v = [bool]$v }
             elseif ($v -match "^\d+$") { $v = [int]$v }
 
             $tecnico[$k] = $v
@@ -388,16 +362,8 @@ if ($fase2) {
     $dismOk  = ($tecnico["DismExitCode"]  -eq 0)
     $cleanOk = ($tecnico["ComponentCleanupExitCode"] -eq 0)
 
-    $pendBefore = $false
-    $pendAfter  = $false
-
-    if ($tecnico.ContainsKey("PendingRebootBefore")) {
-        $pendBefore = ($tecnico["PendingRebootBefore"].ToString().ToLower() -eq "true")
-    }
-
-    if ($tecnico.ContainsKey("PendingRebootAfter")) {
-        $pendAfter = ($tecnico["PendingRebootAfter"].ToString().ToLower() -eq "true")
-    }
+    $pendBefore = [bool]$tecnico["PendingRebootBefore"]
+    $pendAfter  = [bool]$tecnico["PendingRebootAfter"]
 
     # texto interpretado
     $statusTexto = ""
