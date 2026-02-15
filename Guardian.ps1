@@ -12,8 +12,8 @@
 		Fase 3	- Otimizações estruturais
 		Fase 4	- Limpeza de arquivos temporários
 		Fase 5	- Atualizações do Windows
-    Fase 6	- Atualizações dos programas inatalados
-    Fase 7	- Pós-atualização / Componentes
+        Fase 6	- Atualizações dos programas inatalados
+        Fase 7	- Pós-atualização / Componentes
 		Fase 8	- Otimização de Armazenamento
 		Fase 9	- Segurança (Varredura contra malwares)
 	Valida os arquivos de backup gerados pelo programa Macrium Reflect
@@ -46,9 +46,9 @@
 .AUTHOR
     Tato, IT4You Ltda
 .VERSION
-    1.3
+    1.5
 .LASTUPDATED
-    22/01/2026
+    15/02/2026
 #>
 
 
