@@ -179,10 +179,6 @@ if ($null -eq $indexSoftware)
 # ------------------------------------------------------------------------------
 # Divisão Hardware / Softwares
 # ------------------------------------------------------------------------------
-if ($indexSoftware -le 0) {
-    Write-Host "❌ Estrutura inesperada no inventário." -ForegroundColor Red
-    exit
-}
 $hardwareLines = $msg[0..($indexSoftware - 1)]
 $softwareLines = $msg[($indexSoftware + 1)..($msg.Count - 1)]
 
@@ -191,7 +187,7 @@ $softwareList = $softwareLines |
     Where-Object { $_ -ne "" } |
     Sort-Object -Unique
 
-# ------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------
 # Identificar blocos Armazenamento e Partições
 # ------------------------------------------------------------------------------
 $idxArmazenamento = ($hardwareLines | Select-String "^\s*Armazenamento\s*:" | Select-Object -First 1).LineNumber
@@ -450,7 +446,7 @@ if ($faseLixo) {
         if ($e -match "Drive=(.*?),\s*Success=(.*?),\s*ItemsDeleted=(.*?),\s*Errors=(.*)$") {
 
             $drive = $matches[1].Trim()
-            $success = ($matches[2].ToString().ToLower() -eq "true")
+            $success = [bool]$matches[2]
             $deleted = [int]$matches[3]
             $errors  = $matches[4].Trim()
 
@@ -779,6 +775,8 @@ try {
 catch {}
 
 
+
+
 # ------------------------------------------------------------------------------
 # Saúde Geral do Sistema — Consolidação de todas as fases
 # ------------------------------------------------------------------------------
@@ -938,6 +936,56 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
     }
 })
 
+# ------------------------------------------------------------------------------
+# Verificação de Backups do Macrium Reflect
+# ------------------------------------------------------------------------------
+$macriumInfo = [PSCustomObject]@{
+    ExisteParticaoD   = $false
+    ExistePastaRescue = $false
+    ExistemImagens    = $false
+    TotalImagens      = 0
+    DataImagem1       = $null
+    DataImagem2       = $null
+}
+
+try {
+
+    if (Test-Path "D:\") {
+
+        $macriumInfo.ExisteParticaoD = $true
+        $rescuePath = "D:\Rescue"
+
+        if (Test-Path $rescuePath) {
+
+            $macriumInfo.ExistePastaRescue = $true
+
+            $files = @(
+                Get-ChildItem $rescuePath -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $ext = $_.Extension.ToLower().Trim()
+                    $ext -eq ".mrimg" -or $ext -eq ".mrbak"
+                } |
+                Sort-Object LastWriteTime -Descending
+            )
+
+            if ($files.Count -gt 0) {
+
+                $macriumInfo.ExistemImagens = $true
+                $macriumInfo.TotalImagens   = $files.Count
+
+                if ($files.Count -ge 1) {
+                    $macriumInfo.DataImagem1 = $files[0].LastWriteTime
+                }
+
+                if ($files.Count -ge 2) {
+                    $macriumInfo.DataImagem2 = $files[1].LastWriteTime
+                }
+            }
+        }
+    }
+
+}
+catch {}
 
 
 # ------------------------------------------------------------------------------
