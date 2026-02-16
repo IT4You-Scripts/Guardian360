@@ -89,7 +89,31 @@ if ($faseBlockApp -or $faseQgis) {
         $_ -ne $faseBlockApp -and $_ -ne $faseQgis
     }
 
+    # Inserir nova fase logo após "Atualização da Loja da Microsoft"
+$indexStore = -1
+
+for ($i = 0; $i -lt $jsonRaw.Fases.Count; $i++) {
+    if ($jsonRaw.Fases[$i].Phase -match "Loja da Microsoft") {
+        $indexStore = $i
+        break
+    }
+}
+
+if ($indexStore -ge 0) {
+    $antes  = $jsonRaw.Fases[0..$indexStore]
+    $depois = @()
+
+    if ($indexStore + 1 -lt $jsonRaw.Fases.Count) {
+        $depois = $jsonRaw.Fases[($indexStore + 1)..($jsonRaw.Fases.Count - 1)]
+    }
+
+    $jsonRaw.Fases = @($antes + $novaFase + $depois)
+}
+else {
+    # fallback (caso não encontre)
     $jsonRaw.Fases += $novaFase
+}
+
 }
 
 if (-not $jsonRaw.Fases) {
