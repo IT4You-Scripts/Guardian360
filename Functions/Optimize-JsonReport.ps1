@@ -973,41 +973,6 @@ catch {
     $uuidSistema = $null
 }
 
-# ---------------- Credencial SMB (192.168.x.x ou 10.0.x.x) ----------------
-$usuarioSMB = $null
-
-try {
-    $linhas = cmdkey /list 2>$null
-
-    $ipValido = $false
-
-    foreach ($linhaRaw in $linhas) {
-
-        $linha = $linhaRaw.Trim()
-
-        # Detectar destino válido (PT ou EN)
-        if ($linha -match "^(Target|Destino):\s*Domain:target=((192\.168|10\.0)\.\d{1,3}\.\d{1,3})") {
-            $ipValido = $true
-            continue
-        }
-
-        # Se já encontrou IP válido, procurar usuário
-        if ($ipValido -and $linha -match "^(User|Usuário):\s*(.+)") {
-            $usuarioSMB = $matches[2].Trim()
-            break
-        }
-
-        # Se iniciou novo bloco, resetar estado
-        if ($linha -match "^(Target|Destino):") {
-            $ipValido = $false
-        }
-    }
-}
-catch {
-    $usuarioSMB = $null
-}
-
-
 
 
 # ------------------------------------------------------------------------------
@@ -1020,7 +985,6 @@ $sistemaObj = [PSCustomObject]@{
     "Login ID"            = $hardwareObj["Login ID"]
     "Sistema Operacional" = $hardwareObj["Sistema Operacional"]
     "UUID SMBIOS"         = $uuidSistema
-    "UsuarioSMB"          = $usuarioSMB
 }
 
 
