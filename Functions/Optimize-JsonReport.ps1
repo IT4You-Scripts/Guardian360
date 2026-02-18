@@ -11,7 +11,7 @@ param(
     [string]$Pasta = "."
 )
 
-Write-Host "`n🔍 Procurando arquivo ORIGINAL..." -ForegroundColor Cyan
+# Write-Host "`n🔍 Procurando arquivo ORIGINAL..." -ForegroundColor Cyan
 
 # ------------------------------------------------------------------------------
 # Localizar arquivo ORIGINAL — caminho fixo C:\Guardian\Json
@@ -34,7 +34,7 @@ if (-not (Test-Path $jsonDir)) {
     exit
 }
 
-Write-Host "📁 Procurando arquivo ORIGINAL em: $jsonDir" -ForegroundColor Cyan
+# Write-Host "📁 Procurando arquivo ORIGINAL em: $jsonDir" -ForegroundColor Cyan
 
 # Buscar arquivo ORIGINAL (ignora EXTREME e TRATADO)
 $arquivo = Get-ChildItem -Path $jsonDir -Filter *.json |
@@ -51,7 +51,7 @@ if (-not $arquivo) {
     exit
 }
 
-Write-Host "✔ Arquivo original identificado: $($arquivo.FullName)" -ForegroundColor Green
+# Write-Host "✔ Arquivo original identificado: $($arquivo.FullName)" -ForegroundColor Green
 
 
 # ------------------------------------------------------------------------------
@@ -1019,6 +1019,36 @@ $nomeOut = Join-Path $arquivo.DirectoryName (($arquivo.BaseName) + "_TRATADO.jso
 $jsonRaw | ConvertTo-Json -Depth 20 |
     Out-File $nomeOut -Encoding UTF8
 
+
+
+
+Write-Host "📦 JSON gerado em: $nomeOut" -ForegroundColor Cyan
+Write-Host ""
+
+
+# ------------------------------------------------------------------------------
+# Enviar para a API do Guardian
+# ------------------------------------------------------------------------------
+$apiUrl = "http://192.168.0.210:8000/insert-single"
+
+try {
+    $jsonParaApi = Get-Content $nomeOut -Raw -Encoding UTF8
+
+    $response = Invoke-RestMethod `
+        -Uri $apiUrl `
+        -Method POST `
+        -Body $jsonParaApi `
+        -ContentType "application/json; charset=utf-8"
+
+    Write-Host "🚀 Integração realizada com sucesso via API!" -ForegroundColor Cyan
+    #Write-Host "  computador_id : $($response.computador_id)" -ForegroundColor Gray
+    #Write-Host "  vistoria_id   : $($response.vistoria_id)" -ForegroundColor Gray
+    #Write-Host "  nota saúde    : $($jsonRaw.SaudeGeral.Nota) - $($jsonRaw.SaudeGeral.Classificacao)" -ForegroundColor Gray
+
+} catch {
+    # Write-Host "`n⚠ Falha ao enviar para a API: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
+Write-Host ""
 Write-Host "`n🔥 GUARDIAN 360 finalizado com sucesso!"
-Write-Host "📦 JSON gerado em: $nomeOut" -ForegroundColor Yellow
 Write-Host ""
