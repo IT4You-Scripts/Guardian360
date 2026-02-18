@@ -1038,7 +1038,8 @@ try {
         -Uri $apiUrl `
         -Method POST `
         -Body $jsonParaApi `
-        -ContentType "application/json; charset=utf-8"
+        -ContentType "application/json; charset=utf-8"`
+        -TimeoutSec 5
 
     Write-Host "🚀 Integração realizada com sucesso via API!" -ForegroundColor Cyan
     #Write-Host "  computador_id : $($response.computador_id)" -ForegroundColor Gray
