@@ -1029,9 +1029,7 @@ Write-Host ""
 # ------------------------------------------------------------------------------
 # Enviar para a API do Guardian
 # ------------------------------------------------------------------------------
-#$apiUrl = "http://192.168.0.210:8000/insert-single"
-$apiUrl = "https://guardian.it4you.com.br/api/insert-single"
-
+$apiUrl = "http://192.168.0.210:8000/insert-single"
 
 try {
     $jsonParaApi = Get-Content $nomeOut -Raw -Encoding UTF8
