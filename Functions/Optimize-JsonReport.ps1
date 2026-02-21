@@ -337,14 +337,26 @@ $hardwareObj.Remove("Endereço IP")
 $hardwareObj.Remove("Endereço MAC")
 
 # ------------------------------------------------------------------------------
-# Armazenamentos
+# Armazenamentos — com capacidade total
 # ------------------------------------------------------------------------------
+$discosPhysical = @{}
+try {
+    Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object {
+        $discosPhysical[$_.FriendlyName] = [Math]::Round($_.Size / 1GB, 2)
+    }
+} catch {}
+
 $armazenamentos = @(
     foreach ($a in $armazenamentosRaw) {
         if ($a -match "^(.*?)\s*->\s*Status:\s*(.*)$") {
+            $nome = $matches[1].Trim()
+            $status = $matches[2].Trim()
+            $capacidade = $discosPhysical[$nome]
+            
             [PSCustomObject]@{
-                Nome   = $matches[1].Trim()
-                Status = $matches[2].Trim()
+                Nome              = $nome
+                Status            = $status
+                CapacidadeTotalGB = $capacidade
             }
         }
     }
