@@ -337,15 +337,12 @@ $hardwareObj.Remove("Endereço IP")
 $hardwareObj.Remove("Endereço MAC")
 
 # ------------------------------------------------------------------------------
-# Armazenamentos — com capacidade total e tipo de mídia
+# Armazenamentos — com capacidade total
 # ------------------------------------------------------------------------------
 $discosPhysical = @{}
 try {
     Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object {
-        $discosPhysical[$_.FriendlyName] = @{
-            Capacidade = [Math]::Round($_.Size / 1GB, 2)
-            TipoMidia  = $_.MediaType
-        }
+        $discosPhysical[$_.FriendlyName] = [Math]::Round($_.Size / 1GB, 2)
     }
 } catch {}
 
@@ -354,30 +351,11 @@ $armazenamentos = @(
         if ($a -match "^(.*?)\s*->\s*Status:\s*(.*)$") {
             $nome = $matches[1].Trim()
             $status = $matches[2].Trim()
-            $capacidade = $null
-            $tipoMidia = "Desconhecido"
-            
-            if ($discosPhysical.ContainsKey($nome)) {
-                $capacidade = $discosPhysical[$nome].Capacidade
-                $tipoMidia = $discosPhysical[$nome].TipoMidia
-            }
-            
-            # Fallback: detectar tipo pelo nome se MediaType não disponível
-            if ($tipoMidia -eq "Unspecified" -or $tipoMidia -eq "Desconhecido" -or [string]::IsNullOrEmpty($tipoMidia)) {
-                $nomeUpper = $nome.ToUpper()
-                if ($nomeUpper -match "SSD|SOLID|NVME|M\.2") {
-                    $tipoMidia = "SSD"
-                } elseif ($nomeUpper -match "HDD|HARD|WD\d|ST\d|SEAGATE|WESTERN|TOSHIBA MQ|TOSHIBA DT") {
-                    $tipoMidia = "HDD"
-                } else {
-                    $tipoMidia = "Desconhecido"
-                }
-            }
+            $capacidade = $discosPhysical[$nome]
             
             [PSCustomObject]@{
                 Nome              = $nome
                 Status            = $status
-                TipoMidia         = $tipoMidia
                 CapacidadeTotalGB = $capacidade
             }
         }
