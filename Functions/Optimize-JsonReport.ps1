@@ -388,28 +388,51 @@ $armazenamentos = @(
 # ------------------------------------------------------------------------------
 # Partições — Espaço real (GB) + percentagem utilizada
 # ------------------------------------------------------------------------------
-$particoes = @(
-    foreach ($p in $particoesRaw) {
-        if ($p -match "^([A-Z]):.*?([\d\.]+)\s*GB.*?([\d\.]+)%") {
+# ------------------------------------------------------------------------------
+# COLETA FRESCA DAS PARTIÇÕES (após limpezas)
+# ------------------------------------------------------------------------------
+$particoes = @()
+try {
+    $drives = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DriveType = 3" -ErrorAction SilentlyContinue
+    foreach ($d in $drives) {
+        if ($d.Size -and $d.Size -gt 0) {
+            $tamanhoGB = [Math]::Round($d.Size / 1GB, 2)
+            $livreGB   = [Math]::Round($d.FreeSpace / 1GB, 2)
+            $usadoGB   = [Math]::Round(($d.Size - $d.FreeSpace) / 1GB, 2)
+            $usadoPct  = [Math]::Round((($d.Size - $d.FreeSpace) / $d.Size) * 100, 2)
 
-            $letra     = $matches[1]
-            $tamanho   = [double]$matches[2]
-            $pctLivre  = [double]$matches[3]
-
-            $livreGB = [Math]::Round(($tamanho * $pctLivre) / 100, 2)
-            $usadoGB = [Math]::Round(($tamanho - $livreGB), 2)
-            $pctUsado = [Math]::Round((($tamanho - $livreGB) / $tamanho) * 100, 2)
-
-            [PSCustomObject]@{
-                Letra     = $letra
-                TamanhoGB = $tamanho
+            $particoes += [PSCustomObject]@{
+                Letra     = $d.DeviceID.TrimEnd(':')
+                TamanhoGB = $tamanhoGB
                 LivreGB   = $livreGB
                 UsadoGB   = $usadoGB
-                UsadoPct  = $pctUsado
+                UsadoPct  = $usadoPct
             }
         }
     }
-)
+} catch {
+    # Fallback: usar dados do JSON anterior se a coleta falhar
+    $particoes = @(
+        foreach ($p in $particoesRaw) {
+            if ($p -match "^([A-Z]):.*?([\d\.]+)\s*GB.*?([\d\.]+)%") {
+                $letra     = $matches[1]
+                $tamanho   = [double]$matches[2]
+                $pctLivre  = [double]$matches[3]
+                $livreGB   = [Math]::Round(($tamanho * $pctLivre) / 100, 2)
+                $usadoGB   = [Math]::Round(($tamanho - $livreGB), 2)
+                $pctUsado  = [Math]::Round((($tamanho - $livreGB) / $tamanho) * 100, 2)
+
+                [PSCustomObject]@{
+                    Letra     = $letra
+                    TamanhoGB = $tamanho
+                    LivreGB   = $livreGB
+                    UsadoGB   = $usadoGB
+                    UsadoPct  = $pctUsado
+                }
+            }
+        }
+    )
+}
 
 
 # ------------------------------------------------------------------------------

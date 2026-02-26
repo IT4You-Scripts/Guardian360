@@ -3,7 +3,7 @@
   CONVERSOR Json
   - Hardware limpo (sem discos e sem partições)
   - Armazenamentos e Partições extraídos corretamente
-  - Rede estruturada (prioriza “Ethernet”: IP, MAC, Status, Velocidade)
+  - Redes estruturadas (coleta TODOS os adaptadores)
 ====================================================================
 #>
 
@@ -286,69 +286,99 @@ $ipHardware  = $hardwareObj["Endereço IP"]
 $macHardware = $hardwareObj["Endereço MAC"]
 
 # ------------------------------------------------------------------------------
-# Adaptador de rede — prioriza adaptador "Ethernet"
+# Adaptadores de rede — coleta TODOS os adaptadores
 # ------------------------------------------------------------------------------
-$rede = $null
+$redes = @()
 
 try {
-    # Primeira tentativa: adaptador "Ethernet"
-    $adapter = Get-NetAdapter -Name "Ethernet" -ErrorAction SilentlyContinue
+    $adapters = Get-NetAdapter -ErrorAction SilentlyContinue
 
-    # Fallback: pegar adaptador ativo
-    if (-not $adapter) {
-        $adapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1
-    }
-
-    if ($adapter) {
-
-        $ip = (Get-NetIPAddress -AddressFamily IPv4 |
-            Where-Object { $_.InterfaceAlias -eq $adapter.Name } |
+    foreach ($adapter in $adapters) {
+        
+        $ip = (Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | 
             Select-Object -First 1).IPAddress
 
-        # Se IP do Windows falhar, usar o IP do inventário
-        if (-not $ip -and $ipHardware) { $ip = $ipHardware }
+        $dnsServers = (Get-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses
 
-        $rede = [PSCustomObject]@{
-            Adaptador   = $adapter.Name
-            Status      = $adapter.Status
-            Velocidade  = $adapter.LinkSpeed
-            EnderecoIP  = $ip
-            EnderecoMAC = if ($adapter.MacAddress) { $adapter.MacAddress } else { $macHardware }
+        $redes += [PSCustomObject]@{
+            Adaptador     = $adapter.Name
+            Descricao     = $adapter.InterfaceDescription
+            Tipo          = $adapter.InterfaceType
+            Status        = $adapter.Status
+            Velocidade    = $adapter.LinkSpeed
+            EnderecoIP    = $ip
+            EnderecoMAC   = $adapter.MacAddress
+            DNSPrimario   = if ($dnsServers.Count -ge 1) { $dnsServers[0] } else { $null }
+            DNSSecundario = if ($dnsServers.Count -ge 2) { $dnsServers[1] } else { $null }
         }
-    }
-    else {
-        $rede = [PSCustomObject]@{
-            Adaptador   = "Indisponível"
-            Status      = $null
-            Velocidade  = $null
-            EnderecoIP  = $ipHardware
-            EnderecoMAC = $macHardware
-        }
-    }
-
-} catch {
-    $rede = [PSCustomObject]@{
-        Adaptador   = "Erro ao detectar"
-        Status      = $null
-        Velocidade  = $null
-        EnderecoIP  = $ipHardware
-        EnderecoMAC = $macHardware
     }
 }
+catch {
+    $redes = @()
+}
+
+if ($redes.Count -eq 0) {
+    $redes += [PSCustomObject]@{
+        Adaptador     = "Indisponível"
+        Descricao     = $null
+        Tipo          = $null
+        Status        = $null
+        Velocidade    = $null
+        EnderecoIP    = $ipHardware
+        EnderecoMAC   = $macHardware
+        DNSPrimario   = $null
+        DNSSecundario = $null
+    }
+}
+
 
 # Remover IP/MAC do Hardware
 $hardwareObj.Remove("Endereço IP")
 $hardwareObj.Remove("Endereço MAC")
 
 # ------------------------------------------------------------------------------
-# Armazenamentos
+# Armazenamentos — com capacidade total e tipo de mídia
 # ------------------------------------------------------------------------------
+$discosPhysical = @{}
+try {
+    Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object {
+        $discosPhysical[$_.FriendlyName] = @{
+            Capacidade = [Math]::Round($_.Size / 1GB, 2)
+            TipoMidia  = $_.MediaType
+        }
+    }
+} catch {}
+
 $armazenamentos = @(
     foreach ($a in $armazenamentosRaw) {
         if ($a -match "^(.*?)\s*->\s*Status:\s*(.*)$") {
+            $nome = $matches[1].Trim()
+            $status = $matches[2].Trim()
+            $capacidade = $null
+            $tipoMidia = "Desconhecido"
+            
+            if ($discosPhysical.ContainsKey($nome)) {
+                $capacidade = $discosPhysical[$nome].Capacidade
+                $tipoMidia = $discosPhysical[$nome].TipoMidia
+            }
+            
+            # Fallback: detectar tipo pelo nome se MediaType não disponível
+            if ($tipoMidia -eq "Unspecified" -or $tipoMidia -eq "Desconhecido" -or [string]::IsNullOrEmpty($tipoMidia)) {
+                $nomeUpper = $nome.ToUpper()
+                if ($nomeUpper -match "SSD|SOLID|NVME|M\.2") {
+                    $tipoMidia = "SSD"
+                } elseif ($nomeUpper -match "HDD|HARD|WD\d|ST\d|SEAGATE|WESTERN|TOSHIBA MQ|TOSHIBA DT") {
+                    $tipoMidia = "HDD"
+                } else {
+                    $tipoMidia = "Desconhecido"
+                }
+            }
+            
             [PSCustomObject]@{
-                Nome   = $matches[1].Trim()
-                Status = $matches[2].Trim()
+                Nome              = $nome
+                Status            = $status
+                TipoMidia         = $tipoMidia
+                CapacidadeTotalGB = $capacidade
             }
         }
     }
@@ -869,16 +899,24 @@ if ($faseDefender -and $faseDefender.Mensagem.ScanBemSucedido) {
     $notaSeguranca = 40
 }
 
-# =============== 6. Rede (Ethernet priorizada) ===============
+# =============== 6. Rede (prioriza Ethernet, depois Wi-Fi, depois qualquer Up) ===============
 $notaRede = 0
-if ($rede) {
-    switch ($rede.Status) {
+$redeAvaliada = $redes | Where-Object { $_.Adaptador -eq "Ethernet" } | Select-Object -First 1
+if (-not $redeAvaliada) {
+    $redeAvaliada = $redes | Where-Object { $_.Adaptador -eq "Wi-Fi" } | Select-Object -First 1
+}
+if (-not $redeAvaliada) {
+    $redeAvaliada = $redes | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1
+}
+
+if ($redeAvaliada) {
+    switch ($redeAvaliada.Status) {
         "Up" { $notaRede = 100 }
         default { $notaRede = 40 }
     }
 
-    if ($rede.Velocidade -match "100 Mbps") { $notaRede = 70 }
-    if ($rede.Velocidade -match "10 Mbps")  { $notaRede = 40 }
+    if ($redeAvaliada.Velocidade -match "100 Mbps") { $notaRede = 70 }
+    if ($redeAvaliada.Velocidade -match "10 Mbps")  { $notaRede = 40 }
 }
 
 # =============== 7. Limpezas e Otimizações ===============
@@ -1002,7 +1040,7 @@ $hardwareFinal = [PSCustomObject]@{
 $fase1.Mensagem = [PSCustomObject]@{
     Sistema        = $sistemaObj
     Hardware       = $hardwareFinal
-    Rede           = $rede
+    Redes          = $redes
     Armazenamentos = $armazenamentos
     Particoes      = $particoes
     BackupMacrium  = $macriumInfo
@@ -1029,7 +1067,9 @@ Write-Host ""
 # ------------------------------------------------------------------------------
 # Enviar para a API do Guardian
 # ------------------------------------------------------------------------------
-$apiUrl = "http://192.168.0.210:8000/insert-single"
+#$apiUrl = "http://192.168.0.210:8000/insert-single"
+$apiUrl = "https://guardian.it4you.com.br/api/insert-single"
+
 
 try {
     $jsonParaApi = Get-Content $nomeOut -Raw -Encoding UTF8
