@@ -82,40 +82,6 @@ if ([string]::IsNullOrWhiteSpace($Cliente)) {
     $Cliente = 'Cliente não identificado'
 }
 
-# ============================================================================================================================================================
-# BLOQUEIO POR CLIENTE (OFFBOARDING) — SILENCIOSO
-# ============================================================================================================================================================
-
-$DisabledClients = @(
-    'Teknier Engenharia e Tecnologia',
-    'Soneca Company'
-)
-
-# Normaliza: trim + comparação case-insensitive
-$clienteNorm = ($Cliente ?? '').Trim()
-
-$blocked = $false
-foreach ($dc in $DisabledClients) {
-    if ($clienteNorm.Equals(($dc ?? '').Trim(), [System.StringComparison]::OrdinalIgnoreCase)) {
-        $blocked = $true
-        break
-    }
-}
-
-if ($blocked) {
-
-    # (Opcional) remover arquivo de argumentos para evitar reuso
-    $argJsonPath = "C:\Guardian\guardian_arg.json"
-    if (Test-Path $argJsonPath) {
-        try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
-    }
-
-    # Silêncio total: sem Write-Host, sem Write-Output, sem nada.
-    exit 0
-}
-
-# ============================================================================================================================================================
-
 
 # --- BLOCO DE ELEVAÇÃO E DETECÇÃO DO POWERSHELL 7 ---
 # Se não estiver como Admin, reinicia com privilégios elevados
