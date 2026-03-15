@@ -1109,12 +1109,12 @@ Show-GuardianEndUI | Out-Null
 Start-Sleep -Milliseconds 500
 
 #region Envio do Log para Servidor de Arquivos
-#if ($FileServer -and $FileServer.Trim() -ne '') {
-#    Write-Log ("Enviando log para o servidor: {0}" -f $FileServer) 'INFO'
-#    Send-LogToServer -Server $FileServer
-#} else {
-#    Write-Log "Nenhum servidor informado: pulando envio do log." 'INFO'
-#}
+if ($FileServer -and $FileServer.Trim() -ne '') {
+    Write-Log ("Enviando log para o servidor: {0}" -f $FileServer) 'INFO'
+    Send-LogToServer -Server $FileServer
+} else {
+    Write-Log "Nenhum servidor informado: pulando envio do log." 'INFO'
+}
 #endregion
 
 } catch {
