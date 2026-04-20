@@ -211,7 +211,7 @@ $hardwareLines = $msg[0..($indexSoftware - 1)]
 $softwareLines = $msg[($indexSoftware + 1)..($msg.Count - 1)]
 
 $softwareList = $softwareLines |
-    ForEach-Object { $_.Trim() } |
+    ForEach-Object { $_.Trim() -replace '\x00', '' } |
     Where-Object { $_ -ne "" } |
     Sort-Object -Unique
 
@@ -427,7 +427,7 @@ try {
                     TamanhoGB = $tamanho
                     LivreGB   = $livreGB
                     UsadoGB   = $usadoGB
-                    UsadoPct  = $usadoPct
+                    UsadoPct  = $pctUsado
                 }
             }
         }
@@ -1024,14 +1024,13 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
 })
 
 
-# ---------------- UUID SMBIOS + CPU ID ----------------
+# ---------------- UUID SMBIOS ----------------
 $uuidSistema = $null
 
 try {
-    $uuid  = (Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop).UUID
-    $cpuId = (Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1).ProcessorId
-    $uuidSistema = "$uuid|$cpuId"
-} catch {
+    $uuidSistema = (Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop).UUID
+}
+catch {
     $uuidSistema = $null
 }
 
