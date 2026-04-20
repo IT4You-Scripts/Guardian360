@@ -848,7 +848,7 @@ $hasHDD = ($hddList.Count -gt 0)
         @{ Name='Update-MicrosoftStore'; Action={ if($hasInet){ Update-MicrosoftStore } else { Write-Log 'Sem internet: pulando Update-MicrosoftStore' 'WARN' } } }
       )},
     @{ Id=6; Title='Atualizações dos programas instalados'; Steps=@(
-        @{ Name='Block-AppUpdates';  Action={ Block-AppUpdates } },
+        # @{ Name='Block-AppUpdates';  Action={ Block-AppUpdates } },
         @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
       )},
     @{ Id=7; Title='Pós-atualização / Componentes'; Steps=@(
