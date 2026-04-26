@@ -1072,33 +1072,6 @@ $fase1.Mensagem = [PSCustomObject]@{
 }
 
 
-# ------------------------------------------------------------------------------
-# RustDesk — Coleta de dados de acesso remoto
-# ------------------------------------------------------------------------------
-try {
-    . "$PSScriptRoot\Manage-RustDesk.ps1"
-    $rustdeskData = Manage-RustDesk
-
-    if ($rustdeskData) {
-        $rustdeskObj = [PSCustomObject]@{
-            rustdesk_id      = $rustdeskData.rustdesk_id
-            rustdesk_pw      = $rustdeskData.rustdesk_pw
-            rustdesk_status  = $rustdeskData.rustdesk_status
-            rustdesk_version = $rustdeskData.rustdesk_version
-        }
-
-        if ($jsonRaw.PSObject.Properties.Name -contains "RustDesk") {
-            $jsonRaw.PSObject.Properties.Remove("RustDesk")
-        }
-
-        $jsonRaw | Add-Member -MemberType NoteProperty -Name RustDesk -Value $rustdeskObj
-    }
-}
-catch {
-    Write-Host "[RustDesk] Erro na integracao: $($_.Exception.Message)" -ForegroundColor Yellow
-}
-
-
 # --------------------------------------------------------------------------
 # Exportar JSON final — No mesmo local do arquivo json original
 # --------------------------------------------------------------------------
