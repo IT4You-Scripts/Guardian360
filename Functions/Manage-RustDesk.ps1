@@ -91,11 +91,31 @@ function Manage-RustDesk {
             # -------------------------------------------------------------
             try {
                 Write-Host "[RustDesk] Instalando silenciosamente..." -ForegroundColor Cyan
-                $proc = Start-Process -FilePath $installerPath -ArgumentList "--silent-install" -Wait -PassThru -NoNewWindow
+                Start-Process -FilePath $installerPath -ArgumentList "--silent-install"
 
-                Write-Host "[RustDesk] Aguardando servico iniciar (30s)..." -ForegroundColor Cyan
-                Start-Sleep -Seconds 30
+                # Aguardar a instalacao concluir verificando o executavel
+                $tentativas = 0
+                $maxTentativas = 12
+                while (-not (Test-Path $RustDeskExe) -and $tentativas -lt $maxTentativas) {
+                    Start-Sleep -Seconds 10
+                    $tentativas++
+                    Write-Host "[RustDesk] Aguardando instalacao... ($tentativas/$maxTentativas)" -ForegroundColor Cyan
+                }
 
+                if (-not (Test-Path $RustDeskExe)) {
+                    Write-Host "[RustDesk] ERRO: Instalacao nao concluiu." -ForegroundColor Red
+                    $result.rustdesk_status = "Erro: Instalacao nao concluiu"
+                    return $result
+                }
+
+                # Aguardar servico ficar disponivel
+                $tentativas = 0
+                while (-not (Get-Service $RustDeskService -ErrorAction SilentlyContinue) -and $tentativas -lt 6) {
+                    Start-Sleep -Seconds 5
+                    $tentativas++
+                }
+
+                Write-Host "[RustDesk] Instalacao concluida." -ForegroundColor Green
                 Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
             }
             catch {
