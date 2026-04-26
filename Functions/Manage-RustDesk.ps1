@@ -144,7 +144,9 @@ function Manage-RustDesk {
                     New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
                 }
 
-                $configContent = @"
+                # Servidor fica no RustDesk2.toml
+                $config2File = Join-Path $ConfigDir "RustDesk2.toml"
+                $config2Content = @"
 rendezvous_server = '$RustDeskServer'
 nat_type = 1
 serial = 0
@@ -154,13 +156,17 @@ custom-rendezvous-server = '$RustDeskServer'
 relay-server = '$RustDeskServer'
 key = '$RustDeskKey'
 "@
-                Set-Content -Path $ConfigFile -Value $configContent -Force -Encoding UTF8
+                Set-Content -Path $config2File -Value $config2Content -Force -Encoding UTF8
+
+                Start-Service -Name $RustDeskService -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 5
 
                 Write-Host "[RustDesk] Servidor configurado." -ForegroundColor Green
             }
             catch {
                 Write-Host "[RustDesk] ERRO na configuracao: $($_.Exception.Message)" -ForegroundColor Red
             }
+            
 
             # -------------------------------------------------------------
             # ETAPA 2D — Gerar e definir senha (so quando Guardian instala)
