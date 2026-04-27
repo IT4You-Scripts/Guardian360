@@ -99,27 +99,12 @@ Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -TimeoutSec $Downloa
                 return $result
             }
 
-            # --- PATCH: garantir variáveis de ambiente válidas para o instalador (processo filho) ---
-# Reaproveita o $tmp que você já calculou no patch do download
-$env:TEMP = $tmp
-$env:TMP  = $tmp
-
-# Força as pastas de perfil para o caminho "longo" correto (evita USURIO~1)
-$env:USERPROFILE = [Environment]::GetFolderPath('UserProfile')
-$env:APPDATA     = [Environment]::GetFolderPath('ApplicationData')
-$env:LOCALAPPDATA= [Environment]::GetFolderPath('LocalApplicationData')
-
-# Garante que TEMP exista
-if (-not (Test-Path -LiteralPath $env:TEMP)) { New-Item -ItemType Directory -Path $env:TEMP -Force | Out-Null }
-# --- /PATCH ---
-
-
             # -------------------------------------------------------------
             # ETAPA 2B — Instalar silenciosamente
             # -------------------------------------------------------------
             try {
                 Write-Host "[RustDesk] Instalando silenciosamente..." -ForegroundColor Cyan
-                Start-Process -FilePath $installerPath -ArgumentList "--silent-install" -WorkingDirectory $tmp -Wait
+                Start-Process -FilePath $installerPath -ArgumentList "--silent-install"
 
                 # Aguardar a instalacao concluir verificando o executavel
                 $tentativas = 0
