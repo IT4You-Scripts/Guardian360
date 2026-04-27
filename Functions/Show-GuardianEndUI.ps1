@@ -124,7 +124,7 @@
 
     # ---- FECHAMENTO AUTOMÁTICO (ÚNICA ADIÇÃO) ----
     $timer = New-Object Windows.Threading.DispatcherTimer
-    $timer.Interval = [TimeSpan]::FromSeconds(5)
+    $timer.Interval = [TimeSpan]::FromSeconds(10)
     $timer.Add_Tick({
         $timer.Stop()
         $window.Close()
