@@ -427,7 +427,7 @@ try {
                     TamanhoGB = $tamanho
                     LivreGB   = $livreGB
                     UsadoGB   = $usadoGB
-                    UsadoPct  = $pctUsado
+                    UsadoPct  = $usadoPct
                 }
             }
         }
@@ -1024,13 +1024,14 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
 })
 
 
-# ---------------- UUID SMBIOS ----------------
+# ---------------- UUID SMBIOS + CPU ID ----------------
 $uuidSistema = $null
 
 try {
-    $uuidSistema = (Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop).UUID
-}
-catch {
+    $uuid  = (Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop).UUID
+    $cpuId = (Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1).ProcessorId
+    $uuidSistema = "$uuid|$cpuId"
+} catch {
     $uuidSistema = $null
 }
 
@@ -1068,6 +1069,33 @@ $fase1.Mensagem = [PSCustomObject]@{
     Particoes      = $particoes
     BackupMacrium  = $macriumInfo
     Softwares      = $softwareList
+}
+
+
+# ------------------------------------------------------------------------------
+# RustDesk — Coleta de dados de acesso remoto
+# ------------------------------------------------------------------------------
+try {
+    . "$PSScriptRoot\Manage-RustDesk.ps1"
+    $rustdeskData = Manage-RustDesk
+
+    if ($rustdeskData) {
+        $rustdeskObj = [PSCustomObject]@{
+            rustdesk_id      = $rustdeskData.rustdesk_id
+            rustdesk_pw      = $rustdeskData.rustdesk_pw
+            rustdesk_status  = $rustdeskData.rustdesk_status
+            rustdesk_version = $rustdeskData.rustdesk_version
+        }
+
+        if ($jsonRaw.PSObject.Properties.Name -contains "RustDesk") {
+            $jsonRaw.PSObject.Properties.Remove("RustDesk")
+        }
+
+        $jsonRaw | Add-Member -MemberType NoteProperty -Name RustDesk -Value $rustdeskObj
+    }
+}
+catch {
+    Write-Host "[RustDesk] Erro na integracao: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
 

@@ -67,24 +67,11 @@ function Manage-RustDesk {
                     return $result
                 }
 
-$downloadUrl = $asset.browser_download_url
+                $downloadUrl   = $asset.browser_download_url
+                $installerPath = Join-Path $env:TEMP "rustdesk_installer.exe"
 
-# === PATCH CIRÚRGICO: TEMP robusto (evita C:\Users\USURIO~1 inexistente) ===
-$tmp = $env:TEMP
-if ([string]::IsNullOrWhiteSpace($tmp) -or -not (Test-Path -LiteralPath $tmp)) {
-    $tmp = [System.IO.Path]::GetTempPath()
-}
-if (-not (Test-Path -LiteralPath $tmp)) {
-    $tmp = Join-Path $env:WINDIR "Temp"
-    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
-}
-
-$installerPath = Join-Path $tmp "rustdesk_installer.exe"
-# === /PATCH ===
-
-Write-Host "[RustDesk] Baixando: $($asset.name) ..." -ForegroundColor Cyan
-Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -TimeoutSec $DownloadTimeout -ErrorAction Stop
-
+                Write-Host "[RustDesk] Baixando: $($asset.name) ..." -ForegroundColor Cyan
+                Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -TimeoutSec $DownloadTimeout -ErrorAction Stop
 
                 if (-not (Test-Path $installerPath)) {
                     $result.rustdesk_status = "Erro: Download falhou"
