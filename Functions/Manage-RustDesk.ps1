@@ -27,6 +27,7 @@ function Manage-RustDesk {
     $RustDeskService = "RustDesk"
     $ConfigDir       = "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config"
     $ConfigFile      = Join-Path $ConfigDir "RustDesk.toml"
+    $Config2File     = Join-Path $ConfigDir "RustDesk2.toml"
     $PasswordLength  = 16
     $DownloadTimeout = 120
     $GitHubApiUrl    = "https://api.github.com/repos/rustdesk/rustdesk/releases/latest"
@@ -67,24 +68,11 @@ function Manage-RustDesk {
                     return $result
                 }
 
-$downloadUrl = $asset.browser_download_url
+                $downloadUrl   = $asset.browser_download_url
+                $installerPath = "C:\Windows\Temp\rustdesk_installer.exe"
 
-# === PATCH CIRÚRGICO: TEMP robusto (evita C:\Users\USURIO~1 inexistente) ===
-$tmp = $env:TEMP
-if ([string]::IsNullOrWhiteSpace($tmp) -or -not (Test-Path -LiteralPath $tmp)) {
-    $tmp = [System.IO.Path]::GetTempPath()
-}
-if (-not (Test-Path -LiteralPath $tmp)) {
-    $tmp = Join-Path $env:WINDIR "Temp"
-    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
-}
-
-$installerPath = Join-Path $tmp "rustdesk_installer.exe"
-# === /PATCH ===
-
-Write-Host "[RustDesk] Baixando: $($asset.name) ..." -ForegroundColor Cyan
-Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -TimeoutSec $DownloadTimeout -ErrorAction Stop
-
+                Write-Host "[RustDesk] Baixando: $($asset.name) ..." -ForegroundColor Cyan
+                Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -TimeoutSec $DownloadTimeout -ErrorAction Stop
 
                 if (-not (Test-Path $installerPath)) {
                     $result.rustdesk_status = "Erro: Download falhou"
@@ -99,27 +87,12 @@ Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -TimeoutSec $Downloa
                 return $result
             }
 
-            # --- PATCH: garantir variáveis de ambiente válidas para o instalador (processo filho) ---
-# Reaproveita o $tmp que você já calculou no patch do download
-$env:TEMP = $tmp
-$env:TMP  = $tmp
-
-# Força as pastas de perfil para o caminho "longo" correto (evita USURIO~1)
-$env:USERPROFILE = [Environment]::GetFolderPath('UserProfile')
-$env:APPDATA     = [Environment]::GetFolderPath('ApplicationData')
-$env:LOCALAPPDATA= [Environment]::GetFolderPath('LocalApplicationData')
-
-# Garante que TEMP exista
-if (-not (Test-Path -LiteralPath $env:TEMP)) { New-Item -ItemType Directory -Path $env:TEMP -Force | Out-Null }
-# --- /PATCH ---
-
-
             # -------------------------------------------------------------
             # ETAPA 2B — Instalar silenciosamente
             # -------------------------------------------------------------
             try {
                 Write-Host "[RustDesk] Instalando silenciosamente..." -ForegroundColor Cyan
-                Start-Process -FilePath $installerPath -ArgumentList "--silent-install" -WorkingDirectory $tmp -Wait
+                Start-Process -FilePath $installerPath -ArgumentList "--silent-install"
 
                 # Aguardar a instalacao concluir verificando o executavel
                 $tentativas = 0
@@ -157,10 +130,8 @@ if (-not (Test-Path -LiteralPath $env:TEMP)) { New-Item -ItemType Directory -Pat
                 return $result
             }
 
-            Write-Host "[RustDesk] Instalacao concluida." -ForegroundColor Green
-
             # -------------------------------------------------------------
-            # ETAPA 2C — Configurar servidor
+            # ETAPA 2C — Configurar servidor (grava no RustDesk2.toml)
             # -------------------------------------------------------------
             try {
                 Write-Host "[RustDesk] Configurando servidor: $RustDeskServer ..." -ForegroundColor Cyan
@@ -173,7 +144,6 @@ if (-not (Test-Path -LiteralPath $env:TEMP)) { New-Item -ItemType Directory -Pat
                 }
 
                 # Servidor fica no RustDesk2.toml
-                $config2File = Join-Path $ConfigDir "RustDesk2.toml"
                 $config2Content = @"
 rendezvous_server = '$RustDeskServer'
 nat_type = 1
@@ -184,7 +154,7 @@ custom-rendezvous-server = '$RustDeskServer'
 relay-server = '$RustDeskServer'
 key = '$RustDeskKey'
 "@
-                Set-Content -Path $config2File -Value $config2Content -Force -Encoding UTF8
+                Set-Content -Path $Config2File -Value $config2Content -Force -Encoding UTF8
 
                 Start-Service -Name $RustDeskService -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 5
@@ -194,7 +164,6 @@ key = '$RustDeskKey'
             catch {
                 Write-Host "[RustDesk] ERRO na configuracao: $($_.Exception.Message)" -ForegroundColor Red
             }
-            
 
             # -------------------------------------------------------------
             # ETAPA 2D — Gerar e definir senha (so quando Guardian instala)
