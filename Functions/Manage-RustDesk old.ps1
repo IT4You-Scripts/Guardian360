@@ -131,7 +131,7 @@ function Manage-RustDesk {
             }
 
             # -------------------------------------------------------------
-            # ETAPA 2C — Configurar servidor (grava nos DOIS locais)
+            # ETAPA 2C — Configurar servidor (grava no RustDesk2.toml)
             # -------------------------------------------------------------
             try {
                 Write-Host "[RustDesk] Configurando servidor: $RustDeskServer ..." -ForegroundColor Cyan
@@ -139,6 +139,11 @@ function Manage-RustDesk {
                 Stop-Service -Name $RustDeskService -Force -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 3
 
+                if (-not (Test-Path $ConfigDir)) {
+                    New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
+                }
+
+                # Servidor fica no RustDesk2.toml
                 $config2Content = @"
 rendezvous_server = '$RustDeskServer'
 nat_type = 1
@@ -149,30 +154,12 @@ custom-rendezvous-server = '$RustDeskServer'
 relay-server = '$RustDeskServer'
 key = '$RustDeskKey'
 "@
-
-                # Local 1: Config do servico (LocalService)
-                if (-not (Test-Path $ConfigDir)) {
-                    New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
-                }
                 Set-Content -Path $Config2File -Value $config2Content -Force -Encoding UTF8
-
-                # Local 2: Config de TODOS os perfis de usuario
-                $usersDir = "C:\Users"
-                Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-                    $userConfigDir = Join-Path $_.FullName "AppData\Roaming\RustDesk\config"
-                    if (Test-Path (Join-Path $_.FullName "AppData\Roaming")) {
-                        if (-not (Test-Path $userConfigDir)) {
-                            New-Item -ItemType Directory -Path $userConfigDir -Force | Out-Null
-                        }
-                        $userConfig2 = Join-Path $userConfigDir "RustDesk2.toml"
-                        Set-Content -Path $userConfig2 -Value $config2Content -Force -Encoding UTF8
-                    }
-                }
 
                 Start-Service -Name $RustDeskService -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 5
 
-                Write-Host "[RustDesk] Servidor configurado (servico + perfis de usuario)." -ForegroundColor Green
+                Write-Host "[RustDesk] Servidor configurado." -ForegroundColor Green
             }
             catch {
                 Write-Host "[RustDesk] ERRO na configuracao: $($_.Exception.Message)" -ForegroundColor Red
