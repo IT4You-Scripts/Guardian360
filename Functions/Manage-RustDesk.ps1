@@ -8,6 +8,8 @@
 #   A) RustDesk NAO instalado → baixa, instala, configura, gera senha, captura ID
 #   B) RustDesk JA instalado  → apenas captura ID (senha fica por conta do tecnico)
 #
+# Em AMBOS os caminhos: verifica e garante que o servidor esta configurado
+#
 # Retorno: Hashtable com rustdesk_id, rustdesk_pw, rustdesk_status, rustdesk_version
 # =============================================================================
 
@@ -131,9 +133,80 @@ function Manage-RustDesk {
             }
 
             # -------------------------------------------------------------
-            # ETAPA 2C — Configurar servidor (grava nos DOIS locais)
+            # ETAPA 2D — Gerar e definir senha (so quando Guardian instala)
             # -------------------------------------------------------------
             try {
+                $chars    = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#%&*'
+                $password = -join (1..$PasswordLength | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
+
+                Write-Host "[RustDesk] Definindo senha permanente..." -ForegroundColor Cyan
+
+                Start-Service -Name $RustDeskService -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 5
+
+                & $RustDeskExe --password $password 2>&1 | Out-Null
+
+                Start-Sleep -Seconds 3
+
+                $result.rustdesk_pw = $password
+                Write-Host "[RustDesk] Senha definida." -ForegroundColor Green
+            }
+            catch {
+                Write-Host "[RustDesk] ERRO ao definir senha: $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+        else {
+            # =============================================================
+            # CAMINHO B — RustDesk ja estava instalado
+            # =============================================================
+            Write-Host "[RustDesk] Ja instalado. Verificando configuracao..." -ForegroundColor Green
+        }
+
+        # =================================================================
+        # ETAPA 3 — SEMPRE: Verificar e garantir configuracao do servidor
+        # =================================================================
+        # Roda em TODA execucao, independente de ser instalacao nova ou existente.
+        # Se o servidor nao estiver configurado corretamente, corrige.
+        # =================================================================
+        try {
+            $precisaConfigurar = $false
+
+            # Verificar se o RustDesk2.toml do servico existe e tem o servidor correto
+            if (-not (Test-Path $Config2File)) {
+                $precisaConfigurar = $true
+                Write-Host "[RustDesk] Config do servico nao encontrada. Sera criada." -ForegroundColor Yellow
+            }
+            else {
+                $config2Atual = Get-Content $Config2File -Raw -ErrorAction SilentlyContinue
+                if ($config2Atual -notmatch [regex]::Escape($RustDeskServer)) {
+                    $precisaConfigurar = $true
+                    Write-Host "[RustDesk] Servidor incorreto no config do servico. Sera corrigido." -ForegroundColor Yellow
+                }
+                elseif ($config2Atual -notmatch [regex]::Escape($RustDeskKey)) {
+                    $precisaConfigurar = $true
+                    Write-Host "[RustDesk] Key incorreta no config do servico. Sera corrigida." -ForegroundColor Yellow
+                }
+            }
+
+            # Verificar tambem os perfis de usuario
+            $usersDir = "C:\Users"
+            Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                $userConfig2Path = Join-Path $_.FullName "AppData\Roaming\RustDesk\config\RustDesk2.toml"
+                if (Test-Path (Join-Path $_.FullName "AppData\Roaming")) {
+                    if (Test-Path $userConfig2Path) {
+                        $userConfig2Atual = Get-Content $userConfig2Path -Raw -ErrorAction SilentlyContinue
+                        if ($userConfig2Atual -notmatch [regex]::Escape($RustDeskServer)) {
+                            $precisaConfigurar = $true
+                        }
+                    }
+                    else {
+                        # Perfil de usuario existe mas nao tem config do RustDesk
+                        $precisaConfigurar = $true
+                    }
+                }
+            }
+
+            if ($precisaConfigurar) {
                 Write-Host "[RustDesk] Configurando servidor: $RustDeskServer ..." -ForegroundColor Cyan
 
                 Stop-Service -Name $RustDeskService -Force -ErrorAction SilentlyContinue
@@ -157,7 +230,6 @@ key = '$RustDeskKey'
                 Set-Content -Path $Config2File -Value $config2Content -Force -Encoding UTF8
 
                 # Local 2: Config de TODOS os perfis de usuario
-                $usersDir = "C:\Users"
                 Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
                     $userConfigDir = Join-Path $_.FullName "AppData\Roaming\RustDesk\config"
                     if (Test-Path (Join-Path $_.FullName "AppData\Roaming")) {
@@ -174,49 +246,16 @@ key = '$RustDeskKey'
 
                 Write-Host "[RustDesk] Servidor configurado (servico + perfis de usuario)." -ForegroundColor Green
             }
-            catch {
-                Write-Host "[RustDesk] ERRO na configuracao: $($_.Exception.Message)" -ForegroundColor Red
+            else {
+                Write-Host "[RustDesk] Servidor ja configurado corretamente." -ForegroundColor Green
             }
-
-            # -------------------------------------------------------------
-            # ETAPA 2D — Gerar e definir senha (so quando Guardian instala)
-            # -------------------------------------------------------------
-            try {
-                $chars    = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#%&*'
-                $password = -join (1..$PasswordLength | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
-
-                Write-Host "[RustDesk] Definindo senha permanente..." -ForegroundColor Cyan
-
-                Start-Service -Name $RustDeskService -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 5
-
-                & $RustDeskExe --password $password 2>&1 | Out-Null
-
-                Start-Sleep -Seconds 3
-
-                $result.rustdesk_pw = $password
-                Write-Host "[RustDesk] Senha definida." -ForegroundColor Green
-            }
-            catch {
-                Write-Host "[RustDesk] ERRO ao definir senha: $($_.Exception.Message)" -ForegroundColor Red
-            }
-
-            # Garantir servico rodando
-            Start-Service -Name $RustDeskService -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 5
         }
-        else {
-            # =============================================================
-            # CAMINHO B — RustDesk ja estava instalado
-            # =============================================================
-            Write-Host "[RustDesk] Ja instalado (instalacao externa). Apenas capturando ID..." -ForegroundColor Green
-
-            # Nao gera senha, nao configura servidor
-            # A senha fica por conta do tecnico (NocoDB)
+        catch {
+            Write-Host "[RustDesk] ERRO na verificacao/configuracao do servidor: $($_.Exception.Message)" -ForegroundColor Red
         }
 
         # =================================================================
-        # ETAPA 3 — Garantir servico rodando
+        # ETAPA 4 — Garantir servico rodando
         # =================================================================
         $service = Get-Service -Name $RustDeskService -ErrorAction SilentlyContinue
         if ($service -and $service.Status -ne "Running") {
@@ -225,7 +264,7 @@ key = '$RustDeskKey'
         }
 
         # =================================================================
-        # ETAPA 4 — Capturar RustDesk ID (3 metodos com fallback)
+        # ETAPA 5 — Capturar RustDesk ID (3 metodos com fallback)
         # =================================================================
 
         # Metodo 1: via CLI --get-id
@@ -279,7 +318,7 @@ key = '$RustDeskKey'
         }
 
         # =================================================================
-        # ETAPA 5 — Capturar versao
+        # ETAPA 6 — Capturar versao
         # =================================================================
         try {
             $versionInfo = (Get-Item $RustDeskExe -ErrorAction Stop).VersionInfo
@@ -293,7 +332,7 @@ key = '$RustDeskKey'
         }
 
         # =================================================================
-        # ETAPA 6 — Definir status final
+        # ETAPA 7 — Definir status final
         # =================================================================
         if ($result.rustdesk_id) {
             $result.rustdesk_status = "Instalado"
