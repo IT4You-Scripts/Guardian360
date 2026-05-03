@@ -34,6 +34,39 @@ function Manage-RustDesk {
     $DownloadTimeout = 120
     $GitHubApiUrl    = "https://api.github.com/repos/rustdesk/rustdesk/releases/latest"
 
+    # =========================================================================
+    # Funcao auxiliar: verifica se um RustDesk2.toml tem servidor e key corretos
+    # Retorna $true se esta OK, $false se precisa corrigir
+    # =========================================================================
+    function Test-RustDeskConfig {
+        param([string]$FilePath)
+
+        if (-not (Test-Path $FilePath)) { return $false }
+
+        $conteudo = Get-Content $FilePath -Raw -ErrorAction SilentlyContinue
+        if (-not $conteudo) { return $false }
+
+        # Extrair o valor do campo key do arquivo
+        if ($conteudo -match "key\s*=\s*'([^']*)'") {
+            $keyNoArquivo = $Matches[1]
+        } else {
+            return $false
+        }
+
+        # Extrair o valor do campo custom-rendezvous-server
+        if ($conteudo -match "custom-rendezvous-server\s*=\s*'([^']*)'") {
+            $serverNoArquivo = $Matches[1]
+        } else {
+            return $false
+        }
+
+        # Comparacao EXATA (nao substring)
+        if ($keyNoArquivo -ne $RustDeskKey) { return $false }
+        if ($serverNoArquivo -ne $RustDeskServer) { return $false }
+
+        return $true
+    }
+
     # Resultado padrao
     $result = @{
         rustdesk_id      = $null
@@ -166,48 +199,32 @@ function Manage-RustDesk {
         # ETAPA 3 — SEMPRE: Verificar e garantir configuracao do servidor
         # =================================================================
         # Roda em TODA execucao, independente de ser instalacao nova ou existente.
-        # Se o servidor nao estiver configurado corretamente, corrige.
+        # Verifica CADA arquivo individualmente (servico + cada perfil de usuario).
+        # Se qualquer um estiver errado, corrige TODOS.
         # =================================================================
         try {
             $precisaConfigurar = $false
 
-            # Verificar se o RustDesk2.toml do servico existe e tem o servidor correto
-            if (-not (Test-Path $Config2File)) {
+            # Verificar config do servico
+            if (-not (Test-RustDeskConfig -FilePath $Config2File)) {
                 $precisaConfigurar = $true
-                Write-Host "[RustDesk] Config do servico nao encontrada. Sera criada." -ForegroundColor Yellow
-            }
-            else {
-                $config2Atual = Get-Content $Config2File -Raw -ErrorAction SilentlyContinue
-                if ($config2Atual -notmatch [regex]::Escape($RustDeskServer)) {
-                    $precisaConfigurar = $true
-                    Write-Host "[RustDesk] Servidor incorreto no config do servico. Sera corrigido." -ForegroundColor Yellow
-                }
-                elseif ($config2Atual -notmatch [regex]::Escape($RustDeskKey)) {
-                    $precisaConfigurar = $true
-                    Write-Host "[RustDesk] Key incorreta no config do servico. Sera corrigida." -ForegroundColor Yellow
-                }
+                Write-Host "[RustDesk] Config do servico ausente ou incorreta." -ForegroundColor Yellow
             }
 
-            # Verificar tambem os perfis de usuario
+            # Verificar config de cada perfil de usuario
             $usersDir = "C:\Users"
             Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-                $userConfig2Path = Join-Path $_.FullName "AppData\Roaming\RustDesk\config\RustDesk2.toml"
                 if (Test-Path (Join-Path $_.FullName "AppData\Roaming")) {
-                    if (Test-Path $userConfig2Path) {
-                        $userConfig2Atual = Get-Content $userConfig2Path -Raw -ErrorAction SilentlyContinue
-                        if ($userConfig2Atual -notmatch [regex]::Escape($RustDeskServer)) {
-                            $precisaConfigurar = $true
-                        }
-                    }
-                    else {
-                        # Perfil de usuario existe mas nao tem config do RustDesk
+                    $userConfig2Path = Join-Path $_.FullName "AppData\Roaming\RustDesk\config\RustDesk2.toml"
+                    if (-not (Test-RustDeskConfig -FilePath $userConfig2Path)) {
                         $precisaConfigurar = $true
+                        Write-Host "[RustDesk] Config incorreta no perfil: $($_.Name)" -ForegroundColor Yellow
                     }
                 }
             }
 
             if ($precisaConfigurar) {
-                Write-Host "[RustDesk] Configurando servidor: $RustDeskServer ..." -ForegroundColor Cyan
+                Write-Host "[RustDesk] Corrigindo configuracao do servidor..." -ForegroundColor Cyan
 
                 Stop-Service -Name $RustDeskService -Force -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 3
@@ -244,14 +261,14 @@ key = '$RustDeskKey'
                 Start-Service -Name $RustDeskService -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 5
 
-                Write-Host "[RustDesk] Servidor configurado (servico + perfis de usuario)." -ForegroundColor Green
+                Write-Host "[RustDesk] Servidor corrigido (servico + todos os perfis)." -ForegroundColor Green
             }
             else {
-                Write-Host "[RustDesk] Servidor ja configurado corretamente." -ForegroundColor Green
+                Write-Host "[RustDesk] Servidor e key corretos em todos os locais." -ForegroundColor Green
             }
         }
         catch {
-            Write-Host "[RustDesk] ERRO na verificacao/configuracao do servidor: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "[RustDesk] ERRO na verificacao/configuracao: $($_.Exception.Message)" -ForegroundColor Red
         }
 
         # =================================================================
