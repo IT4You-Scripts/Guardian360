@@ -218,7 +218,55 @@ $logFile     = Join-Path $logDir ("{0}_{1}.log" -f $computer, $stamp)
 
 
 
-# === VERIFICAÇÃO DE EXECUÇÃO RECENTE — Movida para RodaGuardian.ps1 / ElevaGuardian.ps1 ===
+# === VERIFICAÇÃO DE EXECUÇÃO RECENTE (<24h) ===
+if (Test-Path $logDir) {
+    $ultimoLog = Get-ChildItem $logDir -Filter "$computer*.log" -ErrorAction SilentlyContinue |
+                 Sort-Object LastWriteTime -Descending |
+                 Select-Object -First 1
+
+    if ($ultimoLog) {
+        $horas = (New-TimeSpan $ultimoLog.LastWriteTime (Get-Date)).TotalHours
+
+        if ($horas -lt 24) {
+
+            Clear-Host
+
+            # Header manual (sem depender da função)
+            $text = "Guardian executado há menos de 24 horas"
+            $bar  = '─' * ($text.Length + 2)
+            Write-Host "┌$bar┐" -ForegroundColor Cyan
+            Write-Host "│ $text │" -ForegroundColor Cyan
+            Write-Host "└$bar┘" -ForegroundColor Cyan
+
+            Write-Host ""
+            Write-Host "Última execução: $($ultimoLog.LastWriteTime)"
+            $ts = New-TimeSpan $ultimoLog.LastWriteTime (Get-Date)
+
+function Format-HumanTime($ts) {
+    if ($ts.TotalDays -ge 1) {
+        return "{0} dia(s) {1}h {2}m" -f [int]$ts.TotalDays, $ts.Hours, $ts.Minutes
+    }
+    elseif ($ts.TotalHours -ge 1) {
+        return "{0}h {1}m" -f $ts.Hours, $ts.Minutes
+    }
+    else {
+        return "{0} min" -f [int]$ts.TotalMinutes
+    }
+}
+
+$tempoHumano = Format-HumanTime $ts
+Write-Host "Tempo decorrido: $tempoHumano"
+
+            Write-Host ""
+            Write-Host "Encerrando manutenção para evitar execução redundante..."
+            Write-Host ""
+
+            Start-Sleep 3
+            exit 0
+        }
+    }
+}
+# =============================================
 
 
 
@@ -782,13 +830,7 @@ $hasHDD = ($hddList.Count -gt 0)
         @{ Name='Get-SystemInventory';   Action={ Get-SystemInventory } }
       )},
     @{ Id=2; Title='Integridade do Sistema'; Steps=@(
-        @{ Name='Repair-SystemIntegrity'; Action={
-            # Fase 2 desativada no Guardian principal — roda separadamente via Guardian Ghost
-            return [PSCustomObject]@{
-                IntegridadeSistema = 100
-                MensagemTecnica    = "System Integrity executado separadamente via Guardian Ghost"
-            }
-        } }
+        @{ Name='Repair-SystemIntegrity'; Action={ Repair-SystemIntegrity } }
       )},
     @{ Id=3; Title='Otimizações Estruturais'; Steps=@(
         @{ Name='Optimize-PowerSettings';    Action={ Optimize-PowerSettings } },
@@ -1086,19 +1128,6 @@ Start-Sleep -Milliseconds 500
 
 
     & "C:\Guardian\Functions\Optimize-JsonReport.ps1" -Pasta "C:\Guardian\Json"
-
-    # =========================================================================
-    # Gravar guardian.json com data da execucao bem-sucedida
-    # =========================================================================
-    try {
-        $guardianJsonPath = "C:\Guardian\guardian.json"
-        $guardianResult = @{
-            ultima_execucao = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-        }
-        $guardianResult | ConvertTo-Json | Set-Content -Path $guardianJsonPath -Encoding UTF8 -Force
-    } catch {}
-
-    # Criação/padronização das tasks — Movida para RodaGuardian.ps1 / ElevaGuardian.ps1
 
     Disable-QuickEditProtection
     Disable-ConsoleAppearance
