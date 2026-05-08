@@ -866,7 +866,7 @@ if ($fase2) {
     if ($fase2.Mensagem.IntegridadeArquivos -eq "OK") {
         $notaIntegridade = 100
     } else {
-        $notaIntegridade = 100
+        $notaIntegridade = 40
     }
 }
 
