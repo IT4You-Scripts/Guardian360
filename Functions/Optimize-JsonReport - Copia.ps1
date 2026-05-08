@@ -861,8 +861,14 @@ catch {}
 # ------------------------------------------------------------------------------
 
 # =============== 1. Integridade do Sistema (SFC/DISM) ===============
-# Nota sempre 100 — a Fase 2 agora roda separadamente via Guardian Ghost
-$notaIntegridade = 100
+$notaIntegridade = 0
+if ($fase2) {
+    if ($fase2.Mensagem.IntegridadeArquivos -eq "OK") {
+        $notaIntegridade = 100
+    } else {
+        $notaIntegridade = 100
+    }
+}
 
 # =============== 2. Atualizações (Windows + Store + Winget) ===============
 $notaAtualizacoes = 0
