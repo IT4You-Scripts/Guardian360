@@ -88,7 +88,7 @@ if ([string]::IsNullOrWhiteSpace($Cliente)) {
 
 $DisabledClients = @(
     'Soneca Company',
-    'Talude Comercial e Construtora Ltda'
+    'Nome da Empresa que não deve mais rodar o Guardian'
 )
 
 # Normaliza: trim + comparação case-insensitive
