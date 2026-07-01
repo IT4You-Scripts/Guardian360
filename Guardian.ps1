@@ -85,18 +85,32 @@ if ([string]::IsNullOrWhiteSpace($Cliente)) {
 # ============================================================================================================================================================
 # BLOQUEIO POR CLIENTE (OFFBOARDING) — SILENCIOSO
 # ============================================================================================================================================================
+# IMPORTANTE: este bloco deve ficar logo após o param() do script, ANTES de
+# qualquer outra lógica (leitura de JSON, logs, disparo de fases etc.)
 
 $DisabledClients = @(
     'Soneca Company',
     'Talude Comercial e Construtora Ltda'
 )
 
-# Normaliza: trim + comparação case-insensitive
-$clienteNorm = ($Cliente ?? '').Trim()
+function Normalize-ClienteName {
+    param([string]$Nome)
+
+    if ([string]::IsNullOrEmpty($Nome)) { return '' }
+
+    # Remove espaços não-quebráveis (U+00A0), zero-width (U+200B) e afins,
+    # colapsa espaços múltiplos e faz trim.
+    $n = $Nome -replace '[\u00A0\u200B\u2007\u202F]', ' '
+    $n = $n -replace '\s+', ' '
+    return $n.Trim()
+}
+
+$clienteNorm = Normalize-ClienteName -Nome $Cliente
 
 $blocked = $false
 foreach ($dc in $DisabledClients) {
-    if ($clienteNorm.Equals(($dc ?? '').Trim(), [System.StringComparison]::OrdinalIgnoreCase)) {
+    $dcNorm = Normalize-ClienteName -Nome $dc
+    if ([string]::Equals($clienteNorm, $dcNorm, [System.StringComparison]::OrdinalIgnoreCase)) {
         $blocked = $true
         break
     }
@@ -104,15 +118,16 @@ foreach ($dc in $DisabledClients) {
 
 if ($blocked) {
 
-    # (Opcional) remover arquivo de argumentos para evitar reuso
+    # Remove arquivo de argumentos para evitar reuso
     $argJsonPath = "C:\Guardian\guardian_arg.json"
     if (Test-Path $argJsonPath) {
-        try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
+        try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue } catch {}
     }
 
     # Silêncio total: sem Write-Host, sem Write-Output, sem nada.
     exit 0
 }
+
 
 # ============================================================================================================================================================
 
