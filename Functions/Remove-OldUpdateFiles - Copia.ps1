@@ -13,7 +13,7 @@
             Write-Host "Isso pode levar alguns minutos. Por favor, aguarde..." -ForegroundColor Yellow
             Write-Host ""
 
-            Dism /Online /Cleanup-Image /StartComponentCleanup /ResetBase /NoRestart
+            Dism /Online /Cleanup-Image /StartComponentCleanup /NoRestart
 
             Write-Host "Limpeza de componentes do Windows concluída com Sucesso!" -ForegroundColor Green
             Write-Host ""
