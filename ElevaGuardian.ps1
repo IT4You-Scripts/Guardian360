@@ -196,7 +196,7 @@ try {
         -Credential $cred `
         -WorkingDirectory (Split-Path $ScriptPath -Parent) `
         -WindowStyle $winStyle `
-        #-UseNewEnvironment `
+        -UseNewEnvironment `
         -PassThru
 
     Show-Header "Guardian iniciado com sucesso. PID: $($proc.Id)" -Color Green
