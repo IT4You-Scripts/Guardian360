@@ -48,137 +48,25 @@ $PolicyStatus = "FALHOU"
 
 Step "Verificando Winget..."
 
-function Get-WingetPath {
-
-    # 1. Tentar comando disponível normalmente
-    $cmd = Get-Command winget.exe -ErrorAction SilentlyContinue
-
-    if ($cmd -and $cmd.Source) {
-        return $cmd.Source
-    }
-
-    # 2. Alias do usuário atual
-    $aliasPath = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\winget.exe"
-
-    if (Test-Path $aliasPath) {
-        return $aliasPath
-    }
-
-    # 3. Executável real dentro do WindowsApps
-    $wingetReal = Get-ChildItem `
-        "C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_*\winget.exe" `
-        -ErrorAction SilentlyContinue |
-        Sort-Object FullName -Descending |
-        Select-Object -First 1
-
-    if ($wingetReal) {
-        return $wingetReal.FullName
-    }
-
-    return $null
-}
-
-
 function Test-Winget {
-
-    $script:WingetExe = Get-WingetPath
-
-    if (-not $script:WingetExe) {
-        return $false
-    }
-
     try {
-        & $script:WingetExe --version 2>$null | Out-Null
-        return ($LASTEXITCODE -eq 0)
-    }
-    catch {
-        return $false
-    }
+        winget --version 2>$null | Out-Null
+        return $?
+    } catch { return $false }
 }
 
-
-# -------------------------------------------------
-# Primeira verificação
-# -------------------------------------------------
-
 if (-not (Test-Winget)) {
-
-    Write-Host "  → Winget não disponível. Tentando registrar o App Installer..." -ForegroundColor Yellow
-
-    # Forçar registro do App Installer
-    try {
-        Add-AppxPackage `
-            -RegisterByFamilyName `
-            -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe `
-            -ErrorAction SilentlyContinue
-    }
-    catch {}
-
-    Start-Sleep -Seconds 5
-}
-
-
-# -------------------------------------------------
-# Se ainda não funcionar, reparar/reinstalar
-# -------------------------------------------------
-
-if (-not (Test-Winget)) {
-
-    Write-Host "  → Winget ainda indisponível. Tentando reparar..." -ForegroundColor Yellow
-
-    Get-AppxPackage Microsoft.DesktopAppInstaller |
-        Remove-AppxPackage 2>$null
-
-    Get-AppxPackage Microsoft.VCLibs* |
-        Remove-AppxPackage 2>$null
-
-    Remove-Item `
-        "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller*" `
-        -Force `
-        -Recurse `
-        2>$null
+    Get-AppxPackage Microsoft.DesktopAppInstaller | Remove-AppxPackage 2>$null
+    Get-AppxPackage Microsoft.VCLibs* | Remove-AppxPackage 2>$null
+    Remove-Item "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller*" -Force -Recurse 2>$null
 
     $u = "https://aka.ms/getwinget"
     $p = "$env:TEMP\AppInstaller.msixbundle"
-
-    Remove-Item $p -Force -ErrorAction SilentlyContinue
-
-    Invoke-WebRequest `
-        -Uri $u `
-        -OutFile $p `
-        -UseBasicParsing `
-        2>$null
-
-    if (Test-Path $p) {
-
-        Add-AppxPackage `
-            -Path $p `
-            2>$null
-    }
-
-    Start-Sleep -Seconds 5
+    Invoke-WebRequest -Uri $u -OutFile $p -UseBasicParsing 2>$null
+    Add-AppxPackage -Path $p 2>$null
 }
 
-
-# -------------------------------------------------
-# Validar Winget — até 3 tentativas
-# -------------------------------------------------
-
-for ($tentativa = 1; $tentativa -le 3; $tentativa++) {
-
-    if (Test-Winget) {
-
-        $WingetStatus = "OK"
-        break
-    }
-
-    if ($tentativa -lt 3) {
-
-        Write-Host "  → Aguardando Winget ficar disponível... tentativa $tentativa/3" -ForegroundColor Yellow
-        Start-Sleep -Seconds 5
-    }
-}
-
+if (Test-Winget) { $WingetStatus = "OK" }
 
 # =====================================
 # INSTALL POWERSHELL 7
@@ -197,75 +85,23 @@ function Show-ProgressBar {
 
 Step "Instalando PowerShell 7..."
 
+Show-ProgressBar -Percent 5
+
+winget install --id Microsoft.PowerShell `
+    --silent --accept-package-agreements --accept-source-agreements `
+    | Out-Null 2>&1
+
+foreach ($p in 20,40,60,80,100) {
+    Start-Sleep -Milliseconds 250
+    Show-ProgressBar -Percent $p
+}
+
 $pwshPath = "C:\Program Files\PowerShell\7\pwsh.exe"
-
-
-# -------------------------------------------------
-# Se já existe, não precisa reinstalar
-# -------------------------------------------------
-
-if (Test-Path $pwshPath) {
-
-    Show-ProgressBar -Percent 100
+if (Test-Path $pwshPath) { 
     $PowerShellStatus = "OK"
 }
 
-# -------------------------------------------------
-# Instalar somente se Winget estiver confirmado
-# -------------------------------------------------
-
-elseif ($WingetStatus -eq "OK") {
-
-    Show-ProgressBar -Percent 5
-
-    for ($tentativaPS = 1; $tentativaPS -le 3; $tentativaPS++) {
-
-        # Atualizar novamente o caminho do Winget
-        $WingetExe = Get-WingetPath
-
-        if ($WingetExe) {
-
-            & $WingetExe install `
-                --id Microsoft.PowerShell `
-                --exact `
-                --source winget `
-                --silent `
-                --accept-package-agreements `
-                --accept-source-agreements `
-                --disable-interactivity `
-                | Out-Null 2>&1
-        }
-
-        if (Test-Path $pwshPath) {
-
-            $PowerShellStatus = "OK"
-            break
-        }
-
-        if ($tentativaPS -lt 3) {
-
-            Write-Host ""
-            Write-Host "  → PowerShell 7 ainda não foi confirmado. Nova tentativa em 5 segundos..." -ForegroundColor Yellow
-
-            Start-Sleep -Seconds 5
-        }
-    }
-
-
-    foreach ($percent in 20,40,60,80,100) {
-        Start-Sleep -Milliseconds 250
-        Show-ProgressBar -Percent $percent
-    }
-}
-
-else {
-
-    Write-Host ""
-    Write-Host "  → PowerShell 7 não pode ser instalado porque o Winget não ficou disponível." -ForegroundColor Red
-}
-
 Write-Host ""
-
 
 # =====================================
 # PATH
