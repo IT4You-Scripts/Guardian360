@@ -53,170 +53,33 @@
 
 
         # ============================================================
-        # 2. ARGUMENTOS UTILIZADOS PELO WINGET
+        # 2. LOCALIZAR MICROSOFT.WINGET.SOURCE
         # ============================================================
 
-        $sourceArgs = @(
-            "source",
-            "update",
-            "--disable-interactivity"
-        )
-
-        $wingetArgs = @(
-            "upgrade",
-            "--all",
-            "--accept-source-agreements",
-            "--accept-package-agreements",
-            "--silent",
-            "--disable-interactivity"
-        )
+        $sourceManifest = Get-ChildItem `
+            "C:\Program Files\WindowsApps\Microsoft.Winget.Source_*\AppXManifest.xml" `
+            -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
 
 
         # ============================================================
-        # 3. ATUALIZAR AS FONTES DO WINGET
+        # 3. REGISTRAR MICROSOFT.WINGET.SOURCE
+        #
+        # O Guardian roda no PowerShell 7.
+        # Add-AppxPackage precisa ser executado pelo
+        # Windows PowerShell 5.1 neste ambiente.
         # ============================================================
 
-        Write-Host "- Verificando fontes do Winget..."
+        if ($sourceManifest) {
 
-        Write-Log `
-            "Atualizando fontes do Winget." `
-            "INFO"
+            Write-Host "- Preparando origem do Winget..."
+            Write-Log "Preparando Microsoft.Winget.Source." "INFO"
 
-        $sourceProcess = Start-Process `
-            -FilePath $wingetExe `
-            -ArgumentList $sourceArgs `
-            -NoNewWindow `
-            -Wait `
-            -PassThru
+            $windowsPowerShell = `
+                "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
 
-        Write-Log `
-            "Winget source update retornou ExitCode=$($sourceProcess.ExitCode)." `
-            "INFO"
-
-
-        # ============================================================
-        # 4. SE SOURCE UPDATE FALHOU, RESETAR AS FONTES
-        # ============================================================
-
-        if ($sourceProcess.ExitCode -ne 0) {
-
-            Write-Host ""
-
-            Show-Header `
-                -Text "Fontes do Winget precisam ser reparadas." `
-                -Color $Yellow
-
-            Write-Log `
-                "Source update falhou. Tentando source reset --force." `
-                "WARN"
-
-            $resetProcess = Start-Process `
-                -FilePath $wingetExe `
-                -ArgumentList @(
-                    "source",
-                    "reset",
-                    "--force"
-                ) `
-                -NoNewWindow `
-                -Wait `
-                -PassThru
-
-            Write-Log `
-                "Winget source reset retornou ExitCode=$($resetProcess.ExitCode)." `
-                "INFO"
-
-
-            # Tenta atualizar novamente após o reset
-            $sourceProcess = Start-Process `
-                -FilePath $wingetExe `
-                -ArgumentList $sourceArgs `
-                -NoNewWindow `
-                -Wait `
-                -PassThru
-
-            Write-Log `
-                "Source update após reset retornou ExitCode=$($sourceProcess.ExitCode)." `
-                "INFO"
-        }
-
-
-        # ============================================================
-        # 5. PRIMEIRA TENTATIVA DE ATUALIZAÇÃO
-        # ============================================================
-
-        Write-Host ""
-        Write-Host "- Atualizando aplicativos via Winget..."
-
-        Write-Log `
-            "Iniciando atualização de aplicativos via Winget." `
-            "INFO"
-
-        $process = Start-Process `
-            -FilePath $wingetExe `
-            -ArgumentList $wingetArgs `
-            -NoNewWindow `
-            -Wait `
-            -PassThru
-
-        Write-Log `
-            "Primeira execução do Winget retornou ExitCode=$($process.ExitCode)." `
-            "INFO"
-
-
-        # ============================================================
-        # 6. SE O UPGRADE FALHOU, REPARAR MICROSOFT.WINGET.SOURCE
-        # ============================================================
-
-        if ($process.ExitCode -ne 0) {
-
-            Write-Host ""
-
-            Show-Header `
-                -Text "Winget apresentou erro. Tentando reparar a origem..." `
-                -Color $Yellow
-
-            Write-Log `
-                "Winget falhou com ExitCode=$($process.ExitCode). Tentando reparar Microsoft.Winget.Source." `
-                "WARN"
-
-            try {
-
-                # ====================================================
-                # 6.1 LOCALIZAR O MANIFESTO DA SOURCE
-                # ====================================================
-
-                $sourceManifest = Get-ChildItem `
-                    "C:\Program Files\WindowsApps\Microsoft.Winget.Source_*\AppXManifest.xml" `
-                    -ErrorAction SilentlyContinue |
-                    Sort-Object LastWriteTime -Descending |
-                    Select-Object -First 1 -ExpandProperty FullName
-
-                if (-not $sourceManifest) {
-
-                    throw "Manifesto Microsoft.Winget.Source não encontrado."
-                }
-
-                Write-Host "- Registrando novamente Microsoft.Winget.Source..."
-
-                Write-Log `
-                    "Manifesto encontrado: $sourceManifest" `
-                    "INFO"
-
-
-                # ====================================================
-                # 6.2 USAR WINDOWS POWERSHELL 5.1 PARA ADD-APPXPACKAGE
-                #
-                # O Guardian roda no PowerShell 7.
-                # O módulo Appx/Add-AppxPackage será executado
-                # separadamente pelo Windows PowerShell 5.1.
-                # ====================================================
-
-                $windowsPowerShell = `
-                    "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
-
-                if (-not (Test-Path $windowsPowerShell)) {
-                    throw "Windows PowerShell 5.1 não encontrado em $windowsPowerShell"
-                }
+            if (Test-Path $windowsPowerShell) {
 
                 $escapedManifest = $sourceManifest.Replace("'", "''")
 
@@ -237,97 +100,128 @@
                     -Wait `
                     -PassThru
 
-                if ($registerProcess.ExitCode -ne 0) {
+                if ($registerProcess.ExitCode -eq 0) {
 
-                    throw `
-                        "Windows PowerShell não conseguiu registrar Microsoft.Winget.Source. ExitCode=$($registerProcess.ExitCode)"
+                    Write-Log `
+                        "Microsoft.Winget.Source registrado via Windows PowerShell 5.1." `
+                        "INFO"
                 }
+                else {
 
-                Write-Log `
-                    "Microsoft.Winget.Source registrado novamente via Windows PowerShell 5.1." `
-                    "INFO"
-
-
-                # ====================================================
-                # 6.3 RESETAR AS SOURCES APÓS O REGISTRO
-                # ====================================================
-
-                Write-Host "- Reconstruindo fontes do Winget..."
-
-                $resetProcess = Start-Process `
-                    -FilePath $wingetExe `
-                    -ArgumentList @(
-                        "source",
-                        "reset",
-                        "--force"
-                    ) `
-                    -NoNewWindow `
-                    -Wait `
-                    -PassThru
-
-                Write-Log `
-                    "Source reset após registro retornou ExitCode=$($resetProcess.ExitCode)." `
-                    "INFO"
-
-
-                # ====================================================
-                # 6.4 ATUALIZAR AS SOURCES NOVAMENTE
-                # ====================================================
-
-                Write-Host "- Atualizando fontes após o reparo..."
-
-                $repairSource = Start-Process `
-                    -FilePath $wingetExe `
-                    -ArgumentList $sourceArgs `
-                    -NoNewWindow `
-                    -Wait `
-                    -PassThru
-
-                Write-Log `
-                    "Source update após reparo retornou ExitCode=$($repairSource.ExitCode)." `
-                    "INFO"
-
-
-                # ====================================================
-                # 6.5 SEGUNDA TENTATIVA DO UPGRADE
-                # ====================================================
-
-                Write-Host ""
-                Write-Host "- Tentando novamente a atualização via Winget..."
-
-                Write-Log `
-                    "Executando segunda tentativa de atualização via Winget." `
-                    "INFO"
-
-                $process = Start-Process `
-                    -FilePath $wingetExe `
-                    -ArgumentList $wingetArgs `
-                    -NoNewWindow `
-                    -Wait `
-                    -PassThru
-
-                Write-Log `
-                    "Segunda execução do Winget retornou ExitCode=$($process.ExitCode)." `
-                    "INFO"
+                    Write-Log `
+                        "Registro de Microsoft.Winget.Source retornou ExitCode=$($registerProcess.ExitCode)." `
+                        "WARN"
+                }
             }
-            catch {
-
-                Show-Header `
-                    -Text "Falha ao reparar Microsoft.Winget.Source: $_" `
-                    -Color $Red
+            else {
 
                 Write-Log `
-                    ("Falha ao reparar Microsoft.Winget.Source: {0}" -f $_) `
-                    "ERROR"
+                    "Windows PowerShell 5.1 não encontrado." `
+                    "WARN"
+            }
+        }
+        else {
+
+            Write-Log `
+                "Manifesto Microsoft.Winget.Source não encontrado." `
+                "WARN"
+        }
+
+
+        # ============================================================
+        # 4. RECONSTRUIR AS FONTES
+        # ============================================================
+
+        Write-Host "- Verificando fontes do Winget..."
+        Write-Log "Reconstruindo fontes do Winget." "INFO"
+
+        $resetProcess = Start-Process `
+            -FilePath $wingetExe `
+            -ArgumentList @(
+                "source",
+                "reset",
+                "--force"
+            ) `
+            -NoNewWindow `
+            -Wait `
+            -PassThru
+
+        Write-Log `
+            "Winget source reset retornou ExitCode=$($resetProcess.ExitCode)." `
+            "INFO"
+
+
+        # ============================================================
+        # 5. ATUALIZAR AS FONTES
+        # ============================================================
+
+        $sourceArgs = @(
+            "source",
+            "update",
+            "--disable-interactivity"
+        )
+
+        $sourceProcess = Start-Process `
+            -FilePath $wingetExe `
+            -ArgumentList $sourceArgs `
+            -NoNewWindow `
+            -Wait `
+            -PassThru
+
+        Write-Log `
+            "Winget source update retornou ExitCode=$($sourceProcess.ExitCode)." `
+            "INFO"
+
+        if ($sourceProcess.ExitCode -ne 0) {
+
+            Show-Header `
+                -Text "Não foi possível atualizar as fontes do Winget." `
+                -Color $Yellow
+
+            Write-Log `
+                "Falha ao atualizar fontes do Winget. ExitCode=$($sourceProcess.ExitCode)." `
+                "WARN"
+
+            return [PSCustomObject]@{
+                MensagemTecnica = "Falha ao atualizar fontes do Winget. ExitCode=$($sourceProcess.ExitCode)"
+                ExitCode        = $sourceProcess.ExitCode
             }
         }
 
 
         # ============================================================
-        # 7. RESULTADO FINAL
+        # 6. ATUALIZAR OS PROGRAMAS
         # ============================================================
 
         Write-Host ""
+        Write-Host "- Atualizando aplicativos via Winget..."
+
+        Write-Log `
+            "Iniciando atualização de aplicativos via Winget." `
+            "INFO"
+
+        $wingetArgs = @(
+            "upgrade",
+            "--all",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+            "--silent",
+            "--disable-interactivity"
+        )
+
+        $process = Start-Process `
+            -FilePath $wingetExe `
+            -ArgumentList $wingetArgs `
+            -NoNewWindow `
+            -Wait `
+            -PassThru
+
+        Write-Host ""
+
+
+        # ============================================================
+        # 7. RESULTADO
+        # ============================================================
 
         if ($process.ExitCode -ne 0) {
 
@@ -340,10 +234,8 @@
                 "WARN"
 
             return [PSCustomObject]@{
-                MensagemTecnica = `
-                    "Winget terminou com erro. ExitCode=$($process.ExitCode)"
-
-                ExitCode = $process.ExitCode
+                MensagemTecnica = "Winget terminou com erro. ExitCode=$($process.ExitCode)"
+                ExitCode        = $process.ExitCode
             }
         }
 
