@@ -6,32 +6,7 @@
 
     try {
 
-        # ============================================================
-        # LOCALIZAR WINGET
-        # ============================================================
-
-        $wingetExe = $null
-
-        # 1. Primeiro tenta pelo método normal
-        $wingetCommand = Get-Command winget.exe -ErrorAction SilentlyContinue
-
-        if ($wingetCommand) {
-            $wingetExe = $wingetCommand.Source
-        }
-
-        # 2. Se não encontrou, procura o executável real no WindowsApps
-        if (-not $wingetExe) {
-
-            $wingetExe = Get-ChildItem `
-                "C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_*\winget.exe" `
-                -ErrorAction SilentlyContinue |
-                Where-Object { $_.Length -gt 0 } |
-                Sort-Object LastWriteTime -Descending |
-                Select-Object -First 1 -ExpandProperty FullName
-        }
-
-        # 3. Se ainda não encontrou, ignora a fase
-        if (-not $wingetExe) {
+        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 
             Show-Header -Text "Winget não está disponível. Phase ignorada." -Color $Yellow
             Write-Log "Winget não encontrado. Phase ignorada." "WARN"
@@ -43,11 +18,7 @@
         }
 
         Write-Host "- Atualizando aplicativos via Winget..."
-        Write-Log "Iniciando atualização de aplicativos via Winget: $wingetExe" "INFO"
-
-        # ============================================================
-        # EXECUTAR WINGET
-        # ============================================================
+        Write-Log  "Iniciando atualização de aplicativos via Winget." "INFO"
 
         $wingetArgs = @(
             "upgrade", "--all",
@@ -57,8 +28,7 @@
             "--disable-interactivity"
         )
 
-        $process = Start-Process `
-            -FilePath $wingetExe `
+        $process = Start-Process winget `
             -ArgumentList $wingetArgs `
             -NoNewWindow `
             -Wait `
