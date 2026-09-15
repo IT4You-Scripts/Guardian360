@@ -105,7 +105,6 @@ if (-not (Test-Winget)) {
 
     Write-Host "  → Winget não disponível. Tentando registrar o App Installer..." -ForegroundColor Yellow
 
-    # Forçar registro do App Installer
     try {
         Add-AppxPackage `
             -RegisterByFamilyName `
@@ -150,7 +149,6 @@ if (-not (Test-Winget)) {
         2>$null
 
     if (Test-Path $p) {
-
         Add-AppxPackage `
             -Path $p `
             2>$null
@@ -167,13 +165,11 @@ if (-not (Test-Winget)) {
 for ($tentativa = 1; $tentativa -le 3; $tentativa++) {
 
     if (Test-Winget) {
-
         $WingetStatus = "OK"
         break
     }
 
     if ($tentativa -lt 3) {
-
         Write-Host "  → Aguardando Winget ficar disponível... tentativa $tentativa/3" -ForegroundColor Yellow
         Start-Sleep -Seconds 5
     }
@@ -195,13 +191,14 @@ function Show-ProgressBar {
     Write-Host ("`r[${bar}] ${Percent}% ") -NoNewline -ForegroundColor Cyan
 }
 
+
 Step "Instalando PowerShell 7..."
 
 $pwshPath = "C:\Program Files\PowerShell\7\pwsh.exe"
 
 
 # -------------------------------------------------
-# Se já existe, não precisa reinstalar
+# 1. Verificar instalação real
 # -------------------------------------------------
 
 if (Test-Path $pwshPath) {
@@ -210,17 +207,19 @@ if (Test-Path $pwshPath) {
     $PowerShellStatus = "OK"
 }
 
-# -------------------------------------------------
-# Instalar somente se Winget estiver confirmado
-# -------------------------------------------------
-
-elseif ($WingetStatus -eq "OK") {
+else {
 
     Show-ProgressBar -Percent 5
 
-    for ($tentativaPS = 1; $tentativaPS -le 3; $tentativaPS++) {
+    # -------------------------------------------------
+    # 2. Primeira tentativa pelo Winget
+    # -------------------------------------------------
 
-        # Atualizar novamente o caminho do Winget
+    if ($WingetStatus -eq "OK") {
+
+        Write-Host ""
+        Write-Host "  → Tentando instalar PowerShell 7 pelo Winget..." -ForegroundColor White
+
         $WingetExe = Get-WingetPath
 
         if ($WingetExe) {
@@ -236,32 +235,111 @@ elseif ($WingetStatus -eq "OK") {
                 | Out-Null 2>&1
         }
 
+        Start-Sleep -Seconds 3
+    }
+
+
+    # -------------------------------------------------
+    # 3. Verificar instalação física
+    # -------------------------------------------------
+
+    if (Test-Path $pwshPath) {
+
+        $PowerShellStatus = "OK"
+    }
+
+    else {
+
+        # -------------------------------------------------
+        # 4. FALLBACK — MSI oficial do PowerShell 7
+        # -------------------------------------------------
+
+        Write-Host "  → PowerShell 7 não foi instalado pelo Winget." -ForegroundColor Yellow
+        Write-Host "  → Instalando diretamente pelo MSI oficial..." -ForegroundColor Yellow
+
+        try {
+
+            $releaseApi = "https://api.github.com/repos/PowerShell/PowerShell/releases/latest"
+
+            $release = Invoke-RestMethod `
+                -Uri $releaseApi `
+                -UseBasicParsing `
+                -ErrorAction Stop
+
+            $msiAsset = $release.assets |
+                Where-Object {
+                    $_.name -match '^PowerShell-[0-9]+\.[0-9]+\.[0-9]+-win-x64\.msi$'
+                } |
+                Select-Object -First 1
+
+            if ($msiAsset) {
+
+                $msiPath = Join-Path $env:TEMP $msiAsset.name
+
+                Remove-Item `
+                    $msiPath `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+
+                Show-ProgressBar -Percent 20
+
+                Invoke-WebRequest `
+                    -Uri $msiAsset.browser_download_url `
+                    -OutFile $msiPath `
+                    -UseBasicParsing `
+                    -ErrorAction Stop
+
+                Show-ProgressBar -Percent 50
+
+                if (Test-Path $msiPath) {
+
+                    $msiArgs = @(
+                        "/i"
+                        "`"$msiPath`""
+                        "/qn"
+                        "/norestart"
+                        "ADD_PATH=1"
+                        "REGISTER_MANIFEST=1"
+                        "USE_MU=1"
+                        "ENABLE_MU=1"
+                    )
+
+                    $msiProcess = Start-Process `
+                        -FilePath "msiexec.exe" `
+                        -ArgumentList $msiArgs `
+                        -Wait `
+                        -PassThru `
+                        -WindowStyle Hidden
+
+                    Show-ProgressBar -Percent 80
+
+                    Start-Sleep -Seconds 3
+                }
+
+                Remove-Item `
+                    $msiPath `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+            }
+        }
+        catch {
+            # Mantém o script silencioso.
+            # O resultado real será validado abaixo.
+        }
+
+
+        # -------------------------------------------------
+        # 5. Validação final
+        # -------------------------------------------------
+
         if (Test-Path $pwshPath) {
 
             $PowerShellStatus = "OK"
-            break
-        }
-
-        if ($tentativaPS -lt 3) {
-
-            Write-Host ""
-            Write-Host "  → PowerShell 7 ainda não foi confirmado. Nova tentativa em 5 segundos..." -ForegroundColor Yellow
-
-            Start-Sleep -Seconds 5
         }
     }
 
 
-    foreach ($percent in 20,40,60,80,100) {
-        Start-Sleep -Milliseconds 250
-        Show-ProgressBar -Percent $percent
-    }
-}
-
-else {
-
-    Write-Host ""
-    Write-Host "  → PowerShell 7 não pode ser instalado porque o Winget não ficou disponível." -ForegroundColor Red
+    Show-ProgressBar -Percent 100
 }
 
 Write-Host ""
@@ -273,14 +351,23 @@ Write-Host ""
 
 Step "Atualizando PATH..."
 
-$envPath = [Environment]::GetEnvironmentVariable("Path","Machine")
-$pwshDir = Split-Path $pwshPath
+if (Test-Path $pwshPath) {
 
-if ($envPath -notlike "*$pwshDir*") {
-    [Environment]::SetEnvironmentVariable("Path","$envPath;$pwshDir","Machine")
+    $envPath = [Environment]::GetEnvironmentVariable("Path","Machine")
+    $pwshDir = Split-Path $pwshPath
+
+    if ($envPath -notlike "*$pwshDir*") {
+
+        [Environment]::SetEnvironmentVariable(
+            "Path",
+            "$envPath;$pwshDir",
+            "Machine"
+        )
+    }
+
+    $PathStatus = "OK"
 }
 
-$PathStatus = "OK"
 
 # =====================================
 # ALIAS
@@ -288,15 +375,22 @@ $PathStatus = "OK"
 
 Step "Criando alias..."
 
-$profilePath = "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
+if (Test-Path $pwshPath) {
 
-if (-not (Test-Path $profilePath)) {
-    New-Item -ItemType File -Path $profilePath -Force | Out-Null
+    $profilePath = "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
+
+    if (-not (Test-Path $profilePath)) {
+        New-Item -ItemType File -Path $profilePath -Force | Out-Null
+    }
+
+    "Set-Alias powershell '$pwshPath'" |
+        Out-File `
+            -FilePath $profilePath `
+            -Append
+
+    $AliasStatus = "OK"
 }
 
-"Set-Alias powershell '$pwshPath'" | Out-File -FilePath $profilePath -Append
-
-$AliasStatus = "OK"
 
 # =====================================
 # ASSOCIAR .ps1
@@ -304,10 +398,17 @@ $AliasStatus = "OK"
 
 Step "Associando .ps1 ao PowerShell 7..."
 
-cmd.exe /c "assoc .ps1=Microsoft.PowerShellScript.1" 2>&1 | Out-Null
-cmd.exe /c "ftype Microsoft.PowerShellScript.1=\"$pwshPath\" \"%1\" %*" 2>&1 | Out-Null
+if (Test-Path $pwshPath) {
 
-$AssocStatus = "OK"
+    cmd.exe /c "assoc .ps1=Microsoft.PowerShellScript.1" 2>&1 |
+        Out-Null
+
+    cmd.exe /c "ftype Microsoft.PowerShellScript.1=\"$pwshPath\" \"%1\" %*" 2>&1 |
+        Out-Null
+
+    $AssocStatus = "OK"
+}
+
 
 # =====================================
 # EXECUTION POLICY
@@ -321,6 +422,7 @@ Set-ExecutionPolicy Undefined -Scope Process      -Force
 Set-ExecutionPolicy RemoteSigned -Force
 
 $PolicyStatus = "OK"
+
 
 # =====================================
 # LIMPEZA FINAL
@@ -340,12 +442,15 @@ ForEach-Object {
     
     if ($p -eq "") {
         $fullTask = "\$($_.TaskName)"
-    } else {
+    }
+    else {
         $fullTask = "$p\$($_.TaskName)"
     }
 
-    schtasks /Delete /TN $fullTask /F | Out-Null
+    schtasks /Delete /TN $fullTask /F |
+        Out-Null
 }
+
 
 # =====================================
 # FINAL SUMMARY — BIG CYAN BOX
@@ -355,22 +460,50 @@ $width = 42
 $top    = "╔" + ("═" * $width) + "╗"
 $bottom = "╚" + ("═" * $width) + "╝"
 
+
 function StatusLine {
     param($label, $status)
 
     if ($status -eq "OK") {
+
         $txt = "→ $label OK"
-        Write-Host ("║  " + $txt + (" " * ($width - 2 - $txt.Length)) + "║") -ForegroundColor Cyan
-    } else {
+
+        Write-Host (
+            "║  " +
+            $txt +
+            (" " * ($width - 2 - $txt.Length)) +
+            "║"
+        ) -ForegroundColor Cyan
+    }
+    else {
+
         $txt = "→ $label FALHOU"
-        Write-Host ("║  " + $txt + (" " * ($width - 2 - $txt.Length)) + "║") -ForegroundColor Red
+
+        Write-Host (
+            "║  " +
+            $txt +
+            (" " * ($width - 2 - $txt.Length)) +
+            "║"
+        ) -ForegroundColor Red
     }
 }
 
+
 Write-Host ""
 Write-Host $top -ForegroundColor Cyan
-Write-Host ("║  RESUMO FINAL" + (" " * 28) + "║") -ForegroundColor Cyan
-Write-Host ("║" + (" " * $width) + "║") -ForegroundColor Cyan
+
+Write-Host (
+    "║  RESUMO FINAL" +
+    (" " * 28) +
+    "║"
+) -ForegroundColor Cyan
+
+Write-Host (
+    "║" +
+    (" " * $width) +
+    "║"
+) -ForegroundColor Cyan
+
 
 StatusLine "Winget           " $WingetStatus
 StatusLine "PowerShell 7     " $PowerShellStatus
@@ -379,7 +512,18 @@ StatusLine "Alias            " $AliasStatus
 StatusLine "Associação .ps1  " $AssocStatus
 StatusLine "Políticas        " $PolicyStatus
 
-Write-Host ("║" + (" " * $width) + "║") -ForegroundColor Cyan
-Write-Host ("║  Ambiente pronto para o Guardian 360." + (" " * 4) + "║") -ForegroundColor Cyan
+
+Write-Host (
+    "║" +
+    (" " * $width) +
+    "║"
+) -ForegroundColor Cyan
+
+Write-Host (
+    "║  Ambiente pronto para o Guardian 360." +
+    (" " * 4) +
+    "║"
+) -ForegroundColor Cyan
+
 Write-Host $bottom -ForegroundColor Cyan
 Write-Host ""
