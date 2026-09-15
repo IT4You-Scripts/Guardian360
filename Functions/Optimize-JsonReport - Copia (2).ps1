@@ -1116,37 +1116,23 @@ Write-Host ""
 $apiUrl = "https://guardian.it4you.com.br/api/insert-single"
 
 
-$jsonParaApi = Get-Content $nomeOut -Raw -Encoding UTF8
+try {
+    $jsonParaApi = Get-Content $nomeOut -Raw -Encoding UTF8
 
-$apiIntegrada = $false
-$maxTentativasApi = 3
+    $response = Invoke-RestMethod `
+        -Uri $apiUrl `
+        -Method POST `
+        -Body $jsonParaApi `
+        -ContentType "application/json; charset=utf-8"`
+        -TimeoutSec 10
 
-for ($tentativaApi = 1; $tentativaApi -le $maxTentativasApi; $tentativaApi++) {
-    try {
-        $response = Invoke-RestMethod `
-            -Uri $apiUrl `
-            -Method POST `
-            -Body $jsonParaApi `
-            -ContentType "application/json; charset=utf-8" `
-            -TimeoutSec 10
+    Write-Host "🚀 Integração realizada com sucesso via API!" -ForegroundColor Cyan
+    #Write-Host "  computador_id : $($response.computador_id)" -ForegroundColor Gray
+    #Write-Host "  vistoria_id   : $($response.vistoria_id)" -ForegroundColor Gray
+    #Write-Host "  nota saúde    : $($jsonRaw.SaudeGeral.Nota) - $($jsonRaw.SaudeGeral.Classificacao)" -ForegroundColor Gray
 
-        Write-Host "🚀 Integração realizada com sucesso via API!" -ForegroundColor Cyan
-        $apiIntegrada = $true
-        break
-
-    } catch {
-        Write-Host "⚠ Falha ao enviar para a API - tentativa $tentativaApi/$maxTentativasApi`: $($_.Exception.Message)" -ForegroundColor Yellow
-
-        if ($tentativaApi -lt $maxTentativasApi) {
-            $esperaApi = if ($tentativaApi -eq 1) { 5 } else { 10 }
-            Write-Host "[API] Nova tentativa em $esperaApi segundos..." -ForegroundColor Yellow
-            Start-Sleep -Seconds $esperaApi
-        }
-    }
-}
-
-if (-not $apiIntegrada) {
-    Write-Host "⚠ Não foi possível integrar com a API após 3 tentativas." -ForegroundColor Yellow
+} catch {
+    # Write-Host "`n⚠ Falha ao enviar para a API: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
 Write-Host ""
