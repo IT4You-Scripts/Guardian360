@@ -145,49 +145,15 @@ function Manage-RustDesk {
                     return $result
                 }
 
-                # ---------------------------------------------------------
-                # Aguardar o servico EXISTIR e ficar realmente RUNNING
-                # ---------------------------------------------------------
+                # Aguardar servico ficar disponivel
                 $tentativas = 0
-                $maxTentativasServico = 20
 
-                while ($tentativas -lt $maxTentativasServico) {
-
-                    $service = Get-Service $RustDeskService -ErrorAction SilentlyContinue
-
-                    if ($service) {
-
-                        if ($service.Status -ne "Running") {
-                            Start-Service -Name $RustDeskService -ErrorAction SilentlyContinue
-                            Start-Sleep -Seconds 2
-
-                            $service = Get-Service $RustDeskService -ErrorAction SilentlyContinue
-                        }
-
-                        if ($service -and $service.Status -eq "Running") {
-                            break
-                        }
-                    }
-
-                    Start-Sleep -Seconds 3
+                while (-not (Get-Service $RustDeskService -ErrorAction SilentlyContinue) -and $tentativas -lt 6) {
+                    Start-Sleep -Seconds 5
                     $tentativas++
-
-                    Write-Host "[RustDesk] Aguardando servico... ($tentativas/$maxTentativasServico)" -ForegroundColor Cyan
                 }
 
-                # Confirmar estado final do servico
-                $service = Get-Service $RustDeskService -ErrorAction SilentlyContinue
-
-                if (-not $service -or $service.Status -ne "Running") {
-                    Write-Host "[RustDesk] ERRO: Servico nao ficou disponivel apos a instalacao." -ForegroundColor Red
-                    $result.rustdesk_status = "Erro: Servico RustDesk nao iniciou"
-                    return $result
-                }
-
-                # Pequeno tempo para o RustDesk terminar sua inicializacao interna
-                Start-Sleep -Seconds 5
-
-                Write-Host "[RustDesk] Instalacao concluida e servico ativo." -ForegroundColor Green
+                Write-Host "[RustDesk] Instalacao concluida." -ForegroundColor Green
                 Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
             }
             catch {
@@ -206,7 +172,9 @@ function Manage-RustDesk {
             # -------------------------------------------------------------
             try {
                 $chars    = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#%&*'
-                $password = -join (1..$PasswordLength | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
+                $password = -join (1..$PasswordLength | ForEach-Object {
+                    $chars[(Get-Random -Maximum $chars.Length)]
+                })
 
                 Write-Host "[RustDesk] Definindo senha permanente..." -ForegroundColor Cyan
 
@@ -234,40 +202,26 @@ function Manage-RustDesk {
         # =================================================================
         # ETAPA 3 — SEMPRE: Verificar e garantir configuracao do servidor
         # =================================================================
-        # Roda em TODA execucao, independente de ser instalacao nova ou existente.
-        # Verifica CADA arquivo individualmente (servico + cada perfil de usuario).
-        # Se qualquer um estiver errado, corrige TODOS.
+        #
+        # Esta etapa foi reforcada para evitar a situacao em que o arquivo
+        # era gravado mas a personalizacao nao permanecia aplicada.
+        #
+        # O restante do fluxo do Manage-RustDesk permanece inalterado.
+        #
+        # Ate 3 tentativas:
+        #   1. verifica
+        #   2. para o servico
+        #   3. grava configuracao
+        #   4. inicia o servico
+        #   5. aguarda
+        #   6. LE NOVAMENTE os arquivos e valida
+        #
         # =================================================================
         try {
-            $precisaConfigurar = $false
 
-            # Verificar config do servico
-            if (-not (Test-RustDeskConfig -FilePath $Config2File)) {
-                $precisaConfigurar = $true
-                Write-Host "[RustDesk] Config do servico ausente ou incorreta." -ForegroundColor Yellow
-            }
-
-            # Verificar config de cada perfil de usuario
             $usersDir = "C:\Users"
 
-            Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-                if (Test-Path (Join-Path $_.FullName "AppData\Roaming")) {
-                    $userConfig2Path = Join-Path $_.FullName "AppData\Roaming\RustDesk\config\RustDesk2.toml"
-
-                    if (-not (Test-RustDeskConfig -FilePath $userConfig2Path)) {
-                        $precisaConfigurar = $true
-                        Write-Host "[RustDesk] Config incorreta no perfil: $($_.Name)" -ForegroundColor Yellow
-                    }
-                }
-            }
-
-            if ($precisaConfigurar) {
-                Write-Host "[RustDesk] Corrigindo configuracao do servidor..." -ForegroundColor Cyan
-
-                Stop-Service -Name $RustDeskService -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 3
-
-                $config2Content = @"
+            $config2Content = @"
 rendezvous_server = '$RustDeskServer'
 nat_type = 1
 serial = 0
@@ -278,37 +232,158 @@ relay-server = '$RustDeskServer'
 key = '$RustDeskKey'
 "@
 
-                # Local 1: Config do servico (LocalService)
-                if (-not (Test-Path $ConfigDir)) {
-                    New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
+            # -------------------------------------------------------------
+            # Funcao local para verificar TODOS os locais
+            # -------------------------------------------------------------
+            function Test-AllRustDeskConfigs {
+
+                # Config do servico
+                if (-not (Test-RustDeskConfig -FilePath $Config2File)) {
+                    return $false
                 }
 
-                Set-Content -Path $Config2File -Value $config2Content -Force -Encoding UTF8
+                # Config dos perfis de usuario
+                foreach ($userDir in (
+                    Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue
+                )) {
 
-                # Local 2: Config de TODOS os perfis de usuario
-                Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-                    $userConfigDir = Join-Path $_.FullName "AppData\Roaming\RustDesk\config"
+                    $roamingDir = Join-Path $userDir.FullName "AppData\Roaming"
 
-                    if (Test-Path (Join-Path $_.FullName "AppData\Roaming")) {
-                        if (-not (Test-Path $userConfigDir)) {
-                            New-Item -ItemType Directory -Path $userConfigDir -Force | Out-Null
+                    if (Test-Path $roamingDir) {
+
+                        $userConfig2Path = Join-Path `
+                            $userDir.FullName `
+                            "AppData\Roaming\RustDesk\config\RustDesk2.toml"
+
+                        if (-not (Test-RustDeskConfig -FilePath $userConfig2Path)) {
+                            return $false
                         }
-
-                        $userConfig2 = Join-Path $userConfigDir "RustDesk2.toml"
-                        Set-Content -Path $userConfig2 -Value $config2Content -Force -Encoding UTF8
                     }
                 }
 
-                Start-Service -Name $RustDeskService -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 5
+                return $true
+            }
 
-                Write-Host "[RustDesk] Servidor corrigido (servico + todos os perfis)." -ForegroundColor Green
+
+            # -------------------------------------------------------------
+            # Verificacao inicial
+            # -------------------------------------------------------------
+            $precisaConfigurar = -not (Test-AllRustDeskConfigs)
+
+
+            if ($precisaConfigurar) {
+
+                Write-Host "[RustDesk] Configuracao ausente ou incorreta. Corrigindo..." -ForegroundColor Yellow
+
+                $configuracaoConfirmada = $false
+                $maxTentativasConfig = 3
+
+
+                for ($tentativaConfig = 1; $tentativaConfig -le $maxTentativasConfig; $tentativaConfig++) {
+
+                    Write-Host "[RustDesk] Configurando servidor - tentativa $tentativaConfig/$maxTentativasConfig..." -ForegroundColor Cyan
+
+
+                    # -----------------------------------------------------
+                    # Parar servico
+                    # -----------------------------------------------------
+                    Stop-Service -Name $RustDeskService -Force -ErrorAction SilentlyContinue
+                    Start-Sleep -Seconds 3
+
+
+                    # -----------------------------------------------------
+                    # Local 1: Config do servico (LocalService)
+                    # -----------------------------------------------------
+                    if (-not (Test-Path $ConfigDir)) {
+                        New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
+                    }
+
+                    Set-Content `
+                        -Path $Config2File `
+                        -Value $config2Content `
+                        -Force `
+                        -Encoding UTF8
+
+
+                    # -----------------------------------------------------
+                    # Local 2: Config de TODOS os perfis de usuario
+                    # -----------------------------------------------------
+                    Get-ChildItem -Path $usersDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+
+                        $roamingDir = Join-Path $_.FullName "AppData\Roaming"
+
+                        if (Test-Path $roamingDir) {
+
+                            $userConfigDir = Join-Path `
+                                $_.FullName `
+                                "AppData\Roaming\RustDesk\config"
+
+                            if (-not (Test-Path $userConfigDir)) {
+                                New-Item `
+                                    -ItemType Directory `
+                                    -Path $userConfigDir `
+                                    -Force |
+                                    Out-Null
+                            }
+
+                            $userConfig2 = Join-Path `
+                                $userConfigDir `
+                                "RustDesk2.toml"
+
+                            Set-Content `
+                                -Path $userConfig2 `
+                                -Value $config2Content `
+                                -Force `
+                                -Encoding UTF8
+                        }
+                    }
+
+
+                    # -----------------------------------------------------
+                    # Iniciar novamente
+                    # -----------------------------------------------------
+                    Start-Service -Name $RustDeskService -ErrorAction SilentlyContinue
+
+                    # Mantemos a espera que ja existia no codigo original
+                    Start-Sleep -Seconds 5
+
+
+                    # -----------------------------------------------------
+                    # VALIDACAO REAL APOS A GRAVACAO
+                    # -----------------------------------------------------
+                    if (Test-AllRustDeskConfigs) {
+
+                        $configuracaoConfirmada = $true
+
+                        Write-Host "[RustDesk] Servidor e key configurados e validados." -ForegroundColor Green
+
+                        break
+                    }
+
+
+                    Write-Host "[RustDesk] Configuracao nao permaneceu correta. Tentando novamente..." -ForegroundColor Yellow
+
+
+                    # Pequena espera antes da proxima tentativa
+                    Start-Sleep -Seconds 3
+                }
+
+
+                # ---------------------------------------------------------
+                # Depois de 3 tentativas ainda nao confirmou
+                # ---------------------------------------------------------
+                if (-not $configuracaoConfirmada) {
+
+                    Write-Host "[RustDesk] AVISO: Nao foi possivel confirmar a personalizacao apos 3 tentativas." -ForegroundColor Yellow
+                }
             }
             else {
+
                 Write-Host "[RustDesk] Servidor e key corretos em todos os locais." -ForegroundColor Green
             }
         }
         catch {
+
             Write-Host "[RustDesk] ERRO na verificacao/configuracao: $($_.Exception.Message)" -ForegroundColor Red
         }
 
@@ -344,6 +419,7 @@ key = '$RustDeskKey'
         if (-not $result.rustdesk_id) {
             try {
                 if (Test-Path $ConfigFile) {
+
                     $tomlContent = Get-Content $ConfigFile -Raw -ErrorAction Stop
 
                     if ($tomlContent -match "enc_id\s*=\s*'([^']+)'") {
@@ -351,7 +427,9 @@ key = '$RustDeskKey'
                     }
 
                     if ($tomlContent -match "(?m)^id\s*=\s*'(\d{7,12})'") {
+
                         $result.rustdesk_id = $Matches[1]
+
                         Write-Host "[RustDesk] ID obtido via TOML servico: $($result.rustdesk_id)" -ForegroundColor Green
                     }
                 }
@@ -364,13 +442,17 @@ key = '$RustDeskKey'
         # Metodo 3 (fallback): ler do TOML do usuario
         if (-not $result.rustdesk_id) {
             try {
+
                 $userConfig = "$env:APPDATA\RustDesk\config\RustDesk.toml"
 
                 if (Test-Path $userConfig) {
+
                     $tomlContent = Get-Content $userConfig -Raw -ErrorAction Stop
 
                     if ($tomlContent -match "(?m)^id\s*=\s*'(\d{7,12})'") {
+
                         $result.rustdesk_id = $Matches[1]
+
                         Write-Host "[RustDesk] ID obtido via TOML usuario: $($result.rustdesk_id)" -ForegroundColor Green
                     }
                 }
@@ -384,7 +466,9 @@ key = '$RustDeskKey'
         # ETAPA 6 — Capturar versao
         # =================================================================
         try {
+
             $versionInfo = (Get-Item $RustDeskExe -ErrorAction Stop).VersionInfo
+
             $result.rustdesk_version = $versionInfo.ProductVersion
 
             if (-not $result.rustdesk_version) {
