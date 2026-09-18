@@ -12,14 +12,12 @@
 
         $wingetExe = $null
 
-        # Primeiro tenta localizar normalmente
         $wingetCommand = Get-Command winget.exe -ErrorAction SilentlyContinue
 
         if ($wingetCommand) {
             $wingetExe = $wingetCommand.Source
         }
 
-        # Se não encontrou pelo PATH/Alias, procura o executável real
         if (-not $wingetExe) {
 
             $wingetExe = Get-ChildItem `
@@ -30,7 +28,6 @@
                 Select-Object -First 1 -ExpandProperty FullName
         }
 
-        # Winget realmente não existe
         if (-not $wingetExe) {
 
             Show-Header `
@@ -42,7 +39,7 @@
                 "WARN"
 
             return [PSCustomObject]@{
-                MensagemTecnica = "Winget não encontrado. Fase ignorada."
+                MensagemTecnica = "Winget não encontrado."
                 ExitCode        = $null
             }
         }
@@ -64,188 +61,185 @@
 
 
         # ============================================================
-        # 3. REGISTRAR MICROSOFT.WINGET.SOURCE
-        #
-        # O Guardian roda no PowerShell 7.
-        # Add-AppxPackage precisa ser executado pelo
-        # Windows PowerShell 5.1 neste ambiente.
+        # 3. TENTAR REGISTRAR MICROSOFT.WINGET.SOURCE
         # ============================================================
 
         if ($sourceManifest) {
 
-            Write-Host "- Preparando origem do Winget..."
-            Write-Log "Preparando Microsoft.Winget.Source." "INFO"
+            try {
 
-            $windowsPowerShell = `
-                "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+                Write-Host "- Preparando origem do Winget..."
+                Write-Log "Preparando Microsoft.Winget.Source." "INFO"
 
-            if (Test-Path $windowsPowerShell) {
+                $windowsPowerShell = `
+                    "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
 
-                $escapedManifest = $sourceManifest.Replace("'", "''")
+                if (Test-Path $windowsPowerShell) {
 
-                $registerCommand = `
-                    "Add-AppxPackage -DisableDevelopmentMode -Register '$escapedManifest' -ErrorAction Stop"
+                    $escapedManifest = $sourceManifest.Replace("'", "''")
 
-                $registerProcess = Start-Process `
-                    -FilePath $windowsPowerShell `
-                    -ArgumentList @(
-                        "-NoProfile",
-                        "-NonInteractive",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-Command",
-                        $registerCommand
-                    ) `
-                    -NoNewWindow `
-                    -Wait `
-                    -PassThru
+                    $registerCommand = `
+                        "Add-AppxPackage -DisableDevelopmentMode -Register '$escapedManifest' -ErrorAction Stop"
 
-                if ($registerProcess.ExitCode -eq 0) {
+                    $registerProcess = Start-Process `
+                        -FilePath $windowsPowerShell `
+                        -ArgumentList @(
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-Command",
+                            $registerCommand
+                        ) `
+                        -NoNewWindow `
+                        -Wait `
+                        -PassThru
 
                     Write-Log `
-                        "Microsoft.Winget.Source registrado via Windows PowerShell 5.1." `
+                        "Registro Microsoft.Winget.Source retornou ExitCode=$($registerProcess.ExitCode)." `
                         "INFO"
                 }
-                else {
 
-                    Write-Log `
-                        "Registro de Microsoft.Winget.Source retornou ExitCode=$($registerProcess.ExitCode)." `
-                        "WARN"
-                }
             }
-            else {
+            catch {
 
                 Write-Log `
-                    "Windows PowerShell 5.1 não encontrado." `
+                    ("Falha ao registrar Microsoft.Winget.Source: {0}" -f $_) `
                     "WARN"
             }
         }
-        else {
+
+
+        # ============================================================
+        # 4. RECONSTRUIR FONTES (NÃO FATAL)
+        # ============================================================
+
+        try {
+
+            Write-Host "- Verificando fontes do Winget..."
+            Write-Log "Executando source reset." "INFO"
+
+            $resetProcess = Start-Process `
+                -FilePath $wingetExe `
+                -ArgumentList @(
+                    "source",
+                    "reset",
+                    "--force"
+                ) `
+                -NoNewWindow `
+                -Wait `
+                -PassThru
 
             Write-Log `
-                "Manifesto Microsoft.Winget.Source não encontrado." `
+                "Winget source reset retornou ExitCode=$($resetProcess.ExitCode)." `
+                "INFO"
+
+        }
+        catch {
+
+            Write-Log `
+                ("Falha em source reset: {0}" -f $_) `
                 "WARN"
         }
 
 
         # ============================================================
-        # 4. RECONSTRUIR AS FONTES
+        # 5. ATUALIZAR FONTES (NÃO FATAL)
         # ============================================================
 
-        Write-Host "- Verificando fontes do Winget..."
-        Write-Log "Reconstruindo fontes do Winget." "INFO"
+        try {
 
-        $resetProcess = Start-Process `
-            -FilePath $wingetExe `
-            -ArgumentList @(
-                "source",
-                "reset",
-                "--force"
-            ) `
-            -NoNewWindow `
-            -Wait `
-            -PassThru
-
-        Write-Log `
-            "Winget source reset retornou ExitCode=$($resetProcess.ExitCode)." `
-            "INFO"
-
-
-        # ============================================================
-        # 5. ATUALIZAR AS FONTES
-        # ============================================================
-
-        $sourceArgs = @(
-            "source",
-            "update",
-            "--disable-interactivity"
-        )
-
-        $sourceProcess = Start-Process `
-            -FilePath $wingetExe `
-            -ArgumentList $sourceArgs `
-            -NoNewWindow `
-            -Wait `
-            -PassThru
-
-        Write-Log `
-            "Winget source update retornou ExitCode=$($sourceProcess.ExitCode)." `
-            "INFO"
-
-        if ($sourceProcess.ExitCode -ne 0) {
-
-            Show-Header `
-                -Text "Não foi possível atualizar as fontes do Winget." `
-                -Color $Yellow
+            $sourceProcess = Start-Process `
+                -FilePath $wingetExe `
+                -ArgumentList @(
+                    "source",
+                    "update",
+                    "--disable-interactivity"
+                ) `
+                -NoNewWindow `
+                -Wait `
+                -PassThru
 
             Write-Log `
-                "Falha ao atualizar fontes do Winget. ExitCode=$($sourceProcess.ExitCode)." `
-                "WARN"
+                "Winget source update retornou ExitCode=$($sourceProcess.ExitCode)." `
+                "INFO"
 
-            return [PSCustomObject]@{
-                MensagemTecnica = "Falha ao atualizar fontes do Winget. ExitCode=$($sourceProcess.ExitCode)"
-                ExitCode        = $sourceProcess.ExitCode
+            if ($sourceProcess.ExitCode -ne 0) {
+
+                Write-Log `
+                    "Source update falhou. Continuando mesmo assim." `
+                    "WARN"
             }
         }
+        catch {
+
+            Write-Log `
+                ("Erro durante source update: {0}" -f $_) `
+                "WARN"
+        }
 
 
         # ============================================================
-        # 6. ATUALIZAR OS PROGRAMAS
+        # 6. UPGRADE
         # ============================================================
 
         Write-Host ""
         Write-Host "- Atualizando aplicativos via Winget..."
 
         Write-Log `
-            "Iniciando atualização de aplicativos via Winget." `
+            "Iniciando atualização de aplicativos." `
             "INFO"
-
-        $wingetArgs = @(
-            "upgrade",
-            "--all",
-            "--accept-source-agreements",
-            "--accept-package-agreements",
-            "--silent",
-            "--disable-interactivity"
-        )
 
         $process = Start-Process `
             -FilePath $wingetExe `
-            -ArgumentList $wingetArgs `
+            -ArgumentList @(
+                "upgrade",
+                "--all",
+                "--silent",
+                "--disable-interactivity",
+                "--accept-package-agreements",
+                "--accept-source-agreements"
+            ) `
             -NoNewWindow `
             -Wait `
             -PassThru
 
         Write-Host ""
 
+        Write-Log `
+            "Winget upgrade retornou ExitCode=$($process.ExitCode)." `
+            "INFO"
+
 
         # ============================================================
         # 7. RESULTADO
         # ============================================================
 
-        if ($process.ExitCode -ne 0) {
+        switch ($process.ExitCode) {
 
-            Show-Header `
-                -Text "Winget terminou com código $($process.ExitCode)." `
-                -Color $Yellow
+            0 {
 
-            Write-Log `
-                "Winget terminou com código inesperado: $($process.ExitCode)" `
-                "WARN"
+                Write-Log `
+                    "Winget finalizado com sucesso." `
+                    "INFO"
 
-            return [PSCustomObject]@{
-                MensagemTecnica = "Winget terminou com erro. ExitCode=$($process.ExitCode)"
-                ExitCode        = $process.ExitCode
+                return [PSCustomObject]@{
+                    MensagemTecnica = "Winget finalizado com sucesso."
+                    ExitCode        = 0
+                }
             }
-        }
 
-        Write-Log `
-            "Winget finalizado com sucesso." `
-            "INFO"
+            default {
 
-        return [PSCustomObject]@{
-            MensagemTecnica = "Winget finalizado com sucesso. ExitCode=0"
-            ExitCode        = 0
+                Write-Log `
+                    "Winget terminou com ExitCode=$($process.ExitCode). Algumas atualizações podem ter sido concluídas." `
+                    "WARN"
+
+                return [PSCustomObject]@{
+                    MensagemTecnica = "Winget finalizado com sucesso parcial. ExitCode=$($process.ExitCode)"
+                    ExitCode        = $process.ExitCode
+                }
+            }
         }
     }
     catch {
