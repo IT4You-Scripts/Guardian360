@@ -190,227 +190,61 @@
 
 
         # ============================================================
-        # 6. ATUALIZAR OS PROGRAMAS INDIVIDUALMENTE
-        #
-        # Cada aplicativo é atualizado separadamente.
-        # Se um aplicativo falhar, os demais continuam normalmente.
+        # 6. ATUALIZAR OS PROGRAMAS
         # ============================================================
 
         Write-Host ""
-        Write-Host "- Verificando aplicativos com atualização disponível..."
+        Write-Host "- Atualizando aplicativos via Winget..."
 
         Write-Log `
-            "Consultando aplicativos com atualização disponível via Winget." `
+            "Iniciando atualização de aplicativos via Winget." `
             "INFO"
 
-        # Obtém a listagem atual do Winget.
-        # A saída é capturada apenas para descobrir os IDs dos pacotes.
-        $upgradeOutput = & $wingetExe `
-            upgrade `
-            --accept-source-agreements `
-            --disable-interactivity 2>&1
-
-        $upgradeListExitCode = $LASTEXITCODE
-
-        # Exibe a própria listagem do Winget na tela
-        $upgradeOutput | ForEach-Object {
-            Write-Host $_
-        }
-
-        Write-Host ""
-
-        # ------------------------------------------------------------
-        # Extrair IDs da tabela retornada pelo Winget
-        #
-        # Exemplo:
-        #
-        # Nome              ID                  Versão   Disponível Origem
-        # ----------------------------------------------------------------
-        # 7-Zip 24.09       7zip.7zip           24.09    26.00      winget
-        # AnyDesk           AnyDesk.AnyDesk      ...      ...        winget
-        #
-        # As colunas do Winget são separadas por 2 ou mais espaços.
-        # ------------------------------------------------------------
-
-        $packageIds = @()
-
-        foreach ($line in $upgradeOutput) {
-
-            $text = [string]$line
-
-            if ([string]::IsNullOrWhiteSpace($text)) {
-                continue
-            }
-
-            # Ignora cabeçalhos e separadores
-            if ($text -match '^\s*-{3,}') {
-                continue
-            }
-
-            # Divide pelas colunas da tabela
-            $columns = $text.Trim() -split '\s{2,}'
-
-            # Uma linha válida de pacote normalmente possui:
-            # Nome | ID | Versão | Disponível | Origem
-            if ($columns.Count -ge 4) {
-
-                $possibleId = $columns[1].Trim()
-
-                # IDs do Winget não possuem espaços.
-                # Também evita capturar o cabeçalho "ID".
-                if (
-                    $possibleId `
-                    -and
-                    $possibleId -ne "ID" `
-                    -and
-                    $possibleId -match '^[^\s]+$'
-                ) {
-
-                    $packageIds += $possibleId
-                }
-            }
-        }
-
-        # Remove eventuais duplicidades
-        $packageIds = @(
-            $packageIds |
-            Sort-Object -Unique
+        $wingetArgs = @(
+            "upgrade",
+            "--all",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+            "--silent",
+            "--disable-interactivity"
         )
 
+        $process = Start-Process `
+            -FilePath $wingetExe `
+            -ArgumentList $wingetArgs `
+            -NoNewWindow `
+            -Wait `
+            -PassThru
 
-        # ============================================================
-        # 6A. NENHUMA ATUALIZAÇÃO ENCONTRADA
-        # ============================================================
-
-        if ($packageIds.Count -eq 0) {
-
-            Write-Log `
-                "Nenhum aplicativo com atualização disponível foi identificado." `
-                "INFO"
-
-            return [PSCustomObject]@{
-                MensagemTecnica = "Nenhum aplicativo com atualização disponível."
-                ExitCode        = 0
-            }
-        }
-
-
-        # ============================================================
-        # 6B. PROCESSAR CADA APLICATIVO
-        # ============================================================
-
-        Write-Host "- Atualizando $($packageIds.Count) aplicativo(s) individualmente..."
         Write-Host ""
-
-        Write-Log `
-            "$($packageIds.Count) aplicativo(s) serão processados individualmente." `
-            "INFO"
-
-        $sucessos = 0
-        $falhas   = 0
-        $falhasDetalhes = @()
-
-        foreach ($packageId in $packageIds) {
-
-            Write-Host "------------------------------------------------------------"
-            Write-Host "- Atualizando: $packageId"
-            Write-Host "------------------------------------------------------------"
-
-            Write-Log `
-                "Iniciando atualização individual: $packageId" `
-                "INFO"
-
-            $packageArgs = @(
-                "upgrade",
-                "--id",
-                $packageId,
-                "--exact",
-                "--accept-source-agreements",
-                "--accept-package-agreements",
-                "--silent",
-                "--disable-interactivity"
-            )
-
-            $packageProcess = Start-Process `
-                -FilePath $wingetExe `
-                -ArgumentList $packageArgs `
-                -NoNewWindow `
-                -Wait `
-                -PassThru
-
-            $packageExitCode = $packageProcess.ExitCode
-
-            Write-Host ""
-
-            if ($packageExitCode -eq 0) {
-
-                $sucessos++
-
-                Write-Host "[OK] $packageId atualizado com sucesso."
-
-                Write-Log `
-                    "Aplicativo atualizado com sucesso: $packageId" `
-                    "INFO"
-            }
-            else {
-
-                $falhas++
-
-                $falhasDetalhes += `
-                    "$packageId (ExitCode=$packageExitCode)"
-
-                Write-Host `
-                    "[AVISO] Falha ao atualizar $packageId. ExitCode=$packageExitCode"
-
-                Write-Log `
-                    "Falha ao atualizar $packageId. ExitCode=$packageExitCode" `
-                    "WARN"
-            }
-
-            Write-Host ""
-        }
 
 
         # ============================================================
         # 7. RESULTADO
         # ============================================================
 
-        Write-Host "============================================================"
-        Write-Host "- Resultado das atualizações do Winget"
-        Write-Host "============================================================"
-        Write-Host "- Sucesso(s): $sucessos"
-        Write-Host "- Falha(s):   $falhas"
-        Write-Host ""
-
-
-        # Houve pelo menos uma falha.
-        # Os demais aplicativos já foram processados normalmente.
-        if ($falhas -gt 0) {
-
-            $falhasTexto = $falhasDetalhes -join "; "
+        if ($process.ExitCode -ne 0) {
 
             Show-Header `
-                -Text "Winget concluiu com $falhas falha(s), mas continuou as demais atualizações." `
+                -Text "Winget terminou com código $($process.ExitCode)." `
                 -Color $Yellow
 
             Write-Log `
-                "Winget concluiu com falhas parciais. Sucessos=$sucessos; Falhas=$falhas; Detalhes: $falhasTexto" `
+                "Winget terminou com código inesperado: $($process.ExitCode)" `
                 "WARN"
 
             return [PSCustomObject]@{
-                MensagemTecnica = "Winget concluiu parcialmente. Sucessos=$sucessos; Falhas=$falhas; $falhasTexto"
-                ExitCode        = 1
+                MensagemTecnica = "Winget terminou com erro. ExitCode=$($process.ExitCode)"
+                ExitCode        = $process.ExitCode
             }
         }
 
-
-        # Tudo atualizado
         Write-Log `
-            "Winget finalizado com sucesso. Aplicativos atualizados=$sucessos." `
+            "Winget finalizado com sucesso." `
             "INFO"
 
         return [PSCustomObject]@{
-            MensagemTecnica = "Winget finalizado com sucesso. Aplicativos atualizados=$sucessos. ExitCode=0"
+            MensagemTecnica = "Winget finalizado com sucesso. ExitCode=0"
             ExitCode        = 0
         }
     }
