@@ -169,6 +169,15 @@ try {
 
         $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
 
+        # A tarefa principal também deve aparecer com a opção "Oculto" habilitada.
+        $hiddenNode = $settingsNode.SelectSingleNode("*[local-name()='Hidden']")
+        if ($hiddenNode) { $hiddenNode.InnerText = "true" }
+        else {
+            $hiddenEl = $xml.CreateElement("Hidden", $ns)
+            $hiddenEl.InnerText = "true"
+            $settingsNode.AppendChild($hiddenEl) | Out-Null
+        }
+
         $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
         if ($roiNode) { $roiNode.InnerText = "true" }
         else {
