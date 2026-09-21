@@ -56,7 +56,11 @@ if (Test-Path $guardianJsonPath) {
     try {
         $guardianData = Get-Content $guardianJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($guardianData.ultima_execucao) {
-            $ultimaExecucao = [datetime]::Parse($guardianData.ultima_execucao)
+            $ultimaExecucao = [datetime]::ParseExact(
+                [string]$guardianData.ultima_execucao,
+                "yyyy-MM-dd HH:mm:ss",
+                [System.Globalization.CultureInfo]::InvariantCulture
+            )
             $agora = Get-Date
 
             # Mesma janela: mesmo mês, mesmo ano, e executou entre dias 1-20
