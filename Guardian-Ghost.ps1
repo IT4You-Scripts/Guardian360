@@ -68,95 +68,99 @@ function Write-Log {
 
 # ============================================================================
 # PADRONIZAR RETENCAO DO MACRIUM REFLECT
-# Executado pelo Ghost como SYSTEM. Altera somente perfis reais que ja possuem
-# a chave de Defaults do Macrium; nao altera definicoes XML de backup.
+# Mesma logica validada isoladamente executando como SYSTEM.
+# Nao cria a chave Defaults; altera somente perfis que ja possuem configuracao.
 # ============================================================================
-function Set-MacriumRetentionDefaults {
-    $macriumExe = @(
-        "$env:ProgramFiles\Macrium\Reflect\Reflect.exe",
-        "${env:ProgramFiles(x86)}\Macrium\Reflect\Reflect.exe"
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
-        Select-Object -First 1
+$desiredMacrium = [ordered]@{
+    FullRetention  = 1
+    FullPeriod     = 0
+    FullInterval   = 1
+    DiffRetention  = 0
+    PurgeBefore    = 1
+    PurgeOldest    = 0
+    PurgeThreshold = 5
+}
 
-    if (-not $macriumExe) { return }
+$profileListMacrium = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+$profilesMacrium = Get-ChildItem -LiteralPath $profileListMacrium -ErrorAction SilentlyContinue
 
-    $desired = [ordered]@{
-        FullRetention  = 1
-        FullPeriod     = 0
-        FullInterval   = 1
-        DiffRetention  = 0
-        PurgeBefore    = 1
-        PurgeOldest    = 0
-        PurgeThreshold = 5
+foreach ($profileMacrium in $profilesMacrium) {
+    $sidMacrium = $profileMacrium.PSChildName
+
+    if ($sidMacrium -notmatch '^S-1-5-21-.+-\d+$') {
+        continue
     }
 
-    $profileList = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
-    $profiles = Get-ChildItem -LiteralPath $profileList -ErrorAction Stop
+    try {
+        $profileInfoMacrium = Get-ItemProperty -LiteralPath $profileMacrium.PSPath -ErrorAction Stop
+        $profilePathMacrium = [Environment]::ExpandEnvironmentVariables(
+            [string]$profileInfoMacrium.ProfileImagePath
+        )
+    }
+    catch {
+        continue
+    }
 
-    foreach ($profile in $profiles) {
-        $sid = $profile.PSChildName
+    if (-not (Test-Path -LiteralPath $profilePathMacrium)) {
+        continue
+    }
 
-        # Mesma selecao de perfis humanos validada no teste isolado como SYSTEM.
-        if ($sid -notmatch '^S-1-5-21-.+-\d+$') { continue }
+    $rootMacrium = "Registry::HKEY_USERS\$sidMacrium"
+    $tempHiveNameMacrium = $null
+    $loadedByUsMacrium = $false
 
-        $loadedByUs = $false
-        $tempHiveName = $null
+    try {
+        if (-not (Test-Path -LiteralPath $rootMacrium)) {
+            $ntUserMacrium = Join-Path $profilePathMacrium 'NTUSER.DAT'
 
-        try {
-            $profileInfo = Get-ItemProperty -LiteralPath $profile.PSPath -ErrorAction Stop
-            $profilePath = [Environment]::ExpandEnvironmentVariables([string]$profileInfo.ProfileImagePath)
-
-            if (-not (Test-Path -LiteralPath $profilePath -PathType Container)) { continue }
-
-            $userRoot = "Registry::HKEY_USERS\$sid"
-
-            if (-not (Test-Path -LiteralPath $userRoot)) {
-                $ntUser = Join-Path $profilePath 'NTUSER.DAT'
-                if (-not (Test-Path -LiteralPath $ntUser -PathType Leaf)) { continue }
-
-                $safeSid = $sid -replace '[^A-Za-z0-9_-]', '_'
-                $tempHiveName = "GuardianGhost_$safeSid"
-
-                & reg.exe load "HKU\$tempHiveName" "$ntUser" 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { continue }
-
-                $userRoot = "Registry::HKEY_USERS\$tempHiveName"
-                $loadedByUs = $true
+            if (-not (Test-Path -LiteralPath $ntUserMacrium)) {
+                continue
             }
 
-            $defaultsPath = "$userRoot\SOFTWARE\Macrium\reflect\Defaults"
+            $safeSidMacrium = $sidMacrium -replace '[^A-Za-z0-9_-]', '_'
+            $tempHiveNameMacrium = "GuardianMacrium_$safeSidMacrium"
 
-            # Nao cria Defaults em usuario que nunca teve configuracao do Macrium.
-            if (-not (Test-Path -LiteralPath $defaultsPath)) { continue }
+            & reg.exe load "HKU\$tempHiveNameMacrium" "$ntUserMacrium" 2>&1 | Out-Null
+            $loadExitMacrium = $LASTEXITCODE
 
-            # Gravacao direta: mesma forma validada no teste isolado como SYSTEM.
-            foreach ($name in $desired.Keys) {
+            if ($loadExitMacrium -ne 0) {
+                continue
+            }
+
+            $rootMacrium = "Registry::HKEY_USERS\$tempHiveNameMacrium"
+            $loadedByUsMacrium = $true
+        }
+
+        $defaultsPathMacrium = "$rootMacrium\SOFTWARE\Macrium\reflect\Defaults"
+
+        if (-not (Test-Path -LiteralPath $defaultsPathMacrium)) {
+            continue
+        }
+
+        foreach ($nameMacrium in $desiredMacrium.Keys) {
+            $targetMacrium = [int]$desiredMacrium[$nameMacrium]
+
+            try {
                 New-ItemProperty `
-                    -LiteralPath $defaultsPath `
-                    -Name $name `
-                    -Value ([int]$desired[$name]) `
+                    -LiteralPath $defaultsPathMacrium `
+                    -Name $nameMacrium `
+                    -Value $targetMacrium `
                     -PropertyType DWord `
                     -Force `
                     -ErrorAction Stop | Out-Null
             }
-        }
-        catch {
-            # Falha na configuracao do Macrium nao impede o restante do Ghost.
-        }
-        finally {
-            if ($loadedByUs -and $tempHiveName) {
-                [GC]::Collect()
-                [GC]::WaitForPendingFinalizers()
-                & reg.exe unload "HKU\$tempHiveName" 2>&1 | Out-Null
+            catch {
+                # Uma falha de valor nao impede os demais nem o Ghost.
             }
         }
     }
-}
-try {
-    Set-MacriumRetentionDefaults
-}
-catch {
-    # Falha na configuracao do Macrium nao impede o Repair-SystemIntegrity.
+    finally {
+        if ($loadedByUsMacrium -and $tempHiveNameMacrium) {
+            [GC]::Collect()
+            [GC]::WaitForPendingFinalizers()
+            & reg.exe unload "HKU\$tempHiveNameMacrium" 2>&1 | Out-Null
+        }
+    }
 }
 
 # ============================================================================
