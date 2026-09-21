@@ -1114,165 +1114,325 @@ Start-Sleep -Milliseconds 500
     } catch {}
 
 
-# PADRONIZAÇÃO DAS TAREFAS NO AGENDADOR
-# Ordem visual: 1. Principal / 2. System / 3. Ghost
+# PADRONIZAÇÃO DAS TAREFAS NO AGENDADOR (via XML — testado e aprovado)
 # =========================================================================
 try {
-    $taskFolder = "\\Guardian\\"
+    $taskFolder = "\Guardian\"
 
-    function Set-TaskWindows10Compatibility {
-        param([xml]$Xml)
-        # Task Scheduler: schema 1.4 = "Configurar para: Windows 10"
-        $Xml.Task.SetAttribute("version", "1.4")
-    }
+    # ----- TASK DO GUARDIAN (dias 1-10, 12:00, ociosidade 10min, aguardar 2h) -----
+    $guardianTasks = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
+                     Where-Object { $_.TaskName -in @("Guardian (Usuários Administrativos)","Guardian (Usuários Restritos)","1. Guardian (Usuários Administrativos)","1. Guardian (Usuários Restritos)") }
 
-    # ----- 1. GUARDIAN PRINCIPAL (dias 1-10, 12:00) -----
-    # Aceita os nomes antigos apenas para migracao e, depois, trabalha com nomes deterministas.
-    $principalNames = @(
-        "1. Guardian (Usuários Administrativos)",
-        "1. Guardian (Usuários Restritos)",
-        "Guardian (Usuários Administrativos)",
-        "Guardian (Usuários Restritos)"
-    )
-
-    $guardianPrincipal = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
-                         Where-Object { $principalNames -contains $_.TaskName } |
-                         Select-Object -First 1
-
-    if ($guardianPrincipal) {
-        $oldPrincipalName = $guardianPrincipal.TaskName
-        $newPrincipalName = if ($oldPrincipalName -like "1. *") { $oldPrincipalName } else { "1. $oldPrincipalName" }
-
-        $xml = [xml](Export-ScheduledTask -TaskName $oldPrincipalName -TaskPath $taskFolder)
+    foreach ($task in $guardianTasks) {
+        $xmlStr = Export-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder
+        $xml = [xml]$xmlStr
         $ns = $xml.Task.NamespaceURI
-
-        # A tarefa chama apenas Roda/Eleva de forma invisivel. Se nao houver trava,
-        # Roda/Eleva abrem o Guardian principal normalmente.
-        $argNode = $xml.Task.SelectSingleNode("*[local-name()='Actions']/*[local-name()='Exec']/*[local-name()='Arguments']")
-        if ($argNode -and $argNode.InnerText -notmatch '(?i)(^|\s)-WindowStyle\s+Hidden(\s|$)') {
-            $argNode.InnerText = "-WindowStyle Hidden " + $argNode.InnerText
-        }
 
         $oldTriggers = $xml.Task.SelectSingleNode("*[local-name()='Triggers']")
         if ($oldTriggers) { $xml.Task.RemoveChild($oldTriggers) | Out-Null }
 
         $newTriggers = $xml.CreateElement("Triggers", $ns)
         $calTrigger = $xml.CreateElement("CalendarTrigger", $ns)
-        $startEl = $xml.CreateElement("StartBoundary", $ns); $startEl.InnerText = "2026-01-01T12:00:00"; $calTrigger.AppendChild($startEl) | Out-Null
-        $enabledEl = $xml.CreateElement("Enabled", $ns); $enabledEl.InnerText = "true"; $calTrigger.AppendChild($enabledEl) | Out-Null
+
+        $startEl = $xml.CreateElement("StartBoundary", $ns)
+        $startEl.InnerText = "2026-01-01T12:00:00"
+        $calTrigger.AppendChild($startEl) | Out-Null
+
+        $enabledEl = $xml.CreateElement("Enabled", $ns)
+        $enabledEl.InnerText = "true"
+        $calTrigger.AppendChild($enabledEl) | Out-Null
+
         $monthlyEl = $xml.CreateElement("ScheduleByMonth", $ns)
+
         $daysEl = $xml.CreateElement("DaysOfMonth", $ns)
-        1..10 | ForEach-Object { $dayEl = $xml.CreateElement("Day", $ns); $dayEl.InnerText = $_; $daysEl.AppendChild($dayEl) | Out-Null }
+        1..10 | ForEach-Object {
+            $dayEl = $xml.CreateElement("Day", $ns)
+            $dayEl.InnerText = $_
+            $daysEl.AppendChild($dayEl) | Out-Null
+        }
         $monthlyEl.AppendChild($daysEl) | Out-Null
+
         $monthsEl = $xml.CreateElement("Months", $ns)
-        @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object { $mEl = $xml.CreateElement($_, $ns); $monthsEl.AppendChild($mEl) | Out-Null }
+        @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
+            $mEl = $xml.CreateElement($_, $ns)
+            $monthsEl.AppendChild($mEl) | Out-Null
+        }
         $monthlyEl.AppendChild($monthsEl) | Out-Null
         $calTrigger.AppendChild($monthlyEl) | Out-Null
         $newTriggers.AppendChild($calTrigger) | Out-Null
+
         $principals = $xml.Task.SelectSingleNode("*[local-name()='Principals']")
         $xml.Task.InsertBefore($newTriggers, $principals) | Out-Null
 
-        $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
-        $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
-        if ($roiNode) { $roiNode.InnerText = "true" } else { $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "true"; $settingsNode.AppendChild($roiEl) | Out-Null }
-        $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
-        if (-not $idleSettings) { $idleSettings = $xml.CreateElement("IdleSettings", $ns); $settingsNode.AppendChild($idleSettings) | Out-Null }
-        foreach ($child in @($idleSettings.ChildNodes)) { $idleSettings.RemoveChild($child) | Out-Null }
-        $durEl = $xml.CreateElement("Duration", $ns); $durEl.InnerText = "PT10M"; $idleSettings.AppendChild($durEl) | Out-Null
-        $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"; $idleSettings.AppendChild($waitEl) | Out-Null
-        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "true"; $idleSettings.AppendChild($stopEl) | Out-Null
-        $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"; $idleSettings.AppendChild($restartEl) | Out-Null
-
-        Set-TaskWindows10Compatibility -Xml $xml
-        Register-ScheduledTask -TaskName $newPrincipalName -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
-        if ($oldPrincipalName -ne $newPrincipalName) {
-            Unregister-ScheduledTask -TaskName $oldPrincipalName -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
+        $actionArgsNode = $xml.Task.SelectSingleNode("*[local-name()='Actions']/*[local-name()='Exec']/*[local-name()='Arguments']")
+        if ($actionArgsNode -and $actionArgsNode.InnerText -notmatch '(?i)(^|\s)-WindowStyle\s+Hidden(\s|$)') {
+            $actionArgsNode.InnerText = "-WindowStyle Hidden " + $actionArgsNode.InnerText
         }
 
-        $guardianPrincipal = Get-ScheduledTask -TaskName $newPrincipalName -TaskPath $taskFolder -ErrorAction SilentlyContinue
-        Write-Host "[Guardian] Task '$newPrincipalName' padronizada." -ForegroundColor Green
+        $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
+
+        $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
+        if ($roiNode) { $roiNode.InnerText = "true" }
+        else {
+            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "true"
+            $settingsNode.AppendChild($roiEl) | Out-Null
+        }
+
+        $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
+        if (-not $idleSettings) {
+            $idleSettings = $xml.CreateElement("IdleSettings", $ns)
+            $settingsNode.AppendChild($idleSettings) | Out-Null
+        }
+        foreach ($child in @($idleSettings.ChildNodes)) { $idleSettings.RemoveChild($child) | Out-Null }
+
+        $durEl = $xml.CreateElement("Duration", $ns); $durEl.InnerText = "PT10M"
+        $idleSettings.AppendChild($durEl) | Out-Null
+        $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"
+        $idleSettings.AppendChild($waitEl) | Out-Null
+        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "true"
+        $idleSettings.AppendChild($stopEl) | Out-Null
+        $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
+        $idleSettings.AppendChild($restartEl) | Out-Null
+
+        $nomePrincipalNovo = if ($task.TaskName -like "1. *") { $task.TaskName } else { "1. $($task.TaskName)" }
+        Register-ScheduledTask -TaskName $nomePrincipalNovo -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
+        if ($task.TaskName -ne $nomePrincipalNovo) {
+            Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
+        }
+        Write-Host "[Guardian] Task '$($task.TaskName)' padronizada: dias 1-10, 12:00." -ForegroundColor Green
     }
 
-    # ----- 2. GUARDIAN SYSTEM (dias 11-20, 15:00, SYSTEM, sem ociosidade) -----
+
+    # ----- TASK GUARDIAN SYSTEM (dias 11-20, 15:00, SYSTEM, sem ociosidade) -----
+    # Usa a acao da task principal como modelo e preserva seus argumentos.
+    $guardianPrincipal = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -in @("1. Guardian (Usuários Administrativos)","1. Guardian (Usuários Restritos)") } | Select-Object -First 1
+
     if ($guardianPrincipal) {
         try {
             $acaoPrincipal = $guardianPrincipal.Actions | Select-Object -First 1
             $executeSystem = $acaoPrincipal.Execute
             $argumentsSystem = $acaoPrincipal.Arguments
             $workingDirSystem = $acaoPrincipal.WorkingDirectory
+
+            # Sob SYSTEM nao ha necessidade de ElevaGuardian.
             $executeSystem = $executeSystem -replace '(?i)ElevaGuardian\.ps1','RodaGuardian.ps1'
             $argumentsSystem = $argumentsSystem -replace '(?i)ElevaGuardian\.ps1','RodaGuardian.ps1'
 
-            $actionSystemParams = @{ Execute=$executeSystem; Argument=$argumentsSystem }
-            if (-not [string]::IsNullOrWhiteSpace($workingDirSystem)) { $actionSystemParams.WorkingDirectory = $workingDirSystem }
+            $actionSystemParams = @{
+                Execute  = $executeSystem
+                Argument = $argumentsSystem
+            }
+            if (-not [string]::IsNullOrWhiteSpace($workingDirSystem)) {
+                $actionSystemParams.WorkingDirectory = $workingDirSystem
+            }
             $actionSystem = New-ScheduledTaskAction @actionSystemParams
+
+            # Cria uma task base valida e depois troca somente o trigger mensal via XML,
+            # usando o mesmo metodo ja empregado pelo Guardian Ghost.
             $triggerSystemBase = New-ScheduledTaskTrigger -Daily -At "15:00"
             $principalSystem = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-            $settingsSystem = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 6) -Hidden
+            $settingsSystem = New-ScheduledTaskSettingsSet `
+                -AllowStartIfOnBatteries `
+                -DontStopIfGoingOnBatteries `
+                -StartWhenAvailable `
+                -ExecutionTimeLimit (New-TimeSpan -Hours 6) `
+                -Hidden
 
-            Register-ScheduledTask -TaskName "2. Guardian System" -TaskPath $taskFolder -Action $actionSystem -Trigger $triggerSystemBase -Settings $settingsSystem -Principal $principalSystem -Description "Guardian System - fallback. Dias 11-20 as 15:00." -Force | Out-Null
+            Register-ScheduledTask `
+                -TaskName "2. Guardian System" `
+                -TaskPath $taskFolder `
+                -Action $actionSystem `
+                -Trigger $triggerSystemBase `
+                -Settings $settingsSystem `
+                -Principal $principalSystem `
+                -Description "Guardian System - fallback do Guardian principal. Dias 11-20 as 15:00." `
+                -Force | Out-Null
+
             $systemXml = [xml](Export-ScheduledTask -TaskName "2. Guardian System" -TaskPath $taskFolder)
+            try {
+                $principalXmlCompat = [xml](Export-ScheduledTask -TaskName $guardianPrincipal.TaskName -TaskPath $taskFolder)
+                if ($principalXmlCompat.Task.version) { $systemXml.Task.version = $principalXmlCompat.Task.version }
+            } catch {}
             $ns = $systemXml.Task.NamespaceURI
-            $oldTriggers = $systemXml.Task.SelectSingleNode("*[local-name()='Triggers']"); if ($oldTriggers) { $systemXml.Task.RemoveChild($oldTriggers) | Out-Null }
-            $newTriggers = $systemXml.CreateElement("Triggers", $ns); $calTrigger = $systemXml.CreateElement("CalendarTrigger", $ns)
-            $startEl = $systemXml.CreateElement("StartBoundary", $ns); $startEl.InnerText = "2026-01-11T15:00:00"; $calTrigger.AppendChild($startEl) | Out-Null
-            $enabledEl = $systemXml.CreateElement("Enabled", $ns); $enabledEl.InnerText = "true"; $calTrigger.AppendChild($enabledEl) | Out-Null
-            $monthlyEl = $systemXml.CreateElement("ScheduleByMonth", $ns); $daysEl = $systemXml.CreateElement("DaysOfMonth", $ns)
-            11..20 | ForEach-Object { $dayEl = $systemXml.CreateElement("Day", $ns); $dayEl.InnerText = $_; $daysEl.AppendChild($dayEl) | Out-Null }
+
+            $oldTriggers = $systemXml.Task.SelectSingleNode("*[local-name()='Triggers']")
+            if ($oldTriggers) { $systemXml.Task.RemoveChild($oldTriggers) | Out-Null }
+
+            $newTriggers = $systemXml.CreateElement("Triggers", $ns)
+            $calTrigger = $systemXml.CreateElement("CalendarTrigger", $ns)
+
+            $startEl = $systemXml.CreateElement("StartBoundary", $ns)
+            $startEl.InnerText = "2026-01-11T15:00:00"
+            $calTrigger.AppendChild($startEl) | Out-Null
+
+            $enabledEl = $systemXml.CreateElement("Enabled", $ns)
+            $enabledEl.InnerText = "true"
+            $calTrigger.AppendChild($enabledEl) | Out-Null
+
+            $monthlyEl = $systemXml.CreateElement("ScheduleByMonth", $ns)
+            $daysEl = $systemXml.CreateElement("DaysOfMonth", $ns)
+            11..20 | ForEach-Object {
+                $dayEl = $systemXml.CreateElement("Day", $ns)
+                $dayEl.InnerText = $_
+                $daysEl.AppendChild($dayEl) | Out-Null
+            }
             $monthlyEl.AppendChild($daysEl) | Out-Null
+
             $monthsEl = $systemXml.CreateElement("Months", $ns)
-            @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object { $mEl = $systemXml.CreateElement($_, $ns); $monthsEl.AppendChild($mEl) | Out-Null }
-            $monthlyEl.AppendChild($monthsEl) | Out-Null; $calTrigger.AppendChild($monthlyEl) | Out-Null; $newTriggers.AppendChild($calTrigger) | Out-Null
-            $principals = $systemXml.Task.SelectSingleNode("*[local-name()='Principals']"); $systemXml.Task.InsertBefore($newTriggers, $principals) | Out-Null
-            Set-TaskWindows10Compatibility -Xml $systemXml
+            @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
+                $mEl = $systemXml.CreateElement($_, $ns)
+                $monthsEl.AppendChild($mEl) | Out-Null
+            }
+            $monthlyEl.AppendChild($monthsEl) | Out-Null
+            $calTrigger.AppendChild($monthlyEl) | Out-Null
+            $newTriggers.AppendChild($calTrigger) | Out-Null
+
+            $principals = $systemXml.Task.SelectSingleNode("*[local-name()='Principals']")
+            $systemXml.Task.InsertBefore($newTriggers, $principals) | Out-Null
+
             Register-ScheduledTask -TaskName "2. Guardian System" -TaskPath $taskFolder -Xml ($systemXml.OuterXml) -Force | Out-Null
             Unregister-ScheduledTask -TaskName "Guardian System" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
-            Write-Host "[Guardian System] Task '2. Guardian System' padronizada." -ForegroundColor Green
-        } catch { Write-Host "[Guardian System] Nao foi possivel criar/corrigir: $($_.Exception.Message)" -ForegroundColor Yellow }
-    } else { Write-Host "[Guardian System] Task principal nao encontrada; nenhuma configuracao foi inventada." -ForegroundColor Yellow }
+            Write-Host "[Guardian System] Task criada/corrigida: dias 11-20, 15:00, SYSTEM, sem ociosidade." -ForegroundColor Green
+        }
+        catch {
+            Write-Host "[Guardian System] Nao foi possivel criar/corrigir a task: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+    else {
+        Write-Host "[Guardian System] Task principal nao encontrada; nenhuma configuracao foi inventada." -ForegroundColor Yellow
+    }
 
-    # ----- 3. GUARDIAN GHOST (dias 21-25, 12:00, SYSTEM) -----
-    $pwshPath7 = (Get-Command pwsh.exe -ErrorAction SilentlyContinue)?.Source
-    if (-not $pwshPath7) { $pwshPath7 = "powershell.exe" }
-    $actionGhost = New-ScheduledTaskAction -Execute $pwshPath7 -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Guardian\Guardian-Ghost.ps1"'
-    $triggerGhostBase = New-ScheduledTaskTrigger -Daily -At "12:00"
-    $principalGhost = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    $settingsGhost = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 6) -Hidden
-    Register-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder -Action $actionGhost -Trigger $triggerGhostBase -Settings $settingsGhost -Principal $principalGhost -Description "Guardian Ghost - System Integrity. Dias 21-25 as 12:00." -Force | Out-Null
+    # ----- TASK DO GUARDIAN GHOST (dias 21-25, 12:00, ociosidade 10min, aguardar 2h) -----
+    $ghostTask = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
+                 Where-Object { $_.TaskName -in @("3. Guardian Ghost","3. Guardian Ghost") }
 
-    $ghostXml = [xml](Export-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder)
-    $ns = $ghostXml.Task.NamespaceURI
-    $oldTriggers = $ghostXml.Task.SelectSingleNode("*[local-name()='Triggers']"); if ($oldTriggers) { $ghostXml.Task.RemoveChild($oldTriggers) | Out-Null }
-    $newTriggers = $ghostXml.CreateElement("Triggers", $ns); $calTrigger = $ghostXml.CreateElement("CalendarTrigger", $ns)
-    $startEl = $ghostXml.CreateElement("StartBoundary", $ns); $startEl.InnerText = "2026-01-21T12:00:00"; $calTrigger.AppendChild($startEl) | Out-Null
-    $enabledEl = $ghostXml.CreateElement("Enabled", $ns); $enabledEl.InnerText = "true"; $calTrigger.AppendChild($enabledEl) | Out-Null
-    $monthlyEl = $ghostXml.CreateElement("ScheduleByMonth", $ns); $daysEl = $ghostXml.CreateElement("DaysOfMonth", $ns)
-    21..25 | ForEach-Object { $dayEl = $ghostXml.CreateElement("Day", $ns); $dayEl.InnerText = $_; $daysEl.AppendChild($dayEl) | Out-Null }
-    $monthlyEl.AppendChild($daysEl) | Out-Null
-    $monthsEl = $ghostXml.CreateElement("Months", $ns)
-    @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object { $mEl = $ghostXml.CreateElement($_, $ns); $monthsEl.AppendChild($mEl) | Out-Null }
-    $monthlyEl.AppendChild($monthsEl) | Out-Null; $calTrigger.AppendChild($monthlyEl) | Out-Null; $newTriggers.AppendChild($calTrigger) | Out-Null
-    $principals = $ghostXml.Task.SelectSingleNode("*[local-name()='Principals']"); $ghostXml.Task.InsertBefore($newTriggers, $principals) | Out-Null
+    $ghostPrecisaAjustar = $false
 
-    $settingsNode = $ghostXml.Task.SelectSingleNode("*[local-name()='Settings']")
-    $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
-    if ($roiNode) { $roiNode.InnerText = "true" } else { $roiEl = $ghostXml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "true"; $settingsNode.AppendChild($roiEl) | Out-Null }
-    $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
-    if (-not $idleSettings) { $idleSettings = $ghostXml.CreateElement("IdleSettings", $ns); $settingsNode.AppendChild($idleSettings) | Out-Null }
-    foreach ($child in @($idleSettings.ChildNodes)) { $idleSettings.RemoveChild($child) | Out-Null }
-    $durEl = $ghostXml.CreateElement("Duration", $ns); $durEl.InnerText = "PT10M"; $idleSettings.AppendChild($durEl) | Out-Null
-    $waitEl = $ghostXml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"; $idleSettings.AppendChild($waitEl) | Out-Null
-    $stopEl = $ghostXml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "true"; $idleSettings.AppendChild($stopEl) | Out-Null
-    $restartEl = $ghostXml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"; $idleSettings.AppendChild($restartEl) | Out-Null
-    Set-TaskWindows10Compatibility -Xml $ghostXml
-    Register-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder -Xml ($ghostXml.OuterXml) -Force | Out-Null
-    Unregister-ScheduledTask -TaskName "Guardian Ghost" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
-    Write-Host "[Guardian Ghost] Task '3. Guardian Ghost' padronizada." -ForegroundColor Green
+    if (-not $ghostTask) {
+        $ghostPrecisaAjustar = $true
+    }
+    else {
+        $trigger = $ghostTask.Triggers | Select-Object -First 1
+        if ($trigger -and $trigger.CimClass.CimClassName -eq 'MSFT_TaskMonthlyTrigger') {
+            $diasAtuais = @($trigger.DaysOfMonth) | Sort-Object
+            $diasEsperados = @(21,22,23,24,25)
+            if ($null -ne (Compare-Object $diasAtuais $diasEsperados -SyncWindow 0)) {
+                $ghostPrecisaAjustar = $true
+            }
+        }
+        else {
+            $ghostPrecisaAjustar = $true
+        }
+    }
+
+    if ($ghostPrecisaAjustar) {
+        $pwshPath7 = (Get-Command pwsh.exe -ErrorAction SilentlyContinue)?.Source
+        if (-not $pwshPath7) { $pwshPath7 = "powershell.exe" }
+
+        # Passo 1: Criar task base com cmdlets
+        $action = New-ScheduledTaskAction `
+            -Execute $pwshPath7 `
+            -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Guardian\Guardian-Ghost.ps1"'
+        $triggerGhost = New-ScheduledTaskTrigger -Daily -At "12:00"
+        $principalGhost = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+        $settingsGhost = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable `
+            -ExecutionTimeLimit (New-TimeSpan -Hours 6) `
+            -Hidden
+
+        Register-ScheduledTask `
+            -TaskName "3. Guardian Ghost" `
+            -TaskPath $taskFolder `
+            -Action $action `
+            -Trigger $triggerGhost `
+            -Settings $settingsGhost `
+            -Principal $principalGhost `
+            -Description "Guardian Ghost - System Integrity (Fase 2) silenciosa. Roda 1x/mes entre dias 21-25." `
+            -Force | Out-Null
+
+        # Passo 2: Exportar e corrigir trigger + idle via XML
+        $xml = [xml](Export-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder)
+        try {
+            if ($guardianPrincipal) {
+                $principalXmlCompat = [xml](Export-ScheduledTask -TaskName $guardianPrincipal.TaskName -TaskPath $taskFolder)
+                if ($principalXmlCompat.Task.version) { $xml.Task.version = $principalXmlCompat.Task.version }
+            }
+        } catch {}
+        $ns = $xml.Task.NamespaceURI
+
+        $oldTriggers = $xml.Task.SelectSingleNode("*[local-name()='Triggers']")
+        if ($oldTriggers) { $xml.Task.RemoveChild($oldTriggers) | Out-Null }
+
+        $newTriggers = $xml.CreateElement("Triggers", $ns)
+        $calTrigger = $xml.CreateElement("CalendarTrigger", $ns)
+
+        $startEl = $xml.CreateElement("StartBoundary", $ns)
+        $startEl.InnerText = "2026-01-21T12:00:00"
+        $calTrigger.AppendChild($startEl) | Out-Null
+
+        $enabledEl = $xml.CreateElement("Enabled", $ns)
+        $enabledEl.InnerText = "true"
+        $calTrigger.AppendChild($enabledEl) | Out-Null
+
+        $monthlyEl = $xml.CreateElement("ScheduleByMonth", $ns)
+
+        $daysEl = $xml.CreateElement("DaysOfMonth", $ns)
+        21..25 | ForEach-Object {
+            $dayEl = $xml.CreateElement("Day", $ns)
+            $dayEl.InnerText = $_
+            $daysEl.AppendChild($dayEl) | Out-Null
+        }
+        $monthlyEl.AppendChild($daysEl) | Out-Null
+
+        $monthsEl = $xml.CreateElement("Months", $ns)
+        @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
+            $mEl = $xml.CreateElement($_, $ns)
+            $monthsEl.AppendChild($mEl) | Out-Null
+        }
+        $monthlyEl.AppendChild($monthsEl) | Out-Null
+        $calTrigger.AppendChild($monthlyEl) | Out-Null
+        $newTriggers.AppendChild($calTrigger) | Out-Null
+
+        $principals = $xml.Task.SelectSingleNode("*[local-name()='Principals']")
+        $xml.Task.InsertBefore($newTriggers, $principals) | Out-Null
+
+        $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
+
+        $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
+        if ($roiNode) { $roiNode.InnerText = "true" }
+        else {
+            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "true"
+            $settingsNode.AppendChild($roiEl) | Out-Null
+        }
+
+        $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
+        if (-not $idleSettings) {
+            $idleSettings = $xml.CreateElement("IdleSettings", $ns)
+            $settingsNode.AppendChild($idleSettings) | Out-Null
+        }
+        foreach ($child in @($idleSettings.ChildNodes)) { $idleSettings.RemoveChild($child) | Out-Null }
+
+        $durEl = $xml.CreateElement("Duration", $ns); $durEl.InnerText = "PT10M"
+        $idleSettings.AppendChild($durEl) | Out-Null
+        $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"
+        $idleSettings.AppendChild($waitEl) | Out-Null
+        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "true"
+        $idleSettings.AppendChild($stopEl) | Out-Null
+        $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
+        $idleSettings.AppendChild($restartEl) | Out-Null
+
+        Register-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
+        Unregister-ScheduledTask -TaskName "Guardian Ghost" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "[Guardian Ghost] Task criada/corrigida: dias 21-25, 12:00." -ForegroundColor Green
+    }
 }
 catch {
-    Write-Host "[Tasks] Erro na padronizacao: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "[Tasks] Erro na padronização: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 # =========================================================================
+
 
 
     Disable-QuickEditProtection
