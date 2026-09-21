@@ -1121,7 +1121,12 @@ try {
 
     # ----- TASK DO GUARDIAN (dias 1-10, 12:00, ociosidade 10min, aguardar 2h) -----
     $guardianTasks = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
-                     Where-Object { $_.TaskName -in @("Guardian (Usuários Administrativos)","Guardian (Usuários Restritos)","1. Guardian (Usuários Administrativos)","1. Guardian (Usuários Restritos)") }
+                     Where-Object {
+                         $_.TaskName -like "*Guardian*" -and
+                         $_.TaskName -notlike "*Ghost*" -and
+                         $_.TaskName -notlike "*System*" -and
+                         $_.TaskName -notmatch '^\s*[23]\.\s'
+                     }
 
     foreach ($task in $guardianTasks) {
         $xmlStr = Export-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder
@@ -1205,7 +1210,13 @@ try {
 
     # ----- TASK GUARDIAN SYSTEM (dias 11-20, 15:00, SYSTEM, sem ociosidade) -----
     # Usa a acao da task principal como modelo e preserva seus argumentos.
-    $guardianPrincipal = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -in @("1. Guardian (Usuários Administrativos)","1. Guardian (Usuários Restritos)") } | Select-Object -First 1
+    $guardianPrincipal = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
+                         Where-Object {
+                             $_.TaskName -like "1. *Guardian*" -and
+                             $_.TaskName -notlike "*Ghost*" -and
+                             $_.TaskName -notlike "*System*"
+                         } |
+                         Select-Object -First 1
 
     if ($guardianPrincipal) {
         try {
