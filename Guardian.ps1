@@ -1105,6 +1105,15 @@ Start-Sleep -Milliseconds 500
     # =========================================================================
     # Gravar guardian.json com data da execucao bem-sucedida
     # =========================================================================
+    try {
+        $guardianJsonPath = "C:\Guardian\guardian.json"
+        $guardianResult = @{
+            ultima_execucao = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        }
+        $guardianResult | ConvertTo-Json | Set-Content -Path $guardianJsonPath -Encoding UTF8 -Force
+    } catch {}
+
+
 # PADRONIZAÇÃO DAS TAREFAS NO AGENDADOR (via XML — testado e aprovado)
 # =========================================================================
 try {
