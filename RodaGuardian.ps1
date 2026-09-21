@@ -54,7 +54,7 @@ function Fail {
 
 
 # =========================================================================
-# VERIFICAÇÃO SILENCIOSA — Já rodou neste mês (dias 1-20)?
+# VERIFICAÇÃO SILENCIOSA — Já rodou neste mês?
 # Se sim, aborta imediatamente sem atualizar nada, sem mostrar nada.
 # =========================================================================
 $guardianJsonPath = "C:\Guardian\guardian.json"
@@ -65,10 +65,9 @@ if (Test-Path $guardianJsonPath) {
             $ultimaExecucao = [datetime]::Parse($guardianData.ultima_execucao)
             $agora = Get-Date
 
-            # Mesma janela: mesmo mês, mesmo ano, e executou entre dias 1-20
+            # Mesmo mês e mesmo ano: Guardian já executou, então encerra.
             if ($ultimaExecucao.Year -eq $agora.Year -and
-                $ultimaExecucao.Month -eq $agora.Month -and
-                $ultimaExecucao.Day -ge 1 -and $ultimaExecucao.Day -le 20) {
+                $ultimaExecucao.Month -eq $agora.Month) {
                 exit 0
             }
         }
