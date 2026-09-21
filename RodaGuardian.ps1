@@ -178,6 +178,15 @@ try {
             $settingsNode.AppendChild($hiddenEl) | Out-Null
         }
 
+        # Permitir iniciar também quando o computador estiver usando bateria.
+        $batteryNode = $settingsNode.SelectSingleNode("*[local-name()='DisallowStartIfOnBatteries']")
+        if ($batteryNode) { $batteryNode.InnerText = "false" }
+        else {
+            $batteryEl = $xml.CreateElement("DisallowStartIfOnBatteries", $ns)
+            $batteryEl.InnerText = "false"
+            $settingsNode.AppendChild($batteryEl) | Out-Null
+        }
+
         $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
         if ($roiNode) { $roiNode.InnerText = "true" }
         else {
@@ -196,7 +205,7 @@ try {
         $idleSettings.AppendChild($durEl) | Out-Null
         $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"
         $idleSettings.AppendChild($waitEl) | Out-Null
-        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "true"
+        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "false"
         $idleSettings.AppendChild($stopEl) | Out-Null
         $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
         $idleSettings.AppendChild($restartEl) | Out-Null
@@ -431,7 +440,7 @@ try {
         $idleSettings.AppendChild($durEl) | Out-Null
         $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"
         $idleSettings.AppendChild($waitEl) | Out-Null
-        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "true"
+        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "false"
         $idleSettings.AppendChild($stopEl) | Out-Null
         $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
         $idleSettings.AppendChild($restartEl) | Out-Null
