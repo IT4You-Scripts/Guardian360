@@ -91,19 +91,21 @@ function Set-MacriumRetentionDefaults {
     }
 
     $profileList = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+    $profiles = Get-ChildItem -LiteralPath $profileList -ErrorAction Stop
 
-    foreach ($profile in (Get-ChildItem -LiteralPath $profileList -ErrorAction SilentlyContinue)) {
+    foreach ($profile in $profiles) {
         $sid = $profile.PSChildName
 
-        # SIDs de usuarios locais/dominio; ignora SYSTEM, LocalService etc.
+        # Mesma selecao de perfis humanos validada no teste isolado como SYSTEM.
         if ($sid -notmatch '^S-1-5-21-.+-\d+$') { continue }
 
-        $loadedHere = $false
+        $loadedByUs = $false
         $tempHiveName = $null
 
         try {
-            $profilePath = (Get-ItemProperty -LiteralPath $profile.PSPath -Name ProfileImagePath -ErrorAction Stop).ProfileImagePath
-            $profilePath = [Environment]::ExpandEnvironmentVariables($profilePath)
+            $profileInfo = Get-ItemProperty -LiteralPath $profile.PSPath -ErrorAction Stop
+            $profilePath = [Environment]::ExpandEnvironmentVariables([string]$profileInfo.ProfileImagePath)
+
             if (-not (Test-Path -LiteralPath $profilePath -PathType Container)) { continue }
 
             $userRoot = "Registry::HKEY_USERS\$sid"
@@ -112,37 +114,37 @@ function Set-MacriumRetentionDefaults {
                 $ntUser = Join-Path $profilePath 'NTUSER.DAT'
                 if (-not (Test-Path -LiteralPath $ntUser -PathType Leaf)) { continue }
 
-                $tempHiveName = "GuardianGhost_$($sid -replace '[^A-Za-z0-9_]', '_')"
+                $safeSid = $sid -replace '[^A-Za-z0-9_-]', '_'
+                $tempHiveName = "GuardianGhost_$safeSid"
+
                 & reg.exe load "HKU\$tempHiveName" "$ntUser" 2>&1 | Out-Null
                 if ($LASTEXITCODE -ne 0) { continue }
 
-                $loadedHere = $true
                 $userRoot = "Registry::HKEY_USERS\$tempHiveName"
+                $loadedByUs = $true
             }
 
             $defaultsPath = "$userRoot\SOFTWARE\Macrium\reflect\Defaults"
 
             # Nao cria Defaults em usuario que nunca teve configuracao do Macrium.
-            if (Test-Path -LiteralPath $defaultsPath) {
-                foreach ($item in $desired.GetEnumerator()) {
-                    $current = (Get-ItemProperty -LiteralPath $defaultsPath -Name $item.Key -ErrorAction SilentlyContinue).($item.Key)
+            if (-not (Test-Path -LiteralPath $defaultsPath)) { continue }
 
-                    if ($null -eq $current -or [int64]$current -ne [int64]$item.Value) {
-                        New-ItemProperty -LiteralPath $defaultsPath `
-                            -Name $item.Key `
-                            -Value ([int]$item.Value) `
-                            -PropertyType DWord `
-                            -Force `
-                            -ErrorAction Stop | Out-Null
-                    }
-                }
+            # Gravacao direta: mesma forma validada no teste isolado como SYSTEM.
+            foreach ($name in $desired.Keys) {
+                New-ItemProperty `
+                    -LiteralPath $defaultsPath `
+                    -Name $name `
+                    -Value ([int]$desired[$name]) `
+                    -PropertyType DWord `
+                    -Force `
+                    -ErrorAction Stop | Out-Null
             }
         }
         catch {
             # Falha na configuracao do Macrium nao impede o restante do Ghost.
         }
         finally {
-            if ($loadedHere -and $tempHiveName) {
+            if ($loadedByUs -and $tempHiveName) {
                 [GC]::Collect()
                 [GC]::WaitForPendingFinalizers()
                 & reg.exe unload "HKU\$tempHiveName" 2>&1 | Out-Null
@@ -150,7 +152,6 @@ function Set-MacriumRetentionDefaults {
         }
     }
 }
-
 try {
     Set-MacriumRetentionDefaults
 }
