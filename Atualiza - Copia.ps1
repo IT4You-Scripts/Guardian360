@@ -7,7 +7,7 @@ if ($env:GUARDIAN_ATUALIZA_RELANCADO -ne "1") {
     try {
         $SelfBaseUrl = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main/Atualiza.ps1"
         $SelfPath    = "C:\Guardian\Atualiza.ps1"
-        $SelfTemp    = "C:\Guardian\Guardian_Atualiza_$PID.ps1"
+        $SelfTemp    = Join-Path $env:TEMP "Guardian_Atualiza_$PID.ps1"
         $SelfNoCache = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmssfff')"
 
         Invoke-WebRequest `
@@ -59,9 +59,7 @@ if ($env:GUARDIAN_ATUALIZA_RELANCADO -ne "1") {
         Remove-Item -LiteralPath $SelfTemp -Force -ErrorAction SilentlyContinue
     }
     catch {
-        if ($SelfTemp -and (Test-Path -LiteralPath $SelfTemp -ErrorAction SilentlyContinue)) {
-            Remove-Item -LiteralPath $SelfTemp -Force -ErrorAction SilentlyContinue
-        }
+        Remove-Item -LiteralPath $SelfTemp -Force -ErrorAction SilentlyContinue
         # Se a autoatualizacao falhar, preserva o comportamento original.
     }
 }
