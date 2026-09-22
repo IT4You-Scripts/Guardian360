@@ -85,18 +85,32 @@ if ([string]::IsNullOrWhiteSpace($Cliente)) {
 # ============================================================================================================================================================
 # BLOQUEIO POR CLIENTE (OFFBOARDING) — SILENCIOSO
 # ============================================================================================================================================================
+# IMPORTANTE: este bloco deve ficar logo após o param() do script, ANTES de
+# qualquer outra lógica (leitura de JSON, logs, disparo de fases etc.)
 
 $DisabledClients = @(
-    'Teknier Engenharia e Tecnologia',
-    'Soneca Company'
+    'Soneca Company',
+    'Talude Comercial e Construtora Ltda'
 )
 
-# Normaliza: trim + comparação case-insensitive
-$clienteNorm = ($Cliente ?? '').Trim()
+function Normalize-ClienteName {
+    param([string]$Nome)
+
+    if ([string]::IsNullOrEmpty($Nome)) { return '' }
+
+    # Remove espaços não-quebráveis (U+00A0), zero-width (U+200B) e afins,
+    # colapsa espaços múltiplos e faz trim.
+    $n = $Nome -replace '[\u00A0\u200B\u2007\u202F]', ' '
+    $n = $n -replace '\s+', ' '
+    return $n.Trim()
+}
+
+$clienteNorm = Normalize-ClienteName -Nome $Cliente
 
 $blocked = $false
 foreach ($dc in $DisabledClients) {
-    if ($clienteNorm.Equals(($dc ?? '').Trim(), [System.StringComparison]::OrdinalIgnoreCase)) {
+    $dcNorm = Normalize-ClienteName -Nome $dc
+    if ([string]::Equals($clienteNorm, $dcNorm, [System.StringComparison]::OrdinalIgnoreCase)) {
         $blocked = $true
         break
     }
@@ -104,15 +118,16 @@ foreach ($dc in $DisabledClients) {
 
 if ($blocked) {
 
-    # (Opcional) remover arquivo de argumentos para evitar reuso
+    # Remove arquivo de argumentos para evitar reuso
     $argJsonPath = "C:\Guardian\guardian_arg.json"
     if (Test-Path $argJsonPath) {
-        try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
+        try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue } catch {}
     }
 
     # Silêncio total: sem Write-Host, sem Write-Output, sem nada.
     exit 0
 }
+
 
 # ============================================================================================================================================================
 
@@ -218,55 +233,7 @@ $logFile     = Join-Path $logDir ("{0}_{1}.log" -f $computer, $stamp)
 
 
 
-# === VERIFICAÇÃO DE EXECUÇÃO RECENTE (<24h) ===
-if (Test-Path $logDir) {
-    $ultimoLog = Get-ChildItem $logDir -Filter "$computer*.log" -ErrorAction SilentlyContinue |
-                 Sort-Object LastWriteTime -Descending |
-                 Select-Object -First 1
-
-    if ($ultimoLog) {
-        $horas = (New-TimeSpan $ultimoLog.LastWriteTime (Get-Date)).TotalHours
-
-        if ($horas -lt 24) {
-
-            Clear-Host
-
-            # Header manual (sem depender da função)
-            $text = "Guardian executado há menos de 24 horas"
-            $bar  = '─' * ($text.Length + 2)
-            Write-Host "┌$bar┐" -ForegroundColor Cyan
-            Write-Host "│ $text │" -ForegroundColor Cyan
-            Write-Host "└$bar┘" -ForegroundColor Cyan
-
-            Write-Host ""
-            Write-Host "Última execução: $($ultimoLog.LastWriteTime)"
-            $ts = New-TimeSpan $ultimoLog.LastWriteTime (Get-Date)
-
-function Format-HumanTime($ts) {
-    if ($ts.TotalDays -ge 1) {
-        return "{0} dia(s) {1}h {2}m" -f [int]$ts.TotalDays, $ts.Hours, $ts.Minutes
-    }
-    elseif ($ts.TotalHours -ge 1) {
-        return "{0}h {1}m" -f $ts.Hours, $ts.Minutes
-    }
-    else {
-        return "{0} min" -f [int]$ts.TotalMinutes
-    }
-}
-
-$tempoHumano = Format-HumanTime $ts
-Write-Host "Tempo decorrido: $tempoHumano"
-
-            Write-Host ""
-            Write-Host "Encerrando manutenção para evitar execução redundante..."
-            Write-Host ""
-
-            Start-Sleep 3
-            exit 0
-        }
-    }
-}
-# =============================================
+# === VERIFICAÇÃO DE EXECUÇÃO RECENTE — Movida para RodaGuardian.ps1 / ElevaGuardian.ps1 ===
 
 
 
@@ -830,7 +797,13 @@ $hasHDD = ($hddList.Count -gt 0)
         @{ Name='Get-SystemInventory';   Action={ Get-SystemInventory } }
       )},
     @{ Id=2; Title='Integridade do Sistema'; Steps=@(
-        @{ Name='Repair-SystemIntegrity'; Action={ Repair-SystemIntegrity } }
+        @{ Name='Repair-SystemIntegrity'; Action={
+            # Fase 2 desativada no Guardian principal — roda separadamente via Guardian Ghost
+            return [PSCustomObject]@{
+                IntegridadeSistema = 100
+                MensagemTecnica    = "System Integrity executado separadamente via Guardian Ghost"
+            }
+        } }
       )},
     @{ Id=3; Title='Otimizações Estruturais'; Steps=@(
         @{ Name='Optimize-PowerSettings';    Action={ Optimize-PowerSettings } },
@@ -848,7 +821,7 @@ $hasHDD = ($hddList.Count -gt 0)
         @{ Name='Update-MicrosoftStore'; Action={ if($hasInet){ Update-MicrosoftStore } else { Write-Log 'Sem internet: pulando Update-MicrosoftStore' 'WARN' } } }
       )},
     @{ Id=6; Title='Atualizações dos programas instalados'; Steps=@(
-        @{ Name='Block-AppUpdates';  Action={ Block-AppUpdates } },
+        # @{ Name='Block-AppUpdates';  Action={ Block-AppUpdates } },
         @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
       )},
     @{ Id=7; Title='Pós-atualização / Componentes'; Steps=@(
@@ -1109,12 +1082,12 @@ Show-GuardianEndUI | Out-Null
 Start-Sleep -Milliseconds 500
 
 #region Envio do Log para Servidor de Arquivos
-if ($FileServer -and $FileServer.Trim() -ne '') {
-    Write-Log ("Enviando log para o servidor: {0}" -f $FileServer) 'INFO'
-    Send-LogToServer -Server $FileServer
-} else {
-    Write-Log "Nenhum servidor informado: pulando envio do log." 'INFO'
-}
+#if ($FileServer -and $FileServer.Trim() -ne '') {
+#    Write-Log ("Enviando log para o servidor: {0}" -f $FileServer) 'INFO'
+#    Send-LogToServer -Server $FileServer
+#} else {
+#    Write-Log "Nenhum servidor informado: pulando envio do log." 'INFO'
+#}
 #endregion
 
 } catch {
@@ -1128,6 +1101,223 @@ if ($FileServer -and $FileServer.Trim() -ne '') {
 
 
     & "C:\Guardian\Functions\Optimize-JsonReport.ps1" -Pasta "C:\Guardian\Json"
+
+    # =========================================================================
+    # Gravar guardian.json com data da execucao bem-sucedida
+    # =========================================================================
+    try {
+        $guardianJsonPath = "C:\Guardian\guardian.json"
+        $guardianResult = @{
+            ultima_execucao = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        }
+        $guardianResult | ConvertTo-Json | Set-Content -Path $guardianJsonPath -Encoding UTF8 -Force
+    } catch {}
+
+
+# PADRONIZAÇÃO DAS TAREFAS NO AGENDADOR (via XML — testado e aprovado)
+# =========================================================================
+try {
+    $taskFolder = "\Guardian\"
+
+    # ----- TASK DO GUARDIAN (dias 1-15, 12:00, ociosidade 10min, aguardar 2h) -----
+    $guardianTasks = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
+                     Where-Object { $_.TaskName -like "*Guardian*" -and $_.TaskName -notlike "*Ghost*" }
+
+    foreach ($task in $guardianTasks) {
+        $xmlStr = Export-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder
+        $xml = [xml]$xmlStr
+        $ns = $xml.Task.NamespaceURI
+
+        $oldTriggers = $xml.Task.SelectSingleNode("*[local-name()='Triggers']")
+        if ($oldTriggers) { $xml.Task.RemoveChild($oldTriggers) | Out-Null }
+
+        $newTriggers = $xml.CreateElement("Triggers", $ns)
+        $calTrigger = $xml.CreateElement("CalendarTrigger", $ns)
+
+        $startEl = $xml.CreateElement("StartBoundary", $ns)
+        $startEl.InnerText = "2026-01-01T12:00:00"
+        $calTrigger.AppendChild($startEl) | Out-Null
+
+        $enabledEl = $xml.CreateElement("Enabled", $ns)
+        $enabledEl.InnerText = "true"
+        $calTrigger.AppendChild($enabledEl) | Out-Null
+
+        $monthlyEl = $xml.CreateElement("ScheduleByMonth", $ns)
+
+        $daysEl = $xml.CreateElement("DaysOfMonth", $ns)
+        1..15 | ForEach-Object {
+            $dayEl = $xml.CreateElement("Day", $ns)
+            $dayEl.InnerText = $_
+            $daysEl.AppendChild($dayEl) | Out-Null
+        }
+        $monthlyEl.AppendChild($daysEl) | Out-Null
+
+        $monthsEl = $xml.CreateElement("Months", $ns)
+        @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
+            $mEl = $xml.CreateElement($_, $ns)
+            $monthsEl.AppendChild($mEl) | Out-Null
+        }
+        $monthlyEl.AppendChild($monthsEl) | Out-Null
+        $calTrigger.AppendChild($monthlyEl) | Out-Null
+        $newTriggers.AppendChild($calTrigger) | Out-Null
+
+        $principals = $xml.Task.SelectSingleNode("*[local-name()='Principals']")
+        $xml.Task.InsertBefore($newTriggers, $principals) | Out-Null
+
+        $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
+
+        $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
+        if ($roiNode) { $roiNode.InnerText = "true" }
+        else {
+            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "true"
+            $settingsNode.AppendChild($roiEl) | Out-Null
+        }
+
+        $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
+        if (-not $idleSettings) {
+            $idleSettings = $xml.CreateElement("IdleSettings", $ns)
+            $settingsNode.AppendChild($idleSettings) | Out-Null
+        }
+        foreach ($child in @($idleSettings.ChildNodes)) { $idleSettings.RemoveChild($child) | Out-Null }
+
+        $durEl = $xml.CreateElement("Duration", $ns); $durEl.InnerText = "PT10M"
+        $idleSettings.AppendChild($durEl) | Out-Null
+        $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"
+        $idleSettings.AppendChild($waitEl) | Out-Null
+        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "true"
+        $idleSettings.AppendChild($stopEl) | Out-Null
+        $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
+        $idleSettings.AppendChild($restartEl) | Out-Null
+
+        Register-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
+        Write-Host "[Guardian] Task '$($task.TaskName)' padronizada: dias 1-15, 12:00." -ForegroundColor Green
+    }
+
+    # ----- TASK DO GUARDIAN GHOST (dias 20-25, 12:00, ociosidade 10min, aguardar 2h) -----
+    $ghostTask = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
+                 Where-Object { $_.TaskName -eq "Guardian Ghost" }
+
+    $ghostPrecisaAjustar = $false
+
+    if (-not $ghostTask) {
+        $ghostPrecisaAjustar = $true
+    }
+    else {
+        $trigger = $ghostTask.Triggers | Select-Object -First 1
+        if ($trigger -and $trigger.CimClass.CimClassName -eq 'MSFT_TaskMonthlyTrigger') {
+            $diasAtuais = @($trigger.DaysOfMonth) | Sort-Object
+            $diasEsperados = @(20,21,22,23,24,25)
+            if ($null -ne (Compare-Object $diasAtuais $diasEsperados -SyncWindow 0)) {
+                $ghostPrecisaAjustar = $true
+            }
+        }
+        else {
+            $ghostPrecisaAjustar = $true
+        }
+    }
+
+    if ($ghostPrecisaAjustar) {
+        $pwshPath7 = (Get-Command pwsh.exe -ErrorAction SilentlyContinue)?.Source
+        if (-not $pwshPath7) { $pwshPath7 = "powershell.exe" }
+
+        # Passo 1: Criar task base com cmdlets
+        $action = New-ScheduledTaskAction `
+            -Execute $pwshPath7 `
+            -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Guardian\Guardian-Ghost.ps1"'
+        $triggerGhost = New-ScheduledTaskTrigger -Daily -At "12:00"
+        $principalGhost = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+        $settingsGhost = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable `
+            -ExecutionTimeLimit (New-TimeSpan -Hours 6) `
+            -Hidden
+
+        Register-ScheduledTask `
+            -TaskName "Guardian Ghost" `
+            -TaskPath $taskFolder `
+            -Action $action `
+            -Trigger $triggerGhost `
+            -Settings $settingsGhost `
+            -Principal $principalGhost `
+            -Description "Guardian Ghost - System Integrity (Fase 2) silenciosa. Roda 1x/mes entre dias 20-25." `
+            -Force | Out-Null
+
+        # Passo 2: Exportar e corrigir trigger + idle via XML
+        $xml = [xml](Export-ScheduledTask -TaskName "Guardian Ghost" -TaskPath $taskFolder)
+        $ns = $xml.Task.NamespaceURI
+
+        $oldTriggers = $xml.Task.SelectSingleNode("*[local-name()='Triggers']")
+        if ($oldTriggers) { $xml.Task.RemoveChild($oldTriggers) | Out-Null }
+
+        $newTriggers = $xml.CreateElement("Triggers", $ns)
+        $calTrigger = $xml.CreateElement("CalendarTrigger", $ns)
+
+        $startEl = $xml.CreateElement("StartBoundary", $ns)
+        $startEl.InnerText = "2026-01-20T12:00:00"
+        $calTrigger.AppendChild($startEl) | Out-Null
+
+        $enabledEl = $xml.CreateElement("Enabled", $ns)
+        $enabledEl.InnerText = "true"
+        $calTrigger.AppendChild($enabledEl) | Out-Null
+
+        $monthlyEl = $xml.CreateElement("ScheduleByMonth", $ns)
+
+        $daysEl = $xml.CreateElement("DaysOfMonth", $ns)
+        20..25 | ForEach-Object {
+            $dayEl = $xml.CreateElement("Day", $ns)
+            $dayEl.InnerText = $_
+            $daysEl.AppendChild($dayEl) | Out-Null
+        }
+        $monthlyEl.AppendChild($daysEl) | Out-Null
+
+        $monthsEl = $xml.CreateElement("Months", $ns)
+        @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
+            $mEl = $xml.CreateElement($_, $ns)
+            $monthsEl.AppendChild($mEl) | Out-Null
+        }
+        $monthlyEl.AppendChild($monthsEl) | Out-Null
+        $calTrigger.AppendChild($monthlyEl) | Out-Null
+        $newTriggers.AppendChild($calTrigger) | Out-Null
+
+        $principals = $xml.Task.SelectSingleNode("*[local-name()='Principals']")
+        $xml.Task.InsertBefore($newTriggers, $principals) | Out-Null
+
+        $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
+
+        $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
+        if ($roiNode) { $roiNode.InnerText = "true" }
+        else {
+            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "true"
+            $settingsNode.AppendChild($roiEl) | Out-Null
+        }
+
+        $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
+        if (-not $idleSettings) {
+            $idleSettings = $xml.CreateElement("IdleSettings", $ns)
+            $settingsNode.AppendChild($idleSettings) | Out-Null
+        }
+        foreach ($child in @($idleSettings.ChildNodes)) { $idleSettings.RemoveChild($child) | Out-Null }
+
+        $durEl = $xml.CreateElement("Duration", $ns); $durEl.InnerText = "PT10M"
+        $idleSettings.AppendChild($durEl) | Out-Null
+        $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"
+        $idleSettings.AppendChild($waitEl) | Out-Null
+        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "true"
+        $idleSettings.AppendChild($stopEl) | Out-Null
+        $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
+        $idleSettings.AppendChild($restartEl) | Out-Null
+
+        Register-ScheduledTask -TaskName "Guardian Ghost" -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
+        Write-Host "[Guardian Ghost] Task criada/corrigida: dias 20-25, 12:00." -ForegroundColor Green
+    }
+}
+catch {
+    Write-Host "[Tasks] Erro na padronização: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+# =========================================================================
+
+
 
     Disable-QuickEditProtection
     Disable-ConsoleAppearance
