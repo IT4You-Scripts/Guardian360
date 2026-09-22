@@ -1048,7 +1048,6 @@ $jsonObject = [PSCustomObject]@{
     Cliente            = if ($Cliente) { $Cliente } else { "Não informado" }
     NomeComputador     = $env:COMPUTERNAME
     DataExecucao       = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    PulaFases          = @($PulaFases)
     Fases              = $jsonResults
 }
 
