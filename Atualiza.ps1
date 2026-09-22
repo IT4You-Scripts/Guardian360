@@ -1,62 +1,71 @@
 ﻿# ============================================================================
 # AUTOATUALIZACAO DO PROPRIO ATUALIZA.PS1
-# Antes de qualquer outra rotina, baixa a versao oficial do GitHub.
-# Se houver diferenca, substitui C:\Guardian\Atualiza.ps1, relanca a versao
-# nova e encerra esta instancia. Se ja estiver atualizado, segue normalmente.
+# A marcacao de relancamento impede qualquer possibilidade de loop:
+# a instancia nova pula esta verificacao uma unica vez e segue o Atualiza normal.
 # ============================================================================
-try {
-    $SelfBaseUrl = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main/Atualiza.ps1"
-    $SelfPath    = "C:\Guardian\Atualiza.ps1"
-    $SelfTemp    = Join-Path $env:TEMP "Guardian_Atualiza_$PID.ps1"
-    $SelfNoCache = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmssfff')"
+if ($env:GUARDIAN_ATUALIZA_RELANCADO -ne "1") {
+    try {
+        $SelfBaseUrl = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main/Atualiza.ps1"
+        $SelfPath    = "C:\Guardian\Atualiza.ps1"
+        $SelfTemp    = Join-Path $env:TEMP "Guardian_Atualiza_$PID.ps1"
+        $SelfNoCache = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmssfff')"
 
-    Invoke-WebRequest `
-        -Uri "$SelfBaseUrl$SelfNoCache" `
-        -OutFile $SelfTemp `
-        -UseBasicParsing `
-        -Headers @{ "Cache-Control" = "no-cache" } `
-        -ErrorAction Stop
+        Invoke-WebRequest `
+            -Uri "$SelfBaseUrl$SelfNoCache" `
+            -OutFile $SelfTemp `
+            -UseBasicParsing `
+            -Headers @{ "Cache-Control" = "no-cache" } `
+            -ErrorAction Stop
 
-    $RemoteHash = (Get-FileHash -LiteralPath $SelfTemp -Algorithm SHA256).Hash
-    $LocalHash  = $null
-
-    if (Test-Path -LiteralPath $SelfPath) {
-        $LocalHash = (Get-FileHash -LiteralPath $SelfPath -Algorithm SHA256).Hash
-    }
-
-    if ($RemoteHash -ne $LocalHash) {
-        if (-not (Test-Path -LiteralPath "C:\Guardian")) {
-            New-Item -ItemType Directory -Path "C:\Guardian" -Force | Out-Null
-        }
+        $RemoteHash = (Get-FileHash -LiteralPath $SelfTemp -Algorithm SHA256).Hash
+        $LocalHash  = $null
 
         if (Test-Path -LiteralPath $SelfPath) {
-            attrib -R $SelfPath 2>$null
+            $LocalHash = (Get-FileHash -LiteralPath $SelfPath -Algorithm SHA256).Hash
         }
 
-        Copy-Item -LiteralPath $SelfTemp -Destination $SelfPath -Force
+        if ($RemoteHash -ne $LocalHash) {
+            if (-not (Test-Path -LiteralPath "C:\Guardian")) {
+                New-Item -ItemType Directory -Path "C:\Guardian" -Force | Out-Null
+            }
 
-        $PwshSelf = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source
-        if (-not $PwshSelf) {
-            $PwshSelf = "powershell.exe"
+            if (Test-Path -LiteralPath $SelfPath) {
+                attrib -R $SelfPath 2>$null
+            }
+
+            Copy-Item -LiteralPath $SelfTemp -Destination $SelfPath -Force
+
+            $PwshSelf = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source
+            if (-not $PwshSelf) {
+                $PwshSelf = "powershell.exe"
+            }
+
+            # O processo filho herda esta variavel e, portanto, NAO tenta
+            # se autoatualizar novamente nesta mesma cadeia de execucao.
+            $env:GUARDIAN_ATUALIZA_RELANCADO = "1"
+
+            Start-Process `
+                -FilePath $PwshSelf `
+                -ArgumentList @(
+                    "-NoProfile",
+                    "-ExecutionPolicy", "Bypass",
+                    "-File", "`"$SelfPath`""
+                )
+
+            Remove-Item -LiteralPath $SelfTemp -Force -ErrorAction SilentlyContinue
+            exit 0
         }
-
-        Start-Process `
-            -FilePath $PwshSelf `
-            -ArgumentList @(
-                "-NoProfile",
-                "-ExecutionPolicy", "Bypass",
-                "-File", "`"$SelfPath`""
-            )
 
         Remove-Item -LiteralPath $SelfTemp -Force -ErrorAction SilentlyContinue
-        exit 0
     }
-
-    Remove-Item -LiteralPath $SelfTemp -Force -ErrorAction SilentlyContinue
+    catch {
+        Remove-Item -LiteralPath $SelfTemp -Force -ErrorAction SilentlyContinue
+        # Se a autoatualizacao falhar, preserva o comportamento original.
+    }
 }
-catch {
-    Remove-Item -LiteralPath $SelfTemp -Force -ErrorAction SilentlyContinue
-    # Se a autoatualizacao falhar, preserva o comportamento original do Atualiza.
+else {
+    # Remove a marcacao dentro da nova instancia e continua normalmente.
+    Remove-Item Env:\GUARDIAN_ATUALIZA_RELANCADO -ErrorAction SilentlyContinue
 }
 
 function Update-GuardianFiles {
