@@ -1,4 +1,65 @@
-﻿function Update-GuardianFiles {
+﻿# ============================================================================
+# AUTOATUALIZACAO DO PROPRIO ATUALIZA.PS1
+# Antes de qualquer outra rotina, baixa a versao oficial do GitHub.
+# Se houver diferenca, substitui C:\Guardian\Atualiza.ps1, relanca a versao
+# nova e encerra esta instancia. Se ja estiver atualizado, segue normalmente.
+# ============================================================================
+try {
+    $SelfBaseUrl = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main/Atualiza.ps1"
+    $SelfPath    = "C:\Guardian\Atualiza.ps1"
+    $SelfTemp    = Join-Path $env:TEMP "Guardian_Atualiza_$PID.ps1"
+    $SelfNoCache = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmssfff')"
+
+    Invoke-WebRequest `
+        -Uri "$SelfBaseUrl$SelfNoCache" `
+        -OutFile $SelfTemp `
+        -UseBasicParsing `
+        -Headers @{ "Cache-Control" = "no-cache" } `
+        -ErrorAction Stop
+
+    $RemoteHash = (Get-FileHash -LiteralPath $SelfTemp -Algorithm SHA256).Hash
+    $LocalHash  = $null
+
+    if (Test-Path -LiteralPath $SelfPath) {
+        $LocalHash = (Get-FileHash -LiteralPath $SelfPath -Algorithm SHA256).Hash
+    }
+
+    if ($RemoteHash -ne $LocalHash) {
+        if (-not (Test-Path -LiteralPath "C:\Guardian")) {
+            New-Item -ItemType Directory -Path "C:\Guardian" -Force | Out-Null
+        }
+
+        if (Test-Path -LiteralPath $SelfPath) {
+            attrib -R $SelfPath 2>$null
+        }
+
+        Copy-Item -LiteralPath $SelfTemp -Destination $SelfPath -Force
+
+        $PwshSelf = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source
+        if (-not $PwshSelf) {
+            $PwshSelf = "powershell.exe"
+        }
+
+        Start-Process `
+            -FilePath $PwshSelf `
+            -ArgumentList @(
+                "-NoProfile",
+                "-ExecutionPolicy", "Bypass",
+                "-File", "`"$SelfPath`""
+            )
+
+        Remove-Item -LiteralPath $SelfTemp -Force -ErrorAction SilentlyContinue
+        exit 0
+    }
+
+    Remove-Item -LiteralPath $SelfTemp -Force -ErrorAction SilentlyContinue
+}
+catch {
+    Remove-Item -LiteralPath $SelfTemp -Force -ErrorAction SilentlyContinue
+    # Se a autoatualizacao falhar, preserva o comportamento original do Atualiza.
+}
+
+function Update-GuardianFiles {
 
     $ErrorActionPreference = "Stop"
     $ProgressPreference   = "SilentlyContinue"
