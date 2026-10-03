@@ -190,6 +190,10 @@
             "Iniciando atualização de aplicativos." `
             "INFO"
 
+        # Repara e atualiza automaticamente as fontes do Winget
+        & $wingetExe source reset --force
+        & $wingetExe source update
+
         $process = Start-Process `
             -FilePath $wingetExe `
             -ArgumentList @(
