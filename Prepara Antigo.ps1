@@ -79,6 +79,7 @@ function Get-WingetPath {
     return $null
 }
 
+
 function Test-Winget {
 
     $script:WingetExe = Get-WingetPath
@@ -96,61 +97,67 @@ function Test-Winget {
     }
 }
 
+
 # -------------------------------------------------
-# Instalar/reparar Winget somente se necessário
+# Primeira verificação
 # -------------------------------------------------
 
 if (-not (Test-Winget)) {
 
-    Write-Host "  → Winget não disponível. Instalando dependências..." -ForegroundColor Yellow
-
-    $GuardianDir = "C:\Guardian"
-    $RuntimePath = Join-Path $GuardianDir "WindowsAppRuntimeInstall-x64.exe"
-    $AppInstallerPath = Join-Path $GuardianDir "Microsoft.DesktopAppInstaller.msixbundle"
-
-    if (-not (Test-Path $GuardianDir)) {
-        New-Item -ItemType Directory -Path $GuardianDir -Force | Out-Null
-    }
+    Write-Host "  → Winget não disponível. Tentando registrar o App Installer..." -ForegroundColor Yellow
 
     try {
-        # Dependência exigida pelo App Installer atual
-        Invoke-WebRequest `
-            -Uri "https://aka.ms/windowsappsdk/1.8/latest/windowsappruntimeinstall-x64.exe" `
-            -OutFile $RuntimePath `
-            -UseBasicParsing `
-            -ErrorAction Stop
-
-        if (Test-Path $RuntimePath) {
-            Start-Process `
-                -FilePath $RuntimePath `
-                -Wait `
-                -WindowStyle Hidden
-        }
-
-        # App Installer / Winget oficial
-        Invoke-WebRequest `
-            -Uri "https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle" `
-            -OutFile $AppInstallerPath `
-            -UseBasicParsing `
-            -ErrorAction Stop
-
-        if (Test-Path $AppInstallerPath) {
-            # AppX é executado pelo Windows PowerShell 5.1, não pelo PowerShell 7
-            $ps51Command = "Add-AppxPackage -Path '$AppInstallerPath' -ForceApplicationShutdown -ErrorAction Stop"
-
-            Start-Process `
-                -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
-                -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $ps51Command) `
-                -Wait `
-                -WindowStyle Hidden
-        }
+        Add-AppxPackage `
+            -RegisterByFamilyName `
+            -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe `
+            -ErrorAction SilentlyContinue
     }
-    catch {
-        # O resultado real será validado abaixo.
+    catch {}
+
+    Start-Sleep -Seconds 5
+}
+
+
+# -------------------------------------------------
+# Se ainda não funcionar, reparar/reinstalar
+# -------------------------------------------------
+
+if (-not (Test-Winget)) {
+
+    Write-Host "  → Winget ainda indisponível. Tentando reparar..." -ForegroundColor Yellow
+
+    Get-AppxPackage Microsoft.DesktopAppInstaller |
+        Remove-AppxPackage 2>$null
+
+    Get-AppxPackage Microsoft.VCLibs* |
+        Remove-AppxPackage 2>$null
+
+    Remove-Item `
+        "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller*" `
+        -Force `
+        -Recurse `
+        2>$null
+
+    $u = "https://aka.ms/getwinget"
+    $p = "$env:TEMP\AppInstaller.msixbundle"
+
+    Remove-Item $p -Force -ErrorAction SilentlyContinue
+
+    Invoke-WebRequest `
+        -Uri $u `
+        -OutFile $p `
+        -UseBasicParsing `
+        2>$null
+
+    if (Test-Path $p) {
+        Add-AppxPackage `
+            -Path $p `
+            2>$null
     }
 
     Start-Sleep -Seconds 5
 }
+
 
 # -------------------------------------------------
 # Validar Winget — até 3 tentativas
