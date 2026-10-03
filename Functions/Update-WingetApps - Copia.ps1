@@ -195,8 +195,6 @@
             -ArgumentList @(
                 "upgrade",
                 "--all",
-                "--source",
-                "winget",
                 "--silent",
                 "--disable-interactivity",
                 "--accept-package-agreements",
@@ -234,11 +232,11 @@
             default {
 
                 Write-Log `
-                    "Winget terminou com erro. ExitCode=$($process.ExitCode)." `
-                    "ERROR"
+                    "Winget terminou com ExitCode=$($process.ExitCode). Algumas atualizações podem ter sido concluídas." `
+                    "WARN"
 
                 return [PSCustomObject]@{
-                    MensagemTecnica = "Winget terminou com erro. ExitCode=$($process.ExitCode)"
+                    MensagemTecnica = "Winget finalizado com sucesso parcial. ExitCode=$($process.ExitCode)"
                     ExitCode        = $process.ExitCode
                 }
             }
