@@ -1,6 +1,6 @@
 ﻿function Update-WingetApps {
     [CmdletBinding()]
-    param([switch]$AtualizarUsuario)
+    param()
 
     Write-Host ""
 
@@ -222,7 +222,6 @@
         $taskCreated = $false
         $resultFile = $null
 
-        if ($AtualizarUsuario) {
         try {
             $consoleUser = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName
             if ([string]::IsNullOrWhiteSpace($consoleUser)) {
@@ -290,11 +289,6 @@ $final = if (@($codes | Where-Object { $_ -ne 0 }).Count -gt 0) { 1 } else { 0 }
                 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
             }
             if ($resultFile) { Remove-Item -LiteralPath $resultFile -Force -ErrorAction SilentlyContinue }
-        }
-
-        } else {
-            $userExitCode = 0
-            $userStatus = 'Dispensado (RodaGuardian)'
         }
 
         # ============================================================

@@ -65,15 +65,9 @@ param(
 
 
 $argJsonPath = "C:\Guardian\guardian_arg.json"
-# Apenas JSON recente e legivel identifica uma chamada pelo ElevaGuardian.
-$script:GuardianViaEleva = $false
 
 if (Test-Path $argJsonPath) {
     $jsonArgs = Get-Content $argJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($null -ne $jsonArgs -and
-        (Get-Item -LiteralPath $argJsonPath).LastWriteTime -ge (Get-Date).AddMinutes(-10)) {
-        $script:GuardianViaEleva = $true
-    }
 
     if (-not $FileServer)   { $FileServer   = $jsonArgs.FileServer }
     if (-not $Cliente)      { $Cliente      = $jsonArgs.Cliente }
@@ -828,7 +822,7 @@ $hasHDD = ($hddList.Count -gt 0)
       )},
     @{ Id=6; Title='Atualizações dos programas instalados'; Steps=@(
         # @{ Name='Block-AppUpdates';  Action={ Block-AppUpdates } },
-        @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps -AtualizarUsuario:$script:GuardianViaEleva } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
+        @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
       )},
     @{ Id=7; Title='Pós-atualização / Componentes'; Steps=@(
         @{ Name='Remove-OldUpdateFiles'; Action={ Remove-OldUpdateFiles } }
