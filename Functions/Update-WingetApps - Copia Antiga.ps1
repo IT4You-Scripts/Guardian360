@@ -195,8 +195,6 @@
             -ArgumentList @(
                 "upgrade",
                 "--all",
-                "--source",
-                "winget",
                 "--silent",
                 "--disable-interactivity",
                 "--accept-package-agreements",
@@ -214,94 +212,8 @@
 
 
         # ============================================================
-        # 7. ATUALIZACOES NO CONTEXTO DO USUARIO INTERATIVO
-        # ============================================================
-        $userStatus = 'Pendente'
-        $userExitCode = 1
-        $taskName = $null
-        $taskCreated = $false
-        $resultFile = $null
-
-        try {
-            $consoleUser = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName
-            if ([string]::IsNullOrWhiteSpace($consoleUser)) {
-                $userStatus = 'Sem usuario interativo; atualizacao por usuario pendente'
-                Write-Log $userStatus 'WARN'
-            }
-            else {
-                $sid = ([System.Security.Principal.NTAccount]$consoleUser).Translate(
-                    [System.Security.Principal.SecurityIdentifier]).Value
-                $profileKey = Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" -ErrorAction Stop
-                $profile = [Environment]::ExpandEnvironmentVariables($profileKey.ProfileImagePath)
-                $userTemp = Join-Path $profile 'AppData\Local\Temp'
-                if (-not (Test-Path -LiteralPath $userTemp -PathType Container)) {
-                    throw 'Pasta temporaria do usuario indisponivel.'
-                }
-
-                $taskName = 'Guardian-WingetUser-' + [guid]::NewGuid().ToString('N')
-                $resultFile = Join-Path $userTemp ($taskName + '.exitcode')
-                $quotedResult = "'" + $resultFile.Replace("'", "''") + "'"
-                # MS Store (inclui aplicativos MSIX/AppX por usuario) e pacotes
-                # winget instalados no escopo do usuario. Sem elevacao de privilegios.
-                $command = @'
-$ErrorActionPreference = 'Stop'
-$codes = @()
-try {
-    winget.exe upgrade --all --source msstore --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
-    $codes += [int]$LASTEXITCODE
-    winget.exe upgrade --all --source winget --scope user --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
-    $codes += [int]$LASTEXITCODE
-} catch { $codes += 1 }
-$final = if (@($codes | Where-Object { $_ -ne 0 }).Count -gt 0) { 1 } else { 0 }
-[System.IO.File]::WriteAllText(__RESULT__, [string]$final)
-'@
-                $command = $command.Replace('__RESULT__', $quotedResult)
-                $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-                $pwsh = (Get-Process -Id $PID -ErrorAction Stop).Path
-                $action = New-ScheduledTaskAction -Execute $pwsh -Argument "-NoProfile -NonInteractive -EncodedCommand $encoded"
-                $principal = New-ScheduledTaskPrincipal -UserId $consoleUser -LogonType Interactive -RunLevel Limited
-                $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-                Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -ErrorAction Stop | Out-Null
-                $taskCreated = $true
-                Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
-                $deadline = (Get-Date).AddMinutes(5)
-                while (-not (Test-Path -LiteralPath $resultFile) -and (Get-Date) -lt $deadline) {
-                    Start-Sleep -Seconds 2
-                    $state = (Get-ScheduledTask -TaskName $taskName -ErrorAction Stop).State
-                    if ($state -notin @('Running', 'Queued', 'Ready')) { break }
-                }
-                if (Test-Path -LiteralPath $resultFile) {
-                    $userExitCode = [int](Get-Content -LiteralPath $resultFile -Raw -ErrorAction Stop).Trim()
-                    $userStatus = if ($userExitCode -eq 0) { 'OK' } else { 'Atualizacoes por usuario com falhas' }
-                } else {
-                    $userStatus = 'Sem resultado ou tempo limite atingido'
-                }
-                Write-Log "Winget usuario ($consoleUser): $userStatus" $(if ($userExitCode -eq 0) { 'INFO' } else { 'WARN' })
-            }
-        }
-        catch {
-            $userStatus = "Falha: $_"
-            Write-Log "Winget usuario: $userStatus" 'WARN'
-        }
-        finally {
-            if ($taskCreated) {
-                Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-                Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-            }
-            if ($resultFile) { Remove-Item -LiteralPath $resultFile -Force -ErrorAction SilentlyContinue }
-        }
-
-        # ============================================================
         # 7. RESULTADO
         # ============================================================
-
-        if ($process.ExitCode -eq 0 -and $userExitCode -ne 0) {
-            Write-Log "Winget administrativo OK; usuario: $userStatus" 'WARN'
-            return [PSCustomObject]@{
-                MensagemTecnica = "Winget administrativo OK; usuario: $userStatus"
-                ExitCode        = 1
-            }
-        }
 
         switch ($process.ExitCode) {
 
@@ -312,7 +224,7 @@ $final = if (@($codes | Where-Object { $_ -ne 0 }).Count -gt 0) { 1 } else { 0 }
                     "INFO"
 
                 return [PSCustomObject]@{
-                    MensagemTecnica = "Winget administrativo e usuario finalizados com sucesso."
+                    MensagemTecnica = "Winget finalizado com sucesso."
                     ExitCode        = 0
                 }
             }
@@ -320,11 +232,11 @@ $final = if (@($codes | Where-Object { $_ -ne 0 }).Count -gt 0) { 1 } else { 0 }
             default {
 
                 Write-Log `
-                    "Winget terminou com erro. ExitCode=$($process.ExitCode)." `
-                    "ERROR"
+                    "Winget terminou com ExitCode=$($process.ExitCode). Algumas atualizações podem ter sido concluídas." `
+                    "WARN"
 
                 return [PSCustomObject]@{
-                    MensagemTecnica = "Winget administrativo terminou com erro. ExitCode=$($process.ExitCode). Usuario: $userStatus"
+                    MensagemTecnica = "Winget finalizado com sucesso parcial. ExitCode=$($process.ExitCode)"
                     ExitCode        = $process.ExitCode
                 }
             }
