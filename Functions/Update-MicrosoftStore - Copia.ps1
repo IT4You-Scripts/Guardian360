@@ -20,7 +20,6 @@ function Update-MicrosoftStore {
         $proc = Start-Process winget `
             -ArgumentList @(
                 'upgrade',
-                '--all',
                 '--source','msstore',
                 '--accept-source-agreements',
                 '--accept-package-agreements',
