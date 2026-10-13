@@ -247,6 +247,7 @@ foreach ($item in $AtomicTargets) {
                              $_.TaskName -notlike "*Ghost*" -and
                              $_.TaskName -notlike "*System*" -and
                              $_.TaskName -notlike "*Silencioso*" -and
+                             $_.TaskName -notlike "*Execução Silenciosa*" -and
                              $_.TaskName -notmatch '^\s*[23]\.\s'
                          }
 
@@ -348,7 +349,7 @@ foreach ($item in $AtomicTargets) {
         # ----- TASK GUARDIAN SILENCIOSO (dias 11-20, 15:00) -----
         # Replica o XML da tarefa Principal para preservar identidade e configuracoes.
         $guardianPrincipal = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
-            Where-Object { $_.TaskName -like '1. *Guardian*' -and $_.TaskName -notmatch 'Ghost|System|Silencioso' } |
+            Where-Object { $_.TaskName -like '1. *Guardian*' -and $_.TaskName -notmatch 'Ghost|System|Silencios' } |
             Select-Object -First 1
         if ($guardianPrincipal) {
             try {
@@ -386,13 +387,25 @@ foreach ($item in $AtomicTargets) {
                 $hidden = $settings.SelectSingleNode("*[local-name()='Hidden']")
                 if ($hidden) { $hidden.InnerText = 'true' }
                 else { $hidden = $silXml.CreateElement('Hidden',$ns); $hidden.InnerText = 'true'; $settings.AppendChild($hidden) | Out-Null }
-                Register-ScheduledTask -TaskName '2. Guardian Silencioso' -TaskPath $taskFolder -Xml $silXml.OuterXml -Force -ErrorAction Stop | Out-Null
-                foreach ($old in @('2. Guardian System','Guardian System')) {
+                # O Silencioso nao exige ociosidade, mesmo quando a Principal exige.
+                $idleOnly = $settings.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
+                if ($idleOnly) { $idleOnly.InnerText = 'false' }
+                else { $idleOnly = $silXml.CreateElement('RunOnlyIfIdle',$ns); $idleOnly.InnerText = 'false'; $settings.AppendChild($idleOnly) | Out-Null }
+                # Executar mesmo em bateria; nao interromper quando alternar para bateria.
+                foreach ($flag in @('DisallowStartIfOnBatteries','StopIfGoingOnBatteries')) {
+                    $node = $settings.SelectSingleNode("*[local-name()='$flag']")
+                    if ($node) { $node.InnerText = 'false' }
+                    else { $node = $silXml.CreateElement($flag,$ns); $node.InnerText = 'false'; $settings.AppendChild($node) | Out-Null }
+                }
+                $nomeSilencioso = ($guardianPrincipal.TaskName -replace '^1\.', '2.') + ' - Execução Silenciosa'
+                Register-ScheduledTask -TaskName $nomeSilencioso -TaskPath $taskFolder -Xml $silXml.OuterXml -Force -ErrorAction Stop | Out-Null
+                foreach ($old in @('2. Guardian System','Guardian System','2. Guardian Silencioso','1. Guardian (Usuários Administradores) - Execução Silenciosa','1. Guardian (Usuários Restritos) - Execução Silenciosa','2. Guardian (Usuários Administradores) - Execução Silenciosa','2. Guardian (Usuários Restritos) - Execução Silenciosa')) {
+                    if ($old -eq $nomeSilencioso) { continue }
                     if (Get-ScheduledTask -TaskName $old -TaskPath $taskFolder -ErrorAction SilentlyContinue) {
                         Unregister-ScheduledTask -TaskName $old -TaskPath $taskFolder -Confirm:$false -ErrorAction Stop
                     }
                 }
-                Write-Host '[Guardian Silencioso] Configurado: dias 11-20, 15:00, identidade da tarefa Principal.' -ForegroundColor Green
+                Write-Host "[Guardian Silencioso] '$nomeSilencioso' configurado: dias 11-20, 15:00, sem exigir ociosidade." -ForegroundColor Green
             } catch {
                 Write-Warning "[Guardian Silencioso] Falha na configuracao: $($_.Exception.Message)"
             }
@@ -403,21 +416,26 @@ foreach ($item in $AtomicTargets) {
 
         # ----- TASK DO GUARDIAN GHOST (dias 21-25, 12:00, ociosidade 10min, aguardar 2h) -----
         $ghostTask = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
-                     Where-Object { $_.TaskName -in @("3. Guardian Integridade do Sistema","3. Guardian Ghost") }
+                     Where-Object { $_.TaskName -in @("3. Guardian - Integridade do Sistema","3. Guardian Integridade do Sistema","3. Guardian Ghost") }
 
         # Migra o nome antigo sem alterar o agendamento do Ghost existente.
-        $oldGhost = Get-ScheduledTask -TaskName '3. Guardian Ghost' -TaskPath $taskFolder -ErrorAction SilentlyContinue
-        $newGhost = Get-ScheduledTask -TaskName '3. Guardian Integridade do Sistema' -TaskPath $taskFolder -ErrorAction SilentlyContinue
-        if ($oldGhost -and -not $newGhost) {
-            try {
-                $ghostXml = Export-ScheduledTask -TaskName '3. Guardian Ghost' -TaskPath $taskFolder
-                Register-ScheduledTask -TaskName '3. Guardian Integridade do Sistema' -TaskPath $taskFolder -Xml $ghostXml -Force -ErrorAction Stop | Out-Null
-                Unregister-ScheduledTask -TaskName '3. Guardian Ghost' -TaskPath $taskFolder -Confirm:$false -ErrorAction Stop
-                $ghostTask = Get-ScheduledTask -TaskName '3. Guardian Integridade do Sistema' -TaskPath $taskFolder
-            } catch { Write-Warning "Falha ao renomear Ghost: $($_.Exception.Message)" }
+        foreach ($legacyName in @('3. Guardian Integridade do Sistema','3. Guardian Ghost')) {
+            $legacyTask = Get-ScheduledTask -TaskName $legacyName -TaskPath $taskFolder -ErrorAction SilentlyContinue
+            $newGhost = Get-ScheduledTask -TaskName '3. Guardian - Integridade do Sistema' -TaskPath $taskFolder -ErrorAction SilentlyContinue
+            if ($legacyTask) {
+                try {
+                    if (-not $newGhost) {
+                        $ghostXml = Export-ScheduledTask -TaskName $legacyName -TaskPath $taskFolder
+                        Register-ScheduledTask -TaskName '3. Guardian - Integridade do Sistema' -TaskPath $taskFolder -Xml $ghostXml -Force -ErrorAction Stop | Out-Null
+                    }
+                    Unregister-ScheduledTask -TaskName $legacyName -TaskPath $taskFolder -Confirm:$false -ErrorAction Stop
+                    $ghostTask = Get-ScheduledTask -TaskName '3. Guardian - Integridade do Sistema' -TaskPath $taskFolder
+                } catch { Write-Warning "Falha ao renomear tarefa de integridade: $($_.Exception.Message)" }
+            }
         }
 
 
+        $ghostTask = Get-ScheduledTask -TaskName "3. Guardian - Integridade do Sistema" -TaskPath $taskFolder -ErrorAction SilentlyContinue
         $ghostPrecisaAjustar = $false
 
         if (-not $ghostTask) {
@@ -454,7 +472,7 @@ foreach ($item in $AtomicTargets) {
                 -Hidden
 
             Register-ScheduledTask `
-                -TaskName "3. Guardian Integridade do Sistema" `
+                -TaskName "3. Guardian - Integridade do Sistema" `
                 -TaskPath $taskFolder `
                 -Action $action `
                 -Trigger $triggerGhost `
@@ -463,7 +481,7 @@ foreach ($item in $AtomicTargets) {
                 -Description "Guardian Ghost - System Integrity (Fase 2) silenciosa. Roda 1x/mes entre dias 21-25." `
                 -Force | Out-Null
 
-            $xml = [xml](Export-ScheduledTask -TaskName "3. Guardian Integridade do Sistema" -TaskPath $taskFolder)
+            $xml = [xml](Export-ScheduledTask -TaskName "3. Guardian - Integridade do Sistema" -TaskPath $taskFolder)
             try {
                 if ($guardianPrincipal) {
                     $principalXmlCompat = [xml](Export-ScheduledTask -TaskName $guardianPrincipal.TaskName -TaskPath $taskFolder)
@@ -533,9 +551,9 @@ foreach ($item in $AtomicTargets) {
             $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
             $idleSettings.AppendChild($restartEl) | Out-Null
 
-            Register-ScheduledTask -TaskName "3. Guardian Integridade do Sistema" -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
+            Register-ScheduledTask -TaskName "3. Guardian - Integridade do Sistema" -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
             Unregister-ScheduledTask -TaskName "Guardian Ghost" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
-            Write-Host "[Guardian Ghost] Task criada/corrigida: dias 21-25, 12:00." -ForegroundColor Green
+            Write-Host "[Guardian Integridade do Sistema] Tarefa criada/corrigida: dias 21-25, 12:00." -ForegroundColor Green
         }
     }
     catch {
