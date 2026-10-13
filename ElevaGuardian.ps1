@@ -157,6 +157,7 @@ $argsObj = @{
     PulaFases     = $PulaFases
     LogLevel      = $LogLevel
     Simulado      = [bool]$Simulado
+    Silencioso     = [bool]$Silencioso
 }
 
 try {
@@ -174,6 +175,7 @@ catch {
 # NÃO repassar mais argumentos pela linha de comando
 $argString = "-ExecutionPolicy Bypass -NoProfile -File `"$ScriptPath`""
 if ($NonInteractive) { $argString += " -NonInteractive" }
+if ($Silencioso) { $argString += " -Silencioso" }
 
 # -------------------------------
 # Configuração da janela

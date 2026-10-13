@@ -273,9 +273,9 @@ try {
                 if ($node) { $node.InnerText = 'false' }
                 else { $node = $silXml.CreateElement($flag,$ns); $node.InnerText = 'false'; $settings.AppendChild($node) | Out-Null }
             }
-            $nomeSilencioso = $guardianPrincipal.TaskName + ' - Execução Silenciosa'
+            $nomeSilencioso = ($guardianPrincipal.TaskName -replace '^1\.', '2.') + ' - Execução Silenciosa'
             Register-ScheduledTask -TaskName $nomeSilencioso -TaskPath $taskFolder -Xml $silXml.OuterXml -Force -ErrorAction Stop | Out-Null
-            foreach ($old in @('2. Guardian System','Guardian System','2. Guardian Silencioso','1. Guardian (Usuários Administradores) - Execução Silenciosa','1. Guardian (Usuários Restritos) - Execução Silenciosa')) {
+            foreach ($old in @('2. Guardian System','Guardian System','2. Guardian Silencioso','1. Guardian (Usuários Administradores) - Execução Silenciosa','1. Guardian (Usuários Restritos) - Execução Silenciosa','2. Guardian (Usuários Administradores) - Execução Silenciosa','2. Guardian (Usuários Restritos) - Execução Silenciosa')) {
                 if ($old -eq $nomeSilencioso) { continue }
                 if (Get-ScheduledTask -TaskName $old -TaskPath $taskFolder -ErrorAction SilentlyContinue) {
                     Unregister-ScheduledTask -TaskName $old -TaskPath $taskFolder -Confirm:$false -ErrorAction Stop
@@ -291,20 +291,25 @@ try {
 
     # ----- TASK DO GUARDIAN GHOST (dias 21-25, 12:00, ociosidade 10min, aguardar 2h) -----
     $ghostTask = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
-                 Where-Object { $_.TaskName -in @("3. Guardian Integridade do Sistema","3. Guardian Ghost") }
+                 Where-Object { $_.TaskName -in @("3. Guardian - Integridade do Sistema","3. Guardian Integridade do Sistema","3. Guardian Ghost") }
 
     # Migra o nome antigo sem alterar o agendamento do Ghost existente.
-    $oldGhost = Get-ScheduledTask -TaskName '3. Guardian Ghost' -TaskPath $taskFolder -ErrorAction SilentlyContinue
-    $newGhost = Get-ScheduledTask -TaskName '3. Guardian Integridade do Sistema' -TaskPath $taskFolder -ErrorAction SilentlyContinue
-    if ($oldGhost -and -not $newGhost) {
-        try {
-            $ghostXml = Export-ScheduledTask -TaskName '3. Guardian Ghost' -TaskPath $taskFolder
-            Register-ScheduledTask -TaskName '3. Guardian Integridade do Sistema' -TaskPath $taskFolder -Xml $ghostXml -Force -ErrorAction Stop | Out-Null
-            Unregister-ScheduledTask -TaskName '3. Guardian Ghost' -TaskPath $taskFolder -Confirm:$false -ErrorAction Stop
-            $ghostTask = Get-ScheduledTask -TaskName '3. Guardian Integridade do Sistema' -TaskPath $taskFolder
-        } catch { Write-Warning "Falha ao renomear Ghost: $($_.Exception.Message)" }
+    foreach ($legacyName in @('3. Guardian Integridade do Sistema','3. Guardian Ghost')) {
+        $legacyTask = Get-ScheduledTask -TaskName $legacyName -TaskPath $taskFolder -ErrorAction SilentlyContinue
+        $newGhost = Get-ScheduledTask -TaskName '3. Guardian - Integridade do Sistema' -TaskPath $taskFolder -ErrorAction SilentlyContinue
+        if ($legacyTask) {
+            try {
+                if (-not $newGhost) {
+                    $ghostXml = Export-ScheduledTask -TaskName $legacyName -TaskPath $taskFolder
+                    Register-ScheduledTask -TaskName '3. Guardian - Integridade do Sistema' -TaskPath $taskFolder -Xml $ghostXml -Force -ErrorAction Stop | Out-Null
+                }
+                Unregister-ScheduledTask -TaskName $legacyName -TaskPath $taskFolder -Confirm:$false -ErrorAction Stop
+                $ghostTask = Get-ScheduledTask -TaskName '3. Guardian - Integridade do Sistema' -TaskPath $taskFolder
+            } catch { Write-Warning "Falha ao renomear tarefa de integridade: $($_.Exception.Message)" }
+        }
     }
 
+    $ghostTask = Get-ScheduledTask -TaskName "3. Guardian - Integridade do Sistema" -TaskPath $taskFolder -ErrorAction SilentlyContinue
     $ghostPrecisaAjustar = $false
 
     if (-not $ghostTask) {
@@ -342,7 +347,7 @@ try {
             -Hidden
 
         Register-ScheduledTask `
-            -TaskName "3. Guardian Integridade do Sistema" `
+            -TaskName "3. Guardian - Integridade do Sistema" `
             -TaskPath $taskFolder `
             -Action $action `
             -Trigger $triggerGhost `
@@ -352,7 +357,7 @@ try {
             -Force | Out-Null
 
         # Passo 2: Exportar e corrigir trigger + idle via XML
-        $xml = [xml](Export-ScheduledTask -TaskName "3. Guardian Integridade do Sistema" -TaskPath $taskFolder)
+        $xml = [xml](Export-ScheduledTask -TaskName "3. Guardian - Integridade do Sistema" -TaskPath $taskFolder)
         try {
             if ($guardianPrincipal) {
                 $principalXmlCompat = [xml](Export-ScheduledTask -TaskName $guardianPrincipal.TaskName -TaskPath $taskFolder)
@@ -422,7 +427,7 @@ try {
         $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
         $idleSettings.AppendChild($restartEl) | Out-Null
 
-        Register-ScheduledTask -TaskName "3. Guardian Integridade do Sistema" -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
+        Register-ScheduledTask -TaskName "3. Guardian - Integridade do Sistema" -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
         Unregister-ScheduledTask -TaskName "Guardian Ghost" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
         Write-Host "[Guardian Integridade do Sistema] Tarefa criada/corrigida: dias 21-25, 12:00." -ForegroundColor Green
     }
@@ -454,6 +459,7 @@ if ($ExecutaFases)   { $argList += '-ExecutaFases'; $argList += ($ExecutaFases -
 if ($PulaFases)      { $argList += '-PulaFases'; $argList += ($PulaFases -join ',') }
 if ($LogLevel)       { $argList += '-LogLevel'; $argList += $LogLevel }
 if ($Simulado)       { $argList += '-Simulado' }
+if ($Silencioso)      { $argList += '-Silencioso' }
 if ($FileServer)     { $argList += '-FileServer'; $argList += $FileServer }
 if ($Cliente)        { $argList += '-Cliente'; $argList += "`"$Cliente`"" }
 
