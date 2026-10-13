@@ -12,6 +12,7 @@ param (
 
     # Opções de janela
     [switch]$NoWindow,
+    [switch]$Silencioso,
     [switch]$NonInteractive,
     [switch]$Maximized,
 
@@ -177,7 +178,7 @@ if ($NonInteractive) { $argString += " -NonInteractive" }
 # -------------------------------
 # Configuração da janela
 # -------------------------------
-$winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } else { 'Normal' }
+$winStyle = if ($NoWindow -or $Silencioso) { 'Hidden' } elseif ($Maximized) { 'Maximized' } else { 'Normal' }
 
 # -------------------------------
 # Log do comando final
