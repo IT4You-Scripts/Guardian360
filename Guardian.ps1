@@ -828,7 +828,7 @@ $hasHDD = ($hddList.Count -gt 0)
       )},
     @{ Id=6; Title='Atualizações dos programas instalados'; Steps=@(
         # @{ Name='Block-AppUpdates';  Action={ Block-AppUpdates } },
-        @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps -AtualizarUsuario:$script:GuardianViaEleva } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
+        @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps -AtualizarUsuario:($script:GuardianViaEleva -or ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18')) } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
       )},
     @{ Id=7; Title='Pós-atualização / Componentes'; Steps=@(
         @{ Name='Remove-OldUpdateFiles'; Action={ Remove-OldUpdateFiles } }
