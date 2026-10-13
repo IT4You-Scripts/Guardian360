@@ -561,6 +561,28 @@ foreach ($item in $AtomicTargets) {
     }
     # =========================================================================
 
+    # Limpeza final idempotente: manter exclusivamente a Principal, a Silenciosa correspondente e a Integridade.
+try {
+    $taskFolder = '\Guardian\'
+    $tasksAtuais = @(Get-ScheduledTask -TaskPath $taskFolder -ErrorAction Stop)
+    $principal = $tasksAtuais | Where-Object { $_.TaskName -in @('1. Guardian (Usuários Administradores)','1. Guardian (Usuários Restritos)') } | Select-Object -First 1
+    if (-not $principal) { throw 'Tarefa Principal nao encontrada; limpeza cancelada.' }
+    $silenciosaEsperada = ($principal.TaskName -replace '^1\.', '2.') + ' - Execução Silenciosa'
+    $nomesValidos = @($principal.TaskName, $silenciosaEsperada, '3. Guardian - Integridade do Sistema')
+    if (-not (Get-ScheduledTask -TaskName $silenciosaEsperada -TaskPath $taskFolder -ErrorAction SilentlyContinue)) {
+        throw 'Tarefa silenciosa esperada nao encontrada; limpeza cancelada.'
+    }
+    if (-not (Get-ScheduledTask -TaskName '3. Guardian - Integridade do Sistema' -TaskPath $taskFolder -ErrorAction SilentlyContinue)) {
+        throw 'Tarefa de integridade esperada nao encontrada; limpeza cancelada.'
+    }
+    foreach ($task in $tasksAtuais) {
+        if ($task.TaskName -notin $nomesValidos) {
+            Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder -Confirm:$false -ErrorAction Stop
+            Write-Host "[Guardian] Tarefa obsoleta removida: $($task.TaskName)" -ForegroundColor Yellow
+        }
+    }
+} catch { Write-Warning "[Guardian] Falha na limpeza final das tarefas: $($_.Exception.Message)" }
+
     Show-Header "Atualização concluída com sucesso!" -Color Green
 }
 

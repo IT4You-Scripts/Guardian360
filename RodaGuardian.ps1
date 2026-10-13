@@ -483,6 +483,8 @@ try {
         if ($_ -match '\s') { '"{0}"' -f ($_ -replace '"','\"') } else { $_ }
     }) -join ' '
 
+    # Marcador herdado pelo processo filho, independente da passagem de argumentos.
+    if ($Silencioso) { $env:GUARDIAN_EXECUCAO_SILENCIOSA = '1' }
     $procGuardian = Start-Process `
         -FilePath $PwshPath `
         -ArgumentList $argStringGuardian `
