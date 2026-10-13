@@ -91,7 +91,7 @@
                             "-Command",
                             $registerCommand
                         ) `
-                        -NoNewWindow `
+                        -WindowStyle Hidden `
                         -Wait `
                         -PassThru
 
@@ -126,7 +126,7 @@
                     "reset",
                     "--force"
                 ) `
-                -NoNewWindow `
+                -WindowStyle Hidden `
                 -Wait `
                 -PassThru
 
@@ -156,7 +156,7 @@
                     "update",
                     "--disable-interactivity"
                 ) `
-                -NoNewWindow `
+                -WindowStyle Hidden `
                 -Wait `
                 -PassThru
 
@@ -202,7 +202,7 @@
                 "--accept-package-agreements",
                 "--accept-source-agreements"
             ) `
-            -NoNewWindow `
+            -WindowStyle Hidden `
             -Wait `
             -PassThru
 
@@ -248,10 +248,15 @@
 $ErrorActionPreference = 'Stop'
 $codes = @()
 try {
-    winget.exe upgrade --all --source msstore --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
-    $codes += [int]$LASTEXITCODE
-    winget.exe upgrade --all --source winget --scope user --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
-    $codes += [int]$LASTEXITCODE
+    $winget = (Get-Command winget.exe -ErrorAction Stop).Source
+    $common = @('--silent', '--disable-interactivity', '--accept-package-agreements', '--accept-source-agreements')
+    foreach ($sourceName in @('msstore', 'winget')) {
+        # Nao restringir a --scope user: Notepad++ e outros aplicativos podem
+        # estar instalados por maquina e ainda serem atualizaveis pelo usuario.
+        $arguments = @('upgrade', '--all', '--source', $sourceName) + $common
+        $p = Start-Process -FilePath $winget -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop
+        $codes += [int]$p.ExitCode
+    }
 } catch { $codes += 1 }
 $final = if (@($codes | Where-Object { $_ -ne 0 }).Count -gt 0) { 1 } else { 0 }
 [System.IO.File]::WriteAllText(__RESULT__, [string]$final)
