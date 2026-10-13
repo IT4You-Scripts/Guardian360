@@ -12,7 +12,6 @@ param (
 
     # Opções de janela
     [switch]$NoWindow,
-    [switch]$Silencioso,
     [switch]$NonInteractive,
     [switch]$Maximized,
 
@@ -157,7 +156,6 @@ $argsObj = @{
     PulaFases     = $PulaFases
     LogLevel      = $LogLevel
     Simulado      = [bool]$Simulado
-    Silencioso     = [bool]$Silencioso
 }
 
 try {
@@ -175,12 +173,11 @@ catch {
 # NÃO repassar mais argumentos pela linha de comando
 $argString = "-ExecutionPolicy Bypass -NoProfile -File `"$ScriptPath`""
 if ($NonInteractive) { $argString += " -NonInteractive" }
-if ($Silencioso) { $argString += " -Silencioso" }
 
 # -------------------------------
 # Configuração da janela
 # -------------------------------
-$winStyle = if ($NoWindow -or $Silencioso) { 'Hidden' } elseif ($Maximized) { 'Maximized' } else { 'Normal' }
+$winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } else { 'Normal' }
 
 # -------------------------------
 # Log do comando final
