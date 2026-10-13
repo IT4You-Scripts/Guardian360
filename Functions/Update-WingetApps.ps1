@@ -222,7 +222,9 @@
         $taskCreated = $false
         $resultFile = $null
 
-        if ($AtualizarUsuario) {
+        # SYSTEM executa na sessao 0. Nunca iniciar tarefas no desktop do usuario.
+        $executandoComoSystem = ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18')
+        if ($AtualizarUsuario -and -not $executandoComoSystem) {
         try {
             $consoleUser = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName
             if ([string]::IsNullOrWhiteSpace($consoleUser)) {
