@@ -91,7 +91,7 @@
                             "-Command",
                             $registerCommand
                         ) `
-                        -WindowStyle Hidden `
+                        -NoNewWindow `
                         -Wait `
                         -PassThru
 
@@ -126,7 +126,7 @@
                     "reset",
                     "--force"
                 ) `
-                -WindowStyle Hidden `
+                -NoNewWindow `
                 -Wait `
                 -PassThru
 
@@ -156,7 +156,7 @@
                     "update",
                     "--disable-interactivity"
                 ) `
-                -WindowStyle Hidden `
+                -NoNewWindow `
                 -Wait `
                 -PassThru
 
@@ -202,7 +202,7 @@
                 "--accept-package-agreements",
                 "--accept-source-agreements"
             ) `
-            -WindowStyle Hidden `
+            -NoNewWindow `
             -Wait `
             -PassThru
 
@@ -222,7 +222,7 @@
         $taskCreated = $false
         $resultFile = $null
 
-        # SYSTEM executa na sessao 0. Nunca iniciar tarefas no desktop do usuario.
+        # Execucao SYSTEM: nao iniciar WinGet na sessao interativa do usuario.
         $executandoComoSystem = ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18')
         if ($AtualizarUsuario -and -not $executandoComoSystem) {
         try {
@@ -250,15 +250,10 @@
 $ErrorActionPreference = 'Stop'
 $codes = @()
 try {
-    $winget = (Get-Command winget.exe -ErrorAction Stop).Source
-    $common = @('--silent', '--disable-interactivity', '--accept-package-agreements', '--accept-source-agreements')
-    foreach ($sourceName in @('msstore', 'winget')) {
-        # Nao restringir a --scope user: Notepad++ e outros aplicativos podem
-        # estar instalados por maquina e ainda serem atualizaveis pelo usuario.
-        $arguments = @('upgrade', '--all', '--source', $sourceName) + $common
-        $p = Start-Process -FilePath $winget -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop
-        $codes += [int]$p.ExitCode
-    }
+    winget.exe upgrade --all --source msstore --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
+    $codes += [int]$LASTEXITCODE
+    winget.exe upgrade --all --source winget --scope user --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
+    $codes += [int]$LASTEXITCODE
 } catch { $codes += 1 }
 $final = if (@($codes | Where-Object { $_ -ne 0 }).Count -gt 0) { 1 } else { 0 }
 [System.IO.File]::WriteAllText(__RESULT__, [string]$final)
