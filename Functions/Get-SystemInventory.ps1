@@ -224,7 +224,11 @@ function Get-SystemInventory {
                                         $releaseType=$sk.GetValue('ReleaseType')
                                         $parent=$sk.GetValue('ParentKeyName')
                                         if($dn -and -not $sys -and -not $parent -and ($releaseType -ne 'Update')){
-                                            [void]$names.Add([string]$dn)
+                                            # Remove NUL e caracteres de controle invalidos para o PostgreSQL.
+                                            $nomeLimpo = ([string]$dn).Replace([string][char]0, '').Trim()
+                                            if (-not [string]::IsNullOrWhiteSpace($nomeLimpo)) {
+                                                [void]$names.Add($nomeLimpo)
+                                            }
                                         }
                                     }
                                 } catch {}
