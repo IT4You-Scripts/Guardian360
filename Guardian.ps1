@@ -89,51 +89,80 @@ if ([string]::IsNullOrWhiteSpace($Cliente)) {
 }
 
 # ============================================================================================================================================================
-# BLOQUEIO POR CLIENTE (OFFBOARDING) — SILENCIOSO
+# OFFBOARDING — TALUDE: identificar pelo -Cliente das tarefas Guardian, nunca pelo JSON.
+# Nao remove arquivos, diretorios, servicos ou tarefas de outros nomes.
 # ============================================================================================================================================================
-# IMPORTANTE: este bloco deve ficar logo após o param() do script, ANTES de
-# qualquer outra lógica (leitura de JSON, logs, disparo de fases etc.)
-
-$DisabledClients = @(
-    'Soneca Company',
-    'Talude Comercial e Construtora Ltda'
-)
-
 function Normalize-ClienteName {
     param([string]$Nome)
-
-    if ([string]::IsNullOrEmpty($Nome)) { return '' }
-
-    # Remove espaços não-quebráveis (U+00A0), zero-width (U+200B) e afins,
-    # colapsa espaços múltiplos e faz trim.
-    $n = $Nome -replace '[\u00A0\u200B\u2007\u202F]', ' '
-    $n = $n -replace '\s+', ' '
-    return $n.Trim()
+    if ([string]::IsNullOrWhiteSpace($Nome)) { return '' }
+    return (($Nome -replace '[\u00A0\u200B\u2007\u202F]', ' ') -replace '\s+', ' ').Trim()
 }
 
+$taludeOffboarding = 'Talude Comercial e Construtora Ltda'
 $clienteNorm = Normalize-ClienteName -Nome $Cliente
 
-$blocked = $false
-foreach ($dc in $DisabledClients) {
-    $dcNorm = Normalize-ClienteName -Nome $dc
-    if ([string]::Equals($clienteNorm, $dcNorm, [System.StringComparison]::OrdinalIgnoreCase)) {
-        $blocked = $true
-        break
-    }
-}
-
-if ($blocked) {
-
-    # Remove arquivo de argumentos para evitar reuso
-    $argJsonPath = "C:\Guardian\guardian_arg.json"
+# Preserva integralmente o bloqueio anterior da Soneca Company.
+if ([string]::Equals($clienteNorm, 'Soneca Company', [System.StringComparison]::OrdinalIgnoreCase)) {
     if (Test-Path $argJsonPath) {
         try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue } catch {}
     }
-
-    # Silêncio total: sem Write-Host, sem Write-Output, sem nada.
     exit 0
 }
 
+# Descobre o cliente por argumento EXPLICITO nas tarefas, e exige unanimidade.
+# A leitura deve funcionar mesmo quando guardian_arg.json nao existir.
+try {
+    $tarefasGuardian = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -match 'Guardian' })
+    $clientesNasTarefas = @()
+    foreach ($tarefa in $tarefasGuardian) {
+        foreach ($acao in @($tarefa.Actions)) {
+            $argumentos = [string]$acao.Arguments
+            # Aceita -Cliente "Nome Completo", -Cliente 'Nome Completo' ou -Cliente NomeSemEspacos.
+            $matchCliente = [regex]::Match($argumentos, '(?i)(?:^|\s)-Cliente\s+(?:"([^"]+)"|''([^'']+)''|([^\s]+))(?=\s|$)')
+            if ($matchCliente.Success) {
+                $valor = if ($matchCliente.Groups[1].Success) { $matchCliente.Groups[1].Value } elseif ($matchCliente.Groups[2].Success) { $matchCliente.Groups[2].Value } else { $matchCliente.Groups[3].Value }
+                $clientesNasTarefas += (Normalize-ClienteName -Nome $valor)
+            }
+        }
+    }
+
+    $clientesDistintos = @($clientesNasTarefas | Where-Object { $_ } | Sort-Object -Unique)
+    $taludeConfirmada = ($clientesDistintos.Count -eq 1 -and
+        [string]::Equals($clientesDistintos[0], $taludeOffboarding, [System.StringComparison]::OrdinalIgnoreCase))
+
+    if ($taludeConfirmada) {
+        # Em modo simulado, nenhuma tarefa e removida.
+        if ($Simulado) {
+            foreach ($tarefa in $tarefasGuardian) {
+                Write-Output "[SIMULACAO TALUDE] Removeria tarefa: $($tarefa.TaskPath)$($tarefa.TaskName)"
+            }
+            exit 0
+        }
+        # Fail closed: se nao houver elevacao, nao executar a vistoria nem tentar exclusao parcial.
+        $administrador = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        if (-not $administrador) { exit 1 }
+
+        $falhou = $false
+        foreach ($tarefa in $tarefasGuardian) {
+            try {
+                Unregister-ScheduledTask -TaskName $tarefa.TaskName -TaskPath $tarefa.TaskPath -Confirm:$false -ErrorAction Stop
+            } catch {
+                $falhou = $true
+                Write-Warning "Offboarding Talude: falha ao remover tarefa $($tarefa.TaskPath)$($tarefa.TaskName): $($_.Exception.Message)"
+            }
+        }
+        if ($falhou) { exit 1 }
+        exit 0
+    }
+} catch {
+    # Falha na consulta nao autoriza nenhuma exclusao.
+    Write-Warning "Offboarding: impossivel validar tarefas agendadas: $($_.Exception.Message)"
+}
+
+# Preserva o bloqueio existente por parametro para Talude, mesmo se a tarefa nao for identificada.
+if ([string]::Equals($clienteNorm, $taludeOffboarding, [System.StringComparison]::OrdinalIgnoreCase)) {
+    exit 0
+}
 
 # ============================================================================================================================================================
 
