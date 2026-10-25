@@ -49,9 +49,6 @@ function Optimize-PowerSettings {
             powercfg /change standby-timeout-dc 20 | Out-Null
         }
 
-        # Desativa hibernação
-        powercfg /h off | Out-Null
-
         Write-Host "Configurações de energia otimizadas." -ForegroundColor Green
 
         return "Configurações de energia otimizadas (High Performance + ajustes AC/DC)."
