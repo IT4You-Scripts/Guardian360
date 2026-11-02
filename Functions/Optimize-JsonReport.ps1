@@ -1,4 +1,4 @@
-<#
+﻿<#
 ====================================================================
   CONVERSOR Json
   - Hardware limpo (sem discos e sem partições)
@@ -1104,16 +1104,16 @@ try {
         Write-Host '[Telemetria] Funcao ausente; vistoria segue normalmente.' -ForegroundColor Yellow
     }
     else {
-        $inicioColetaTelemetria = Get-Date
+        # Descarta a coleta anterior antes de iniciar uma nova, sem comparar datas.
+        # Se nao conseguir removê-la, nao permite reutilizar dados antigos.
+        if (Test-Path -LiteralPath $arquivoTelemetria -PathType Leaf) {
+            Remove-Item -LiteralPath $arquivoTelemetria -Force -ErrorAction Stop
+        }
         # Executa a funcao validada; um erro nao deve bloquear a API principal.
         & $scriptTelemetria
 
         if (-not (Test-Path -LiteralPath $arquivoTelemetria -PathType Leaf)) {
-            throw 'Arquivo de telemetria nao gerado.'
-        }
-        $arquivoTelemetriaInfo = Get-Item -LiteralPath $arquivoTelemetria -ErrorAction Stop
-        if ($arquivoTelemetriaInfo.LastWriteTime -lt $inicioColetaTelemetria.AddSeconds(-2)) {
-            throw 'Arquivo de telemetria antigo; nao sera reutilizado.'
+            throw 'Arquivo de telemetria nao gerado nesta execucao.'
         }
 
         $telemetria = Get-Content -LiteralPath $arquivoTelemetria -Raw -Encoding UTF8 -ErrorAction Stop |
@@ -1129,10 +1129,6 @@ try {
         if ([string]::IsNullOrWhiteSpace($nomeComputador) -or
             $nomeComputador -ine [string]$telemetria.computador) {
             throw "Computadores diferentes: vistoria='$nomeComputador'; telemetria='$($telemetria.computador)'."
-        }
-        $dataTelemetria = [datetimeoffset]::Parse([string]$telemetria.coletado_em)
-        if ($dataTelemetria -lt ([datetimeoffset]$inicioColetaTelemetria).AddSeconds(-2)) {
-            throw 'Coleta de telemetria antiga.'
         }
         if ($jsonRaw.PSObject.Properties.Name -contains 'telemetria') {
             throw 'O JSON ja contem telemetria; nao sera sobrescrita.'
