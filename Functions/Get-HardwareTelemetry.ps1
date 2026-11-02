@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 Guardian 360 - telemetria isolada (fase de laboratorio)
 Destino sugerido: C:\Guardian\Functions\Get-HardwareTelemetry.ps1
@@ -98,6 +98,88 @@ function Get-Medida($leituras, [string]$categoria, [string]$tipo, [string[]]$nom
     return [math]::Round([double]$s.valor, 2)
 }
 
+
+# Seleciona temperaturas exclusivamente do hardware CPU. Os sensores de
+# distancia ate TjMax nao representam temperatura absoluta.
+# Prioridade: Package > Core Average > Core Max > nucleos individuais > CPU generico.
+# Na ausencia de agregados, a media e calculada entre os nucleos ativos,
+# e o maximo e o maior valor medido entre eles.
+function Get-CpuTemperatureSample($leituras) {
+    $candidatos = @($leituras | Where-Object {
+        $_.categoria -match 'Cpu' -and
+        $_.tipo -eq 'Temperature' -and
+        $null -ne $_.valor -and
+        [double]$_.valor -gt -20 -and [double]$_.valor -le 150 -and
+        $_.sensor -notmatch '(?i)distance|tjmax|delta|offset' -and
+        $_.sensor_id -notmatch '(?i)distance|tjmax'
+    })
+    if ($candidatos.Count -eq 0) { return $null }
+
+    $ordem = @(
+        @{ Nome = 'package'; Padrao = '(?i)^(CPU Package|Package|CPU Die|Tdie|CPU \(Tctl/Tdie\))$'; Tipo = 'um' },
+        @{ Nome = 'media_hardware'; Padrao = '(?i)^(Core Average|CPU Core Average|Core Temperatures Average)$'; Tipo = 'um' },
+        @{ Nome = 'maximo_hardware'; Padrao = '(?i)^(Core Max|CPU Core Max)$'; Tipo = 'um' },
+        @{ Nome = 'nucleos'; Padrao = '(?i)^(CPU Core|Core)\s*#?\s*\d+(?!\s*(?:Distance|Thread))'; Tipo = 'nucleos' },
+        @{ Nome = 'cpu_generico'; Padrao = '(?i)^(CPU Core|CPU Temperature|CPU Temp|CPU|Tctl|Tdie|Core Temperature)$'; Tipo = 'um' }
+    )
+
+    foreach ($regra in $ordem) {
+        $selecionados = @($candidatos | Where-Object { $_.sensor -match $regra.Padrao } |
+            Sort-Object sensor_id -Unique)
+        if ($selecionados.Count -eq 0) { continue }
+
+        $valores = @($selecionados | ForEach-Object { [double]$_.valor })
+        if ($regra.Tipo -eq 'nucleos') {
+            $media = ($valores | Measure-Object -Average).Average
+            $maximo = ($valores | Measure-Object -Maximum).Maximum
+        } else {
+            $media = $valores[0]
+            $maximo = $valores[0]
+            $selecionados = @($selecionados[0])
+        }
+
+        return [pscustomobject]@{
+            media = [double]$media
+            maxima = [double]$maximo
+            criterio = $regra.Nome
+            sensores = @($selecionados | ForEach-Object {
+                [pscustomobject]@{ nome=$_.sensor; id=$_.sensor_id; temperatura_c=[math]::Round([double]$_.valor, 2) }
+            })
+        }
+    }
+
+    # Sensores desconhecidos nao sao classificados automaticamente como CPU.
+    return $null
+}
+
+function Write-SensorSelectionLog([string]$caminho, $amostras, $selecoes) {
+    try {
+        $linhas = [System.Collections.Generic.List[string]]::new()
+        $linhas.Add("Guardian 360 - diagnostico de sensores da CPU")
+        $linhas.Add("Coletado em: $((Get-Date).ToString('o'))")
+        for ($i = 0; $i -lt $amostras.Count; $i++) {
+            $linhas.Add("Amostra $($i+1):")
+            $todos = @($amostras[$i] | Where-Object { $_.categoria -match 'Cpu' -and $_.tipo -eq 'Temperature' })
+            foreach ($s in $todos) {
+                $linhas.Add("  Detectado: $($s.sensor) [$($s.sensor_id)] = $($s.valor) C")
+            }
+            if ($null -eq $selecoes[$i]) {
+                $linhas.Add('  Selecao: nenhuma temperatura confiavel de CPU')
+            } else {
+                $linhas.Add("  Criterio: $($selecoes[$i].criterio)")
+                foreach ($sensor in $selecoes[$i].sensores) {
+                    $linhas.Add("  Utilizado: $($sensor.nome) [$($sensor.id)] = $($sensor.temperatura_c) C")
+                }
+            }
+        }
+        $logTemp = "$caminho.tmp"
+        $linhas | Set-Content -LiteralPath $logTemp -Encoding utf8 -ErrorAction Stop
+        Move-Item -LiteralPath $logTemp -Destination $caminho -Force -ErrorAction Stop
+    } catch {
+        # Log diagnostico e opcional e nunca deve interromper a coleta.
+    }
+}
+
 function Get-EventSummary([int[]]$ids, [string]$providerPattern, [datetime]$inicio) {
     # Leitura somente: nao apaga, modifica nem exporta logs do Windows.
     try {
@@ -187,20 +269,30 @@ try {
     }
     $leituras = $amostras[-1]
 
-    $cpuTemp = @()
-    $cpuCarga = @()
+    $cpuTemp = [System.Collections.Generic.List[double]]::new()
+    $cpuMax = [System.Collections.Generic.List[double]]::new()
+    $cpuCarga = [System.Collections.Generic.List[double]]::new()
+    $selecoesCpu = [System.Collections.Generic.List[object]]::new()
+
     foreach ($amostra in $amostras) {
-        $temp = Get-Medida $amostra 'Cpu' 'Temperature' @('CPU Package','Core Average','Core Max')
+        $selecao = Get-CpuTemperatureSample $amostra
+        $selecoesCpu.Add($selecao)
+        if ($null -ne $selecao) {
+            $cpuTemp.Add([double]$selecao.media)
+            $cpuMax.Add([double]$selecao.maxima)
+        }
         $carga = Get-Medida $amostra 'Cpu' 'Load' @('CPU Total')
-        if ($null -ne $temp) { $cpuTemp += $temp }
-        if ($null -ne $carga) { $cpuCarga += $carga }
+        if ($null -ne $carga) { $cpuCarga.Add([double]$carga) }
     }
+
+    Write-SensorSelectionLog (Join-Path $PastaMonitor 'telemetria-sensores.log') $amostras $selecoesCpu.ToArray()
+
     $cpuHardware = $leituras | Where-Object categoria -match 'Cpu' | Select-Object -First 1
     if ($null -ne $cpuHardware) {
         $resultado.cpu = [ordered]@{
             nome = $cpuHardware.hardware
             temperatura_media_c = $(if ($cpuTemp.Count) { [math]::Round(($cpuTemp | Measure-Object -Average).Average,2) } else { $null })
-            temperatura_max_c = $(if ($cpuTemp.Count) { [math]::Round(($cpuTemp | Measure-Object -Maximum).Maximum,2) } else { $null })
+            temperatura_max_c = $(if ($cpuMax.Count) { [math]::Round(($cpuMax | Measure-Object -Maximum).Maximum,2) } else { $null })
             uso_medio_pct = $(if ($cpuCarga.Count) { [math]::Round(($cpuCarga | Measure-Object -Average).Average,2) } else { $null })
             uso_max_pct = $(if ($cpuCarga.Count) { [math]::Round(($cpuCarga | Measure-Object -Maximum).Maximum,2) } else { $null })
         }
