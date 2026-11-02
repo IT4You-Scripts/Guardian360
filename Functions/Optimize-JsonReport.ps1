@@ -1093,6 +1093,60 @@ catch {
 }
 
 
+# ------------------------------------------------------------------------------
+# Telemetria opcional — nao interfere na vistoria ou no envio principal
+# ------------------------------------------------------------------------------
+try {
+    $scriptTelemetria = Join-Path $PSScriptRoot 'Get-HardwareTelemetry.ps1'
+    $arquivoTelemetria = 'C:\Guardian\Monitor\telemetria-teste.json'
+
+    if (-not (Test-Path -LiteralPath $scriptTelemetria -PathType Leaf)) {
+        Write-Host '[Telemetria] Funcao ausente; vistoria segue normalmente.' -ForegroundColor Yellow
+    }
+    else {
+        $inicioColetaTelemetria = Get-Date
+        # Executa a funcao validada; um erro nao deve bloquear a API principal.
+        & $scriptTelemetria
+
+        if (-not (Test-Path -LiteralPath $arquivoTelemetria -PathType Leaf)) {
+            throw 'Arquivo de telemetria nao gerado.'
+        }
+        $arquivoTelemetriaInfo = Get-Item -LiteralPath $arquivoTelemetria -ErrorAction Stop
+        if ($arquivoTelemetriaInfo.LastWriteTime -lt $inicioColetaTelemetria.AddSeconds(-2)) {
+            throw 'Arquivo de telemetria antigo; nao sera reutilizado.'
+        }
+
+        $telemetria = Get-Content -LiteralPath $arquivoTelemetria -Raw -Encoding UTF8 -ErrorAction Stop |
+            ConvertFrom-Json -Depth 100 -ErrorAction Stop
+
+        if ($null -eq $telemetria -or $telemetria -is [array] -or $telemetria.schema_version -ne 1) {
+            throw 'Estrutura de telemetria invalida.'
+        }
+        if ($telemetria.status -notin @('ok', 'parcial')) {
+            throw 'Status de telemetria invalido.'
+        }
+        $nomeComputador = [string]$jsonRaw.NomeComputador
+        if ([string]::IsNullOrWhiteSpace($nomeComputador) -or
+            $nomeComputador -ine [string]$telemetria.computador) {
+            throw "Computadores diferentes: vistoria='$nomeComputador'; telemetria='$($telemetria.computador)'."
+        }
+        $dataTelemetria = [datetimeoffset]::Parse([string]$telemetria.coletado_em)
+        if ($dataTelemetria -lt ([datetimeoffset]$inicioColetaTelemetria).AddSeconds(-2)) {
+            throw 'Coleta de telemetria antiga.'
+        }
+        if ($jsonRaw.PSObject.Properties.Name -contains 'telemetria') {
+            throw 'O JSON ja contem telemetria; nao sera sobrescrita.'
+        }
+
+        $jsonRaw | Add-Member -MemberType NoteProperty -Name 'telemetria' -Value $telemetria -ErrorAction Stop
+        Write-Host '[Telemetria] Incorporada ao JSON tratado.' -ForegroundColor Green
+    }
+}
+catch {
+    Write-Host "[Telemetria] Nao incorporada: $($_.Exception.Message). Vistoria segue normalmente." -ForegroundColor Yellow
+}
+
+
 # --------------------------------------------------------------------------
 # Exportar JSON final — No mesmo local do arquivo json original
 # --------------------------------------------------------------------------
