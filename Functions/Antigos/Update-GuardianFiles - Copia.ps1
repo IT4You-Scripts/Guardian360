@@ -1,4 +1,4 @@
-function Update-GuardianFiles {
+﻿function Update-GuardianFiles {
 
     $ErrorActionPreference = "Stop"
     $ProgressPreference   = "SilentlyContinue"
@@ -42,6 +42,7 @@ function Update-GuardianFiles {
     $Folders = @(
         $BasePath,
         "$BasePath\Functions",
+        "$BasePath\Monitor",
         "$BasePath\Assets\Images"
     )
 
@@ -162,6 +163,48 @@ foreach ($item in $AtomicTargets) {
         }
     }
 }
+
+    # --------------------------------------------------------------
+    # Telemetria - componentes opcionais, isolados do fluxo principal.
+    # Arquivos devem existir na mesma estrutura no GitHub.
+    # Uma falha aqui nao aborta a atualizacao nem o Guardian.
+    # --------------------------------------------------------------
+    $MonitorFiles = @(
+        @{ Repo = 'Functions/Get-HardwareTelemetry.ps1'; Dest = "$BasePath\Functions\Get-HardwareTelemetry.ps1" },
+        @{ Repo = 'Monitor/BlackSharp.Core.dll';          Dest = "$BasePath\Monitor\BlackSharp.Core.dll" },
+        @{ Repo = 'Monitor/DiskInfoToolkit.dll';           Dest = "$BasePath\Monitor\DiskInfoToolkit.dll" },
+        @{ Repo = 'Monitor/HidSharp.dll';                  Dest = "$BasePath\Monitor\HidSharp.dll" },
+        @{ Repo = 'Monitor/LibreHardwareMonitorLib.dll';  Dest = "$BasePath\Monitor\LibreHardwareMonitorLib.dll" },
+        @{ Repo = 'Monitor/RAMSPDToolkit-NDD.dll';         Dest = "$BasePath\Monitor\RAMSPDToolkit-NDD.dll" },
+        @{ Repo = 'Monitor/System.IO.Ports.dll';          Dest = "$BasePath\Monitor\System.IO.Ports.dll" },
+        @{ Repo = 'Monitor/System.Management.dll';        Dest = "$BasePath\Monitor\System.Management.dll" }
+    )
+
+    foreach ($MonitorFile in $MonitorFiles) {
+        $temporario = "$($MonitorFile.Dest).download"
+        try {
+            Invoke-WebRequest `
+                -Uri "$BaseUrl/$($MonitorFile.Repo)$NoCache" `
+                -OutFile $temporario `
+                -UseBasicParsing `
+                -Headers @{ 'Cache-Control' = 'no-cache' } `
+                -ErrorAction Stop
+
+            if ((Get-Item -LiteralPath $temporario -ErrorAction Stop).Length -eq 0) {
+                throw 'Download vazio'
+            }
+            if (Test-Path -LiteralPath $MonitorFile.Dest) {
+                attrib -R $MonitorFile.Dest 2>$null
+            }
+            Move-Item -LiteralPath $temporario -Destination $MonitorFile.Dest -Force -ErrorAction Stop
+        }
+        catch {
+            Write-Host "Aviso: telemetria nao atualizada ($($MonitorFile.Repo)): $($_.Exception.Message)" -ForegroundColor DarkYellow
+        }
+        finally {
+            Remove-Item -LiteralPath $temporario -Force -ErrorAction SilentlyContinue
+        }
+    }
 
     # Final OK
     Show-Header "Atualização concluída com sucesso!" -Color Green

@@ -1143,6 +1143,49 @@ catch {
 
 $nomeOut = Join-Path $arquivo.DirectoryName (($arquivo.BaseName) + "_TRATADO.json")
 
+# ------------------------------------------------------------------------------
+# Sanitizacao Unicode do objeto FINAL, apos incorporar a telemetria.
+# O PostgreSQL (jsonb) nao aceita U+0000, mesmo serializado como \u0000.
+# Somente remove caracteres NUL de valores string; preserva arrays, objetos,
+# numeros, booleanos, datas e a estrutura do relatorio.
+# ------------------------------------------------------------------------------
+function Remove-GuardianNullChars {
+    param([AllowNull()][object]$Valor)
+
+    if ($null -eq $Valor) { return $null }
+
+    if ($Valor -is [string]) {
+        return $Valor.Replace([string][char]0, '')
+    }
+
+    if ($Valor -is [System.Collections.IDictionary]) {
+        foreach ($chave in @($Valor.Keys)) {
+            $Valor[$chave] = Remove-GuardianNullChars -Valor $Valor[$chave]
+        }
+        return ,$Valor
+    }
+
+    if ($Valor -is [System.Collections.IList]) {
+        for ($i = 0; $i -lt $Valor.Count; $i++) {
+            $Valor[$i] = Remove-GuardianNullChars -Valor $Valor[$i]
+        }
+        return ,$Valor
+    }
+
+    if ($Valor -is [pscustomobject]) {
+        foreach ($propriedade in $Valor.PSObject.Properties) {
+            if ($propriedade.IsSettable) {
+                $propriedade.Value = Remove-GuardianNullChars -Valor $propriedade.Value
+            }
+        }
+        return $Valor
+    }
+
+    return $Valor
+}
+
+$jsonRaw = Remove-GuardianNullChars -Valor $jsonRaw
+
 $jsonRaw | ConvertTo-Json -Depth 20 |
     Out-File $nomeOut -Encoding UTF8
 
