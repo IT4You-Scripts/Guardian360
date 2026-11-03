@@ -1098,26 +1098,20 @@ catch {
 # ------------------------------------------------------------------------------
 try {
     $scriptTelemetria = Join-Path $PSScriptRoot 'Get-HardwareTelemetry.ps1'
-    $arquivoTelemetria = 'C:\Guardian\Monitor\telemetria-teste.json'
 
     if (-not (Test-Path -LiteralPath $scriptTelemetria -PathType Leaf)) {
         Write-Host '[Telemetria] Funcao ausente; vistoria segue normalmente.' -ForegroundColor Yellow
     }
     else {
-        # Descarta a coleta anterior antes de iniciar uma nova, sem comparar datas.
-        # Se nao conseguir removê-la, nao permite reutilizar dados antigos.
-        if (Test-Path -LiteralPath $arquivoTelemetria -PathType Leaf) {
-            Remove-Item -LiteralPath $arquivoTelemetria -Force -ErrorAction Stop
+        # Coletor devolve um objeto em memoria; nenhum JSON temporario e utilizado.
+        $retornoTelemetria = @(& $scriptTelemetria)
+        $objetosTelemetria = @($retornoTelemetria | Where-Object {
+            $null -ne $_ -and $_.PSObject.Properties.Name -contains 'schema_version'
+        })
+        if ($objetosTelemetria.Count -ne 1) {
+            throw "Esperado um objeto de telemetria; recebidos $($objetosTelemetria.Count)."
         }
-        # Executa a funcao validada; um erro nao deve bloquear a API principal.
-        & $scriptTelemetria
-
-        if (-not (Test-Path -LiteralPath $arquivoTelemetria -PathType Leaf)) {
-            throw 'Arquivo de telemetria nao gerado nesta execucao.'
-        }
-
-        $telemetria = Get-Content -LiteralPath $arquivoTelemetria -Raw -Encoding UTF8 -ErrorAction Stop |
-            ConvertFrom-Json -Depth 100 -ErrorAction Stop
+        $telemetria = $objetosTelemetria[0]
 
         if ($null -eq $telemetria -or $telemetria -is [array] -or $telemetria.schema_version -ne 1) {
             throw 'Estrutura de telemetria invalida.'

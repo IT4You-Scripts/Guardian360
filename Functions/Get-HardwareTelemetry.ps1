@@ -1,15 +1,18 @@
 ﻿#Requires -Version 7.0
 <#
-Guardian 360 - telemetria isolada (fase de laboratorio)
+Guardian 360 - telemetria em memoria (fallback Dell SMM)
 Destino sugerido: C:\Guardian\Functions\Get-HardwareTelemetry.ps1
 Bibliotecas: C:\Guardian\Monitor\*.dll
-Saida local: C:\Guardian\Monitor\telemetria-teste.json
-Nao altera Guardian.ps1, tarefas, API ou banco de dados.
+Saida: objeto PowerShell (nenhum JSON de laboratorio gerado)
+Nao altera tarefas nem envia diretamente a API; integracao depende do transmissor existente.
+Fallback Dell SMM opcional: -SemDellSMM para desativar.
+Executa apenas DellFanCmd rpm-fan1, apos fechar o LibreHardwareMonitor.
 Instala PawnIO 2.2.0 silenciosamente apenas se ausente, mediante assinatura valida.
 #>
 [CmdletBinding()]
 param(
     [switch]$SemInstalarPawnIO,
+    [switch]$SemDellSMM,
     [int]$DiasEventos = 35,
     [string]$PastaMonitor = 'C:\Guardian\Monitor'
 )
@@ -17,7 +20,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $avisos = [System.Collections.Generic.List[string]]::new()
 $versaoPawnIO = '2.2.0'
-$saida = Join-Path $PastaMonitor 'telemetria-teste.json'
+
 
 function Test-PawnIODriver {
     try {
@@ -335,20 +338,83 @@ try {
     if ($null -ne $computer) { try { $computer.Close() } catch {} }
 }
 
+# Fallback experimental Dell SMM, somente leitura.
+# Somente executado depois de fechar a instancia LibreHardwareMonitor.
+# O driver e seus arquivos devem estar previamente instalados no laboratorio.
+# Nao distribui, instala, desativa protecoes nem altera o controle da ventoinha.
+if (-not $SemDellSMM -and @($resultado.ventoinhas).Count -eq 0) {
+    try {
+        $sistemaDell = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        $fabricanteDell = ([string]$sistemaDell.Manufacturer -match '(?i)dell')
+        $portatilDell = ($sistemaDell.PCSystemType -eq 2)
+
+        if ($fabricanteDell -and -not $portatilDell) {
+            $gabinetesDell = @(Get-CimInstance Win32_SystemEnclosure -ErrorAction SilentlyContinue)
+            foreach ($gabineteDell in $gabinetesDell) {
+                if (@($gabineteDell.ChassisTypes | Where-Object {
+                    $_ -in @(8,9,10,11,12,14,18,21,30,31,32)
+                }).Count -gt 0) {
+                    $portatilDell = $true
+                    break
+                }
+            }
+        }
+
+        if ($fabricanteDell -and $portatilDell) {
+            $pastaDell = Join-Path $PastaMonitor 'DellFanCmd'
+            $exeDell = Join-Path $pastaDell 'DellFanCmd.exe'
+            $dllDell = Join-Path $pastaDell 'DellFanLib.dll'
+            $driverDell = Join-Path $pastaDell 'bzh_dell_smm_io_x64.sys'
+
+            if (-not ((Test-Path -LiteralPath $exeDell -PathType Leaf) -and
+                       (Test-Path -LiteralPath $dllDell -PathType Leaf) -and
+                       (Test-Path -LiteralPath $driverDell -PathType Leaf))) {
+                $avisos.Add('Dell SMM: arquivos ausentes; RPM indisponivel.')
+            } else {
+                $assinaturaDell = Get-AuthenticodeSignature -LiteralPath $driverDell -ErrorAction Stop
+                if ($assinaturaDell.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+                    $avisos.Add("Dell SMM: assinatura do driver nao validada ($($assinaturaDell.Status)).")
+                } else {
+                    $processoDell = $null
+                    try {
+                        $inicioDell = [System.Diagnostics.ProcessStartInfo]::new()
+                        $inicioDell.FileName = $exeDell
+                        $inicioDell.Arguments = 'rpm-fan1'
+                        $inicioDell.WorkingDirectory = $pastaDell
+                        $inicioDell.UseShellExecute = $false
+                        $inicioDell.CreateNoWindow = $true
+
+                        $processoDell = [System.Diagnostics.Process]::Start($inicioDell)
+                        if ($null -eq $processoDell) { throw 'Nao foi possivel iniciar DellFanCmd.' }
+
+                        if (-not $processoDell.WaitForExit(8000)) {
+                            try { $processoDell.Kill($true) } catch {}
+                            $avisos.Add('Dell SMM: tempo limite de 8 segundos excedido; RPM indisponivel.')
+                        } else {
+                            # DellFanCmd 2.1.1 retorna a leitura de RPM no exit code.
+                            $rpmDell = [int]$processoDell.ExitCode
+                            if ($rpmDell -ge 100 -and $rpmDell -le 15000) {
+                                $resultado.ventoinhas = @(
+                                    [ordered]@{ controlador='Dell SMM'; sensor='CPU Fan'; rpm=$rpmDell }
+                                )
+                            } else {
+                                $avisos.Add("Dell SMM: leitura RPM indisponivel (codigo $rpmDell).")
+                            }
+                        }
+                    } finally {
+                        if ($null -ne $processoDell) { $processoDell.Dispose() }
+                    }
+                }
+            }
+        }
+    } catch {
+        $avisos.Add("Dell SMM: falha no fallback: $($_.Exception.Message)")
+    }
+}
+
 $resultado.avisos = @($avisos.ToArray())
 if ($resultado.status -eq 'ok' -and $avisos.Count -gt 0) { $resultado.status = 'parcial' }
 
-try {
-    New-Item -ItemType Directory -Path $PastaMonitor -Force -ErrorAction Stop | Out-Null
-    $temporario = Join-Path $PastaMonitor ('telemetria-teste.' + [guid]::NewGuid().ToString('N') + '.tmp')
-    try {
-        $resultado | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $temporario -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporario -Destination $saida -Force -ErrorAction Stop
-    } finally {
-        Remove-Item -LiteralPath $temporario -Force -ErrorAction SilentlyContinue
-    }
-    Write-Host "Telemetria salva em: $saida"
-    Write-Host "Status: $($resultado.status); avisos: $($avisos.Count)"
-} catch {
-    Write-Warning "Nao foi possivel gravar telemetria local: $($_.Exception.Message)"
-}
+# Retorna objeto em memoria para o transmissor oficial do Guardian.
+# Nenhum arquivo telemetria-teste.json e criado.
+[pscustomobject]$resultado

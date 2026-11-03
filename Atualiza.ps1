@@ -249,9 +249,28 @@ foreach ($item in $AtomicTargets) {
         @{ Relative = 'Monitor/System.Management.dll'; Dest = "$MonitorPath\System.Management.dll" }
     )
 
+    # Binarios opcionais somente em notebooks Dell. Falhas nao abortam a atualizacao.
+    try {
+        $csDellSMM = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+        $ehDell = ([string]$csDellSMM.Manufacturer -match '(?i)dell')
+        $ehNotebook = ($csDellSMM.PCSystemType -eq 2)
+        if (-not $ehNotebook) {
+            $ehNotebook = @((Get-CimInstance Win32_SystemEnclosure -ErrorAction Stop).ChassisTypes |
+                Where-Object { $_ -in @(8,9,10,11,12,14,18,21,30,31,32) }).Count -gt 0
+        }
+        if ($ehDell -and $ehNotebook) {
+            $TelemetryFiles += @(
+            @{ Relative = 'Monitor/DellFanCmd/DellFanCmd.exe'; Dest = "$MonitorPath\DellFanCmd\DellFanCmd.exe" },
+            @{ Relative = 'Monitor/DellFanCmd/DellFanLib.dll'; Dest = "$MonitorPath\DellFanCmd\DellFanLib.dll" },
+            @{ Relative = 'Monitor/DellFanCmd/bzh_dell_smm_io_x64.sys'; Dest = "$MonitorPath\DellFanCmd\bzh_dell_smm_io_x64.sys" }
+            )
+        }
+    } catch { Write-Warning "Dell SMM: identificacao indisponivel; download ignorado." }
+
     try {
         New-Item -ItemType Directory -Path $MonitorPath -Force -ErrorAction Stop | Out-Null
         foreach ($entry in $TelemetryFiles) {
+            try { New-Item -ItemType Directory -Path (Split-Path -Parent $entry.Dest) -Force -ErrorAction Stop | Out-Null } catch { continue }
             $tmp = "$($entry.Dest).telemetry-download"
             try {
                 Invoke-WebRequest -Uri "$BaseUrl/$($entry.Relative)$NoCache" `
