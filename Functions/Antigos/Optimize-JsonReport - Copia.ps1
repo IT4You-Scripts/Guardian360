@@ -861,14 +861,8 @@ catch {}
 # ------------------------------------------------------------------------------
 
 # =============== 1. Integridade do Sistema (SFC/DISM) ===============
-$notaIntegridade = 0
-if ($fase2) {
-    if ($fase2.Mensagem.IntegridadeArquivos -eq "OK") {
-        $notaIntegridade = 100
-    } else {
-        $notaIntegridade = 100
-    }
-}
+# Nota sempre 100 — a Fase 2 agora roda separadamente via Guardian Ghost
+$notaIntegridade = 100
 
 # =============== 2. Atualizações (Windows + Store + Winget) ===============
 $notaAtualizacoes = 0
@@ -1122,23 +1116,37 @@ Write-Host ""
 $apiUrl = "https://guardian.it4you.com.br/api/insert-single"
 
 
-try {
-    $jsonParaApi = Get-Content $nomeOut -Raw -Encoding UTF8
+$jsonParaApi = Get-Content $nomeOut -Raw -Encoding UTF8
 
-    $response = Invoke-RestMethod `
-        -Uri $apiUrl `
-        -Method POST `
-        -Body $jsonParaApi `
-        -ContentType "application/json; charset=utf-8"`
-        -TimeoutSec 10
+$apiIntegrada = $false
+$maxTentativasApi = 3
 
-    Write-Host "🚀 Integração realizada com sucesso via API!" -ForegroundColor Cyan
-    #Write-Host "  computador_id : $($response.computador_id)" -ForegroundColor Gray
-    #Write-Host "  vistoria_id   : $($response.vistoria_id)" -ForegroundColor Gray
-    #Write-Host "  nota saúde    : $($jsonRaw.SaudeGeral.Nota) - $($jsonRaw.SaudeGeral.Classificacao)" -ForegroundColor Gray
+for ($tentativaApi = 1; $tentativaApi -le $maxTentativasApi; $tentativaApi++) {
+    try {
+        $response = Invoke-RestMethod `
+            -Uri $apiUrl `
+            -Method POST `
+            -Body $jsonParaApi `
+            -ContentType "application/json; charset=utf-8" `
+            -TimeoutSec 10
 
-} catch {
-    # Write-Host "`n⚠ Falha ao enviar para a API: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "🚀 Integração realizada com sucesso via API!" -ForegroundColor Cyan
+        $apiIntegrada = $true
+        break
+
+    } catch {
+        Write-Host "⚠ Falha ao enviar para a API - tentativa $tentativaApi/$maxTentativasApi`: $($_.Exception.Message)" -ForegroundColor Yellow
+
+        if ($tentativaApi -lt $maxTentativasApi) {
+            $esperaApi = if ($tentativaApi -eq 1) { 5 } else { 10 }
+            Write-Host "[API] Nova tentativa em $esperaApi segundos..." -ForegroundColor Yellow
+            Start-Sleep -Seconds $esperaApi
+        }
+    }
+}
+
+if (-not $apiIntegrada) {
+    Write-Host "⚠ Não foi possível integrar com a API após 3 tentativas." -ForegroundColor Yellow
 }
 
 Write-Host ""
