@@ -200,59 +200,6 @@ function Get-EventSummary([int[]]$ids, [string]$providerPattern, [datetime]$inic
     }
 }
 
-# Detalhamento opcional por disco fisico. Nao altera o total legado.
-# Identifica somente eventos que citam explicitamente HarddiskN ou Disk N;
-# referencias a RaidPort/controladores sem numero fisico ficam sem identificacao.
-function Get-DiskEventBreakdown([datetime]$inicio) {
-    $idsDisco = @(7,51,129,153,157)
-    $provedores = '(^Disk$|storahci|stornvme|iaStor|storport)'
-    $discosFisicos = @(Get-CimInstance -ClassName Win32_DiskDrive -ErrorAction Stop |
-        Where-Object { $null -ne $_.Index } | Sort-Object Index)
-    $contagem = @{}
-    foreach ($d in $discosFisicos) {
-        $contagem[[int]$d.Index] = [ordered]@{
-            numero = [int]$d.Index
-            modelo = ([string]$d.Model).Trim()
-            serial = ([string]$d.SerialNumber).Trim()
-            total = 0
-            ultimo_em = $null
-        }
-    }
-    $naoIdentificado = [ordered]@{ total=0; ultimo_em=$null }
-    $eventosDisco = @(Get-WinEvent -FilterHashtable @{
-        LogName='System'; Id=$idsDisco; StartTime=$inicio
-    } -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -match $provedores })
-
-    foreach ($evento in $eventosDisco) {
-        $mensagem = [string]$evento.Message
-        $numero = $null
-        # Mensagens localizadas podem conter caminhos de dispositivo invariantes.
-        if ($mensagem -match '(?i)\\Device\\Harddisk(\d+)(?:\\|\b)') {
-            $numero = [int]$Matches[1]
-        } elseif ($mensagem -match '(?i)\\\\\.\\PHYSICALDRIVE(\d+)\b') {
-            $numero = [int]$Matches[1]
-        } elseif ($mensagem -match '(?i)\bDisk\s+(\d+)\b' -and $evento.ProviderName -match '(?i)^disk$') {
-            $numero = [int]$Matches[1]
-        }
-
-        $destino = $naoIdentificado
-        if ($null -ne $numero -and $contagem.ContainsKey($numero)) {
-            $destino = $contagem[$numero]
-        }
-        $destino.total++
-        if ($null -eq $destino.ultimo_em -or
-            $evento.TimeCreated -gt [datetime]$destino.ultimo_em) {
-            $destino.ultimo_em = $evento.TimeCreated.ToString('o')
-        }
-    }
-
-    return [ordered]@{
-        metodo = 'referencia_explicita_ao_disco_no_evento'
-        dispositivos = @($contagem.Keys | Sort-Object | ForEach-Object { [pscustomobject]$contagem[$_] })
-        nao_identificados = [pscustomobject]$naoIdentificado
-    }
-}
-
 $resultado = [ordered]@{
     schema_version = 1
     computador = $env:COMPUTERNAME
@@ -292,12 +239,6 @@ try {
     $bsod = Get-EventSummary @(1001) 'BugCheck|WER-SystemErrorReporting' $inicio
     $inesperados = Get-EventSummary @(41,6008) 'Kernel-Power|EventLog' $inicio
     $disco = Get-EventSummary @(7,51,129,153,157) '(^Disk$|storahci|stornvme|iaStor|storport)' $inicio
-    # O detalhamento e opcional: qualquer falha preserva os totais existentes.
-    try {
-        $disco['por_dispositivo'] = Get-DiskEventBreakdown $inicio
-    } catch {
-        $avisos.Add("Detalhamento de eventos por disco indisponivel: $($_.Exception.Message)")
-    }
     $resultado.eventos_windows = [ordered]@{
         periodo_dias = [math]::Max(1,[math]::Min(90,$DiasEventos))
         whea = $whea
