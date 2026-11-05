@@ -234,6 +234,48 @@ foreach ($item in $AtomicTargets) {
 
 
     # =========================================================================
+    # TELEMETRIA - distribuicao complementar (nao critica)
+    # Nao altera o fluxo dos arquivos oficiais nem interrompe o Guardian.
+    # =========================================================================
+    $MonitorPath = Join-Path $BasePath 'Monitor'
+    $TelemetryFiles = @(
+        @{ Relative = 'Functions/Get-HardwareTelemetry.ps1'; Dest = "$BasePath\Functions\Get-HardwareTelemetry.ps1" },
+        @{ Relative = 'Monitor/BlackSharp.Core.dll'; Dest = "$MonitorPath\BlackSharp.Core.dll" },
+        @{ Relative = 'Monitor/DiskInfoToolkit.dll'; Dest = "$MonitorPath\DiskInfoToolkit.dll" },
+        @{ Relative = 'Monitor/HidSharp.dll'; Dest = "$MonitorPath\HidSharp.dll" },
+        @{ Relative = 'Monitor/LibreHardwareMonitorLib.dll'; Dest = "$MonitorPath\LibreHardwareMonitorLib.dll" },
+        @{ Relative = 'Monitor/RAMSPDToolkit-NDD.dll'; Dest = "$MonitorPath\RAMSPDToolkit-NDD.dll" },
+        @{ Relative = 'Monitor/System.IO.Ports.dll'; Dest = "$MonitorPath\System.IO.Ports.dll" },
+        @{ Relative = 'Monitor/System.Management.dll'; Dest = "$MonitorPath\System.Management.dll" }
+    )
+
+    try {
+        New-Item -ItemType Directory -Path $MonitorPath -Force -ErrorAction Stop | Out-Null
+        foreach ($entry in $TelemetryFiles) {
+            $tmp = "$($entry.Dest).telemetry-download"
+            try {
+                Invoke-WebRequest -Uri "$BaseUrl/$($entry.Relative)$NoCache" `
+                    -OutFile $tmp -UseBasicParsing `
+                    -Headers @{ 'Cache-Control' = 'no-cache' } -ErrorAction Stop
+                if ((Get-Item -LiteralPath $tmp -ErrorAction Stop).Length -le 0) {
+                    throw 'Arquivo recebido vazio'
+                }
+                Move-Item -LiteralPath $tmp -Destination $entry.Dest -Force -ErrorAction Stop
+            }
+            catch {
+                Write-Host "[Telemetria] Aviso: falha ao atualizar $($entry.Relative): $($_.Exception.Message)" -ForegroundColor DarkYellow
+            }
+            finally {
+                Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    catch {
+        Write-Host "[Telemetria] Aviso: falha ao preparar pasta Monitor: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+    # =========================================================================
+
+    # =========================================================================
     # PADRONIZAÇÃO DAS TAREFAS NO AGENDADOR
     # Mesma lógica validada no RodaGuardian/Guardian v4.
     # =========================================================================

@@ -762,44 +762,6 @@ Start-Logging
 Clear-Host
 Show-Header -Text 'Guardian 360 v1.5 — Manutenção e Otimização'
 
-# PRÉ-INICIALIZAÇÃO SILENCIOSA DO PAWNIO — antes das fases do Guardian.
-# Mantém a instalação/verificação original da telemetria como segunda checagem.
-# Não altera JSON, fases, PostgreSQL ou execução de outros componentes.
-if (-not $Simulado) {
-    try {
-        $pawnDriver = Get-CimInstance -ClassName Win32_SystemDriver -Filter "Name='PawnIO'" -ErrorAction Stop
-        $pawnReady = ($null -ne $pawnDriver -and $pawnDriver.State -eq 'Running')
-        if (-not $pawnReady) {
-            $pawnSetup = Join-Path $env:TEMP 'Guardian-PawnIO-2.2.0-setup.exe'
-            try {
-                Invoke-WebRequest -Uri 'https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe' -OutFile $pawnSetup -MaximumRedirection 5 -ErrorAction Stop
-                $pawnSignature = Get-AuthenticodeSignature -FilePath $pawnSetup
-                if ($pawnSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
-                    throw "Assinatura do instalador PawnIO nao validada: $($pawnSignature.Status)"
-                }
-                $pawnProcess = Start-Process -FilePath $pawnSetup -ArgumentList '-install -silent' -PassThru -Wait -WindowStyle Hidden -ErrorAction Stop
-                if ($pawnProcess.ExitCode -ne 0) {
-                    throw "Instalador PawnIO terminou com codigo $($pawnProcess.ExitCode)"
-                }
-                # Aguarda a disponibilidade real do driver, nao apenas o fim da instalacao.
-                for ($pawnTry = 1; $pawnTry -le 10; $pawnTry++) {
-                    $pawnDriver = Get-CimInstance -ClassName Win32_SystemDriver -Filter "Name='PawnIO'" -ErrorAction SilentlyContinue
-                    if ($null -ne $pawnDriver -and $pawnDriver.State -eq 'Running') { break }
-                    if ($pawnTry -lt 10) { Start-Sleep -Seconds 2 }
-                }
-            }
-            finally {
-                Remove-Item -LiteralPath $pawnSetup -Force -ErrorAction SilentlyContinue
-            }
-        }
-    }
-    catch {
-        # Falha na pré-inicialização não pode impedir a vistoria.
-        # A rotina de telemetria mantém sua própria verificação/instalação.
-        Write-Log ("PawnIO: pre-inicializacao nao concluida: {0}" -f $_.Exception.Message) 'WARN'
-    }
-}
-
 try {
   # 2) Carregar funções do repositório
   $functionFiles = @(
@@ -855,6 +817,72 @@ $hasHDD = ($hddList.Count -gt 0)
 
 
 
+
+  # Coleta passiva do TeamViewer — sem instalar, executar ou alterar o aplicativo.
+  # O resultado compoe o JSON local da vistoria quando a Fase 1 e executada.
+  $script:TeamViewerInfo = $null
+  function Get-GuardianTeamViewerInfo {
+      $info = [ordered]@{
+          Instalado = $false
+          ID        = $null
+          Versao    = $null
+          Status    = 'NaoInstalado'
+      }
+      try {
+          $keys = @(
+              'HKLM:\SOFTWARE\TeamViewer',
+              'HKLM:\SOFTWARE\WOW6432Node\TeamViewer',
+              'HKCU:\SOFTWARE\TeamViewer'
+          )
+          $uninstallKeys = @(
+              'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+              'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+              'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+          )
+          $instalacoes = @(
+              foreach ($key in $uninstallKeys) {
+                  Get-ItemProperty -Path $key -ErrorAction SilentlyContinue |
+                      Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -match '^TeamViewer(?:\s|$)' }
+              }
+          )
+          $servico = Get-Service -Name 'TeamViewer' -ErrorAction SilentlyContinue
+          $arquivos = @(
+              (Join-Path $env:ProgramFiles 'TeamViewer\TeamViewer.exe'),
+              (Join-Path $env:ProgramFiles 'TeamViewer\TeamViewer_Service.exe')
+          )
+          if (${env:ProgramFiles(x86)}) {
+              $arquivos += Join-Path ${env:ProgramFiles(x86)} 'TeamViewer\TeamViewer.exe'
+              $arquivos += Join-Path ${env:ProgramFiles(x86)} 'TeamViewer\TeamViewer_Service.exe'
+          }
+          $info.Instalado = (($instalacoes.Count -gt 0) -or ($null -ne $servico) -or
+                             (@($arquivos | Where-Object { Test-Path -LiteralPath $_ }).Count -gt 0))
+          if (-not $info.Instalado) { return [pscustomobject]$info }
+
+          $info.Status = 'IDIndisponivel'
+          foreach ($instalacao in $instalacoes) {
+              if (-not [string]::IsNullOrWhiteSpace([string]$instalacao.DisplayVersion)) {
+                  $info.Versao = [string]$instalacao.DisplayVersion
+                  break
+              }
+          }
+          foreach ($key in $keys) {
+              $item = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+              if ($null -eq $item) { continue }
+              if (-not $info.Versao -and $item.PSObject.Properties['Version']) {
+                  $info.Versao = [string]$item.Version
+              }
+              $id = if ($item.PSObject.Properties['ClientID']) { [string]$item.ClientID } else { '' }
+              if ($id -match '^\d+$' -and $id -ne '0') {
+                  $info.ID = $id
+                  $info.Status = 'OK'
+                  break
+              }
+          }
+      } catch {
+          $info.Status = 'ErroLeitura'
+      }
+      return [pscustomobject]$info
+  }
 
   # 4) Fases e passos
   $Phases = @(
@@ -995,6 +1023,25 @@ foreach ($phase in $Phases) {
         # Executa o passo
         Invoke-GuardianStep -Title $step.Name -Action $step.Action
 
+        # Inventario complementar; falhas nesta leitura nao interrompem a manutencao.
+        if ($id -eq 1 -and $step.Name -eq 'Get-SystemInventory') {
+            try {
+                $script:TeamViewerInfo = Get-GuardianTeamViewerInfo
+                if ($script:TeamViewerInfo.Instalado) {
+                    $tvLabel = if ($script:TeamViewerInfo.ID) { $script:TeamViewerInfo.ID } else { 'indisponivel' }
+                    Write-Report ("TeamViewer: instalado; versao={0}; ID={1}; status={2}" -f `
+                        $script:TeamViewerInfo.Versao, $tvLabel, $script:TeamViewerInfo.Status) 'INFO'
+                } else {
+                    Write-Report 'TeamViewer: nao instalado.' 'INFO'
+                }
+            } catch {
+                $script:TeamViewerInfo = [pscustomobject]@{
+                    Instalado = $false; ID = $null; Versao = $null; Status = 'ErroLeitura'
+                }
+                Write-Report 'TeamViewer: falha na coleta do identificador.' 'WARN'
+            }
+        }
+
         # Atualiza barra de progresso proporcional
         if ($global:GuardianProgressBar) {
             $global:GuardianProgressBar.Dispatcher.Invoke({
@@ -1114,6 +1161,7 @@ $jsonObject = [PSCustomObject]@{
     NomeComputador     = $env:COMPUTERNAME
     DataExecucao       = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     PulaFases          = @($PulaFases)
+    TeamViewer         = $script:TeamViewerInfo
     Fases              = $jsonResults
 }
 

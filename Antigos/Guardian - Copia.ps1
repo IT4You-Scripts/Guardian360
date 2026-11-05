@@ -90,10 +90,8 @@ if ([string]::IsNullOrWhiteSpace($Cliente)) {
 
 # ============================================================================================================================================================
 # BLOQUEIO POR CLIENTE (OFFBOARDING) — SILENCIOSO
+# A verificacao usa apenas copia local de $Cliente. Nao altera parametros nem clientes ativos.
 # ============================================================================================================================================================
-# IMPORTANTE: este bloco deve ficar logo após o param() do script, ANTES de
-# qualquer outra lógica (leitura de JSON, logs, disparo de fases etc.)
-
 $DisabledClients = @(
     'Soneca Company',
     'Talude Comercial e Construtora Ltda'
@@ -101,36 +99,59 @@ $DisabledClients = @(
 
 function Normalize-ClienteName {
     param([string]$Nome)
-
-    if ([string]::IsNullOrEmpty($Nome)) { return '' }
-
-    # Remove espaços não-quebráveis (U+00A0), zero-width (U+200B) e afins,
-    # colapsa espaços múltiplos e faz trim.
-    $n = $Nome -replace '[\u00A0\u200B\u2007\u202F]', ' '
-    $n = $n -replace '\s+', ' '
-    return $n.Trim()
+    if ([string]::IsNullOrWhiteSpace($Nome)) { return '' }
+    $n = ($Nome -replace '[\u00A0\u200B\u2007\u202F]', ' ') -replace '\s+', ' '
+    $n = $n.Trim()
+    # Remove somente aspas nas extremidades, inclusive repetidas e intercaladas.
+    while ($n.Length -gt 0) {
+        $novo = $n.Trim().Trim([char[]]@([char]34, [char]39)).Trim()
+        if ($novo -ceq $n) { break }
+        $n = $novo
+    }
+    return $n
 }
 
 $clienteNorm = Normalize-ClienteName -Nome $Cliente
-
 $blocked = $false
-foreach ($dc in $DisabledClients) {
-    $dcNorm = Normalize-ClienteName -Nome $dc
-    if ([string]::Equals($clienteNorm, $dcNorm, [System.StringComparison]::OrdinalIgnoreCase)) {
-        $blocked = $true
-        break
+if ($clienteNorm.Length -gt 0) {
+    foreach ($dc in $DisabledClients) {
+        if ([string]::Equals($clienteNorm, (Normalize-ClienteName -Nome $dc), [System.StringComparison]::OrdinalIgnoreCase)) {
+            $blocked = $true
+            break
+        }
     }
 }
 
 if ($blocked) {
-
-    # Remove arquivo de argumentos para evitar reuso
-    $argJsonPath = "C:\Guardian\guardian_arg.json"
-    if (Test-Path $argJsonPath) {
-        try { Remove-Item $argJsonPath -Force -ErrorAction SilentlyContinue } catch {}
+    # Somente as tres tarefas conhecidas, somente na pasta exclusiva \Guardian\.
+    # Principal: nome variavel, mas deve ser '1. ...Guardian...' e executar um lancador oficial.
+    # System/Ghost: nomes exatos. Outras tarefas nao sao afetadas.
+    if (-not $Simulado) {
+        try {
+            $tarefas = @(Get-ScheduledTask -TaskPath '\Guardian\' -ErrorAction Stop)
+            foreach ($tarefa in $tarefas) {
+                $nome = [string]$tarefa.TaskName
+                $principal = ($nome -match '^1\.\s+.*Guardian' -and
+                              $nome -notmatch '(?i)System|Ghost' -and
+                              @($tarefa.Actions | Where-Object {
+                                  (($_.Execute + ' ' + $_.Arguments) -match '(?i)(?:ElevaGuardian|RodaGuardian)\.ps1')
+                              }).Count -gt 0)
+                if ($nome -ceq '2. Guardian System' -or
+                    $nome -ceq '3. Guardian Ghost' -or
+                    $principal) {
+                    try {
+                        Unregister-ScheduledTask -TaskPath '\Guardian\' -TaskName $nome -Confirm:$false -ErrorAction Stop
+                    } catch { }
+                }
+            }
+        } catch { }
     }
 
-    # Silêncio total: sem Write-Host, sem Write-Output, sem nada.
+    $argJsonPath = 'C:\Guardian\guardian_arg.json'
+    if (Test-Path -LiteralPath $argJsonPath) {
+        try { Remove-Item -LiteralPath $argJsonPath -Force -ErrorAction SilentlyContinue } catch { }
+    }
+    # Cliente bloqueado nunca inicia a vistoria, mesmo se a remocao falhar.
     exit 0
 }
 
