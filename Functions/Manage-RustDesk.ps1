@@ -1,4 +1,4 @@
-﻿# =============================================================================
+# =============================================================================
 # Manage-RustDesk.ps1
 # Guardian 360 - Integracao com RustDesk
 # =============================================================================
@@ -67,53 +67,6 @@ function Manage-RustDesk {
         if ($serverNoArquivo -ne $RustDeskServer) { return $false }
 
         return $true
-    }
-
-    # =========================================================================
-    # Atualizacao automatica do RustDesk (Windows >= 1.4.6)
-    # Altera somente allow-auto-update em RustDesk2.toml, sem tocar no ID,
-    # senha, servidor, chave ou outras configuracoes.
-    # =========================================================================
-    function Enable-RustDeskAutoUpdate {
-        param([Parameter(Mandatory)][string]$FilePath)
-
-        if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
-            return "ausente"
-        }
-
-        $original = [System.IO.File]::ReadAllText($FilePath)
-        $alterado = $original
-
-        # Opcao de servidor; deve ficar na secao [options].
-        $cabecalho = [regex]::Match($alterado, '(?m)^\s*\[options\]\s*$')
-        if ($cabecalho.Success) {
-            $inicio = $cabecalho.Index + $cabecalho.Length
-            $proxima = [regex]::Match($alterado.Substring($inicio), '(?m)^\s*\[[^\r\n]+\]\s*$')
-            $fim = if ($proxima.Success) { $inicio + $proxima.Index } else { $alterado.Length }
-            $secao = $alterado.Substring($inicio, $fim - $inicio)
-
-            $opcao = [regex]::new('(?m)^[ \t]*allow-auto-update[ \t]*=[ \t]*[^\r\n]*')
-            if ($opcao.IsMatch($secao)) {
-                $secaoNova = $opcao.Replace($secao, 'allow-auto-update = ''Y''', 1)
-            }
-            else {
-                $secaoNova = "`r`nallow-auto-update = 'Y'" + $secao
-            }
-            $alterado = $alterado.Substring(0, $inicio) + $secaoNova + $alterado.Substring($fim)
-        }
-        else {
-            $alterado = $alterado.TrimEnd("`r", "`n") + "`r`n`r`n[options]`r`nallow-auto-update = 'Y'`r`n"
-        }
-
-        if ($alterado -ceq $original) { return "ja_ativo" }
-
-        # Backup pontual antes da alteracao; gravacao UTF-8, como o restante
-        # do Manage-RustDesk (Set-Content -Encoding UTF8).
-        Copy-Item -LiteralPath $FilePath -Destination "$FilePath.guardian-auto-update.bak" -Force -ErrorAction Stop
-        [System.IO.File]::WriteAllText(
-            $FilePath, $alterado, [System.Text.UTF8Encoding]::new($false)
-        )
-        return "habilitado"
     }
 
     # Resultado padrao
@@ -399,42 +352,53 @@ key = '$RustDeskKey'
         }
 
         # =================================================================
-        # ETAPA 3B — Auto update (sem subprocessos / sem reiniciar RustDesk)
-        # Limite cooperativo de 15s SOMENTE para esta etapa.
+        # ETAPA 3B — Auto update (somente TOML do servico; sem subprocessos)
+        # O controle Auto update da interface e uma opcao de servidor.
+        # A rotina nao para/reinicia o RustDesk e nao altera outras opcoes.
+        # Limite cooperativo de 15s, restrito a esta etapa.
         # =================================================================
-        $autoUpdateRelogio = [System.Diagnostics.Stopwatch]::StartNew()
         try {
-            $versaoExe = (Get-Item -LiteralPath $RustDeskExe -ErrorAction Stop).VersionInfo.ProductVersion
-            if ($versaoExe -match '(\d+)\.(\d+)\.(\d+)') {
-                $versaoNormalizada = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
-            }
-            else { $versaoNormalizada = $null }
+            $autoInicio = [System.Diagnostics.Stopwatch]::StartNew()
+            $autoVersao = (Get-Item -LiteralPath $RustDeskExe -ErrorAction Stop).VersionInfo.ProductVersion
+            if ($autoVersao -match '(\d+)\.(\d+)\.(\d+)' -and
+                ([version]"$($Matches[1]).$($Matches[2]).$($Matches[3])" -ge [version]'1.4.6')) {
 
-            if ($versaoNormalizada -and $versaoNormalizada -ge [version]'1.4.6') {
-                $arquivosAutoUpdate = @($Config2File)
-                if ($autoUpdateRelogio.Elapsed.TotalSeconds -lt 15) {
-                    $arquivosAutoUpdate += @(
-                        Get-ChildItem -LiteralPath 'C:\Users' -Directory -ErrorAction SilentlyContinue |
-                            ForEach-Object {
-                                Join-Path $_.FullName 'AppData\Roaming\RustDesk\config\RustDesk2.toml'
-                            } |
-                            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
-                    )
-                }
-                foreach ($arquivo in ($arquivosAutoUpdate | Select-Object -Unique)) {
-                    if ($autoUpdateRelogio.Elapsed.TotalSeconds -ge 15) { break }
-                    try {
-                        $estadoAutoUpdate = Enable-RustDeskAutoUpdate -FilePath $arquivo
-                        if ($estadoAutoUpdate -eq 'habilitado') {
-                            Write-Host "[RustDesk] Auto update habilitado: $arquivo" -ForegroundColor Cyan
+                if ($autoInicio.Elapsed.TotalSeconds -lt 15 -and
+                    (Test-Path -LiteralPath $Config2File -PathType Leaf)) {
+                    $autoOriginal = [System.IO.File]::ReadAllText($Config2File)
+                    $autoNovo = $autoOriginal
+                    $autoSecao = [regex]::Match($autoOriginal, '(?m)^\[options\][ \t]*\r?$')
+                    if ($autoSecao.Success) {
+                        $autoInicioSecao = $autoSecao.Index + $autoSecao.Length
+                        $autoResto = $autoOriginal.Substring($autoInicioSecao)
+                        $autoProximaSecao = [regex]::Match($autoResto, '(?m)^\[[^\r\n]+\][ \t]*\r?$')
+                        $autoFimSecao = if ($autoProximaSecao.Success) {
+                            $autoInicioSecao + $autoProximaSecao.Index
+                        } else { $autoOriginal.Length }
+                        $autoConteudoSecao = $autoOriginal.Substring($autoInicioSecao, $autoFimSecao - $autoInicioSecao)
+                        $autoChave = [regex]::new('(?m)^[ \t]*allow-auto-update[ \t]*=[ \t]*[^\r\n]*')
+                        if ($autoChave.IsMatch($autoConteudoSecao)) {
+                            $autoConteudoNovo = $autoChave.Replace($autoConteudoSecao, "allow-auto-update = 'Y'", 1)
+                        } else {
+                            $autoConteudoNovo = "`r`nallow-auto-update = 'Y'" + $autoConteudoSecao
+                        }
+                        $autoNovo = $autoOriginal.Substring(0, $autoInicioSecao) + $autoConteudoNovo + $autoOriginal.Substring($autoFimSecao)
+                    }
+                    if ($autoInicio.Elapsed.TotalSeconds -lt 15 -and $autoNovo -cne $autoOriginal) {
+                        if ($autoSecao.Success) {
+                            # Arquivo original preservado para restauracao, se necessario.
+                            Copy-Item -LiteralPath $Config2File -Destination "$Config2File.guardian-auto-update.bak" -Force -ErrorAction Stop
+                            [System.IO.File]::WriteAllText($Config2File, $autoNovo, [System.Text.UTF8Encoding]::new($false))
+                            $autoConferencia = [System.IO.File]::ReadAllText($Config2File)
+                            if ($autoConferencia -ceq $autoNovo) {
+                                Write-Host '[RustDesk] Auto update gravado no perfil do servico.' -ForegroundColor Cyan
+                            }
                         }
                     }
-                    catch { } # Opcional: sem avisos
                 }
             }
         }
-        catch { } # Opcional: sem avisos
-        finally { $autoUpdateRelogio.Stop() }
+        catch { } # Etapa opcional: nenhuma falha impede a vistoria.
 
         # =================================================================
         # ETAPA 4 — Garantir servico rodando
