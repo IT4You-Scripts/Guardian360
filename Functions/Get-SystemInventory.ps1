@@ -142,6 +142,50 @@ public static class GuardianInteractiveTokenV1 {
     return [pscustomobject]$resultado
 }
 
+# Verificacao isolada da conta Administrador nativa (SID terminado em -500).
+# Retorna apenas True se a conta estiver habilitada e LogonUser retornar 1327.
+# 1327 indica restricao de conta; nao confirma, isoladamente, senha vazia.
+function Test-GuardianAdmin500SuspiciousBlankPassword {
+    try {
+        $admin500 = Get-LocalUser -ErrorAction Stop |
+            Where-Object { $_.SID.Value -match '-500$' } |
+            Select-Object -First 1
+
+        if (-not $admin500 -or -not $admin500.Enabled) { return $false }
+
+        if (-not ('GuardianAdmin500BlankPasswordProbeV1' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class GuardianAdmin500BlankPasswordProbeV1 {
+    [DllImport("advapi32.dll", EntryPoint="LogonUserW", CharSet=CharSet.Unicode, SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool LogonUser(string user, string domain, string password, int logonType, int provider, out IntPtr token);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseHandle(IntPtr token);
+}
+'@ -ErrorAction Stop
+        }
+
+        $token = [IntPtr]::Zero
+        try {
+            $ok = [GuardianAdmin500BlankPasswordProbeV1]::LogonUser(
+                $admin500.Name, $env:COMPUTERNAME, '', 2, 0, [ref]$token
+            )
+            $codigo = if ($ok) { 0 } else { [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+            return ($codigo -eq 1327)
+        } finally {
+            if ($token -ne [IntPtr]::Zero) {
+                [void][GuardianAdmin500BlankPasswordProbeV1]::CloseHandle($token)
+            }
+        }
+    } catch {
+        # Falha de verificacao nao interrompe inventario nem gera alerta presumido.
+        return $false
+    }
+}
+
 # Coleta informações do inventário de software hardware, com alertas de espaço em disco C: e Saúde do SSD
 function Get-SystemInventory {
     # Fallback de log para ambientes que não tenham Write-Log
@@ -420,6 +464,12 @@ function Get-SystemInventory {
             "Endereço IP"               = $ip
             "Endereço MAC"              = $mac
             "Softwares Instalados"      = ($softwaresFinais -join "`n")
+        }
+
+        # Registra somente suspeita: Administrador SID -500 ativo e erro 1327.
+        # Qualquer outro resultado nao produz alerta nem campo adicional.
+        if (Test-GuardianAdmin500SuspiciousBlankPassword) {
+            $Criar_Inventario_Sistema | Add-Member -NotePropertyName 'Alerta Administrador' -NotePropertyValue 'Suspeita de senha vazia'
         }
 
         # 10. Exibição e Log (Dual Output)
