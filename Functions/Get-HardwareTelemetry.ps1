@@ -11,6 +11,7 @@ Instala PawnIO 2.2.0 silenciosamente apenas se ausente, mediante assinatura vali
 #>
 [CmdletBinding()]
 param(
+    [switch]$PrepararPawnIO,
     [switch]$SemInstalarPawnIO,
     [switch]$SemDellSMM,
     [int]$DiasEventos = 35,
@@ -58,6 +59,17 @@ function Install-PawnIOIfNeeded {
     } finally {
         Remove-Item -LiteralPath $instalador -Force -ErrorAction SilentlyContinue
     }
+}
+
+# Preflight reutiliza a instalacao original sem executar a coleta de sensores.
+# Quando a telemetria for chamada normalmente, esta verificacao permanece ativa.
+if ($PrepararPawnIO) {
+    $estadoPawnIO = Install-PawnIOIfNeeded
+    [pscustomobject]@{
+        Estado = $estadoPawnIO
+        Avisos = @($avisos.ToArray())
+    }
+    return
 }
 
 function Get-HardwareReadings($computer) {
