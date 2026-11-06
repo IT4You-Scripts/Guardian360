@@ -399,112 +399,42 @@ key = '$RustDeskKey'
         }
 
         # =================================================================
-        # ETAPA 3B — Auto-update; isolado e limitado a 15 segundos.
-        # Nao altera nem reinicia o processo/servico RustDesk.
-        # As demais etapas permanecem identicas a versao ja validada.
+        # ETAPA 3B — Auto update (sem subprocessos / sem reiniciar RustDesk)
+        # Limite cooperativo de 15s SOMENTE para esta etapa.
         # =================================================================
-        $guardianAutoUpdateJob = $null
-        try {
-            $guardianAutoUpdateJob = Start-Job -ArgumentList $RustDeskExe, $Config2File -ScriptBlock {
-                param([string]$RustDeskExe, [string]$Config2File)
-    function Enable-RustDeskAutoUpdate {
-        param([Parameter(Mandatory)][string]$FilePath)
-
-        if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
-            return "ausente"
-        }
-
-        $original = [System.IO.File]::ReadAllText($FilePath)
-        $alterado = $original
-
-        # Opcao de servidor; deve ficar na secao [options].
-        $cabecalho = [regex]::Match($alterado, '(?m)^\s*\[options\]\s*$')
-        if ($cabecalho.Success) {
-            $inicio = $cabecalho.Index + $cabecalho.Length
-            $proxima = [regex]::Match($alterado.Substring($inicio), '(?m)^\s*\[[^\r\n]+\]\s*$')
-            $fim = if ($proxima.Success) { $inicio + $proxima.Index } else { $alterado.Length }
-            $secao = $alterado.Substring($inicio, $fim - $inicio)
-
-            $opcao = [regex]::new('(?m)^[ \t]*allow-auto-update[ \t]*=[ \t]*[^\r\n]*')
-            if ($opcao.IsMatch($secao)) {
-                $secaoNova = $opcao.Replace($secao, 'allow-auto-update = ''Y''', 1)
-            }
-            else {
-                $secaoNova = "`r`nallow-auto-update = 'Y'" + $secao
-            }
-            $alterado = $alterado.Substring(0, $inicio) + $secaoNova + $alterado.Substring($fim)
-        }
-        else {
-            $alterado = $alterado.TrimEnd("`r", "`n") + "`r`n`r`n[options]`r`nallow-auto-update = 'Y'`r`n"
-        }
-
-        if ($alterado -ceq $original) { return "ja_ativo" }
-
-        # Backup pontual antes da alteracao; gravacao UTF-8, como o restante
-        # do Manage-RustDesk (Set-Content -Encoding UTF8).
-        Copy-Item -LiteralPath $FilePath -Destination "$FilePath.guardian-auto-update.bak" -Force -ErrorAction Stop
-        [System.IO.File]::WriteAllText(
-            $FilePath, $alterado, [System.Text.UTF8Encoding]::new($false)
-        )
-        return "habilitado"
-    }
-
+        $autoUpdateRelogio = [System.Diagnostics.Stopwatch]::StartNew()
         try {
             $versaoExe = (Get-Item -LiteralPath $RustDeskExe -ErrorAction Stop).VersionInfo.ProductVersion
             if ($versaoExe -match '(\d+)\.(\d+)\.(\d+)') {
                 $versaoNormalizada = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
             }
-            else {
-                $versaoNormalizada = $null
-            }
+            else { $versaoNormalizada = $null }
 
-            if (-not $versaoNormalizada -or $versaoNormalizada -lt [version]'1.4.6') {
-                # Versao antiga: pula silenciosamente.
-            }
-            else {
-                # Configuracao do servico e dos perfis de usuario existentes.
-                # Nao cria perfis nem sobrescreve as demais opcoes dos arquivos.
+            if ($versaoNormalizada -and $versaoNormalizada -ge [version]'1.4.6') {
                 $arquivosAutoUpdate = @($Config2File)
-                $arquivosAutoUpdate += @(
-                    Get-ChildItem -Path 'C:\Users' -Directory -ErrorAction SilentlyContinue |
-                        ForEach-Object {
-                            Join-Path $_.FullName 'AppData\Roaming\RustDesk\config\RustDesk2.toml'
-                        } |
-                        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
-                )
+                if ($autoUpdateRelogio.Elapsed.TotalSeconds -lt 15) {
+                    $arquivosAutoUpdate += @(
+                        Get-ChildItem -LiteralPath 'C:\Users' -Directory -ErrorAction SilentlyContinue |
+                            ForEach-Object {
+                                Join-Path $_.FullName 'AppData\Roaming\RustDesk\config\RustDesk2.toml'
+                            } |
+                            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+                    )
+                }
                 foreach ($arquivo in ($arquivosAutoUpdate | Select-Object -Unique)) {
+                    if ($autoUpdateRelogio.Elapsed.TotalSeconds -ge 15) { break }
                     try {
                         $estadoAutoUpdate = Enable-RustDeskAutoUpdate -FilePath $arquivo
-                        if ($estadoAutoUpdate -eq "habilitado") {
-                            Write-Output "[RustDesk] Auto update habilitado: $arquivo"
+                        if ($estadoAutoUpdate -eq 'habilitado') {
+                            Write-Host "[RustDesk] Auto update habilitado: $arquivo" -ForegroundColor Cyan
                         }
                     }
-                    catch {
-                        # Sem avisos na rotina opcional.
-                    }
+                    catch { } # Opcional: sem avisos
                 }
             }
         }
-        catch {
-            # Falha opcional: pula silenciosamente.
-        }
-
-            }
-            $terminou = Wait-Job -Job $guardianAutoUpdateJob -Timeout 15
-            if ($null -ne $terminou -and $guardianAutoUpdateJob.State -eq 'Completed') {
-                Receive-Job -Job $guardianAutoUpdateJob -ErrorAction SilentlyContinue 2>$null 3>$null 4>$null 5>$null 6>$null |
-                    ForEach-Object { if ($_ -is [string] -and $_.StartsWith('[RustDesk] Auto update habilitado:')) { Write-Host $_ -ForegroundColor Cyan } }
-            }
-        }
-        catch { } # Opcional e silencioso, sem bloquear a vistoria.
-        finally {
-            if ($null -ne $guardianAutoUpdateJob) {
-                if ($guardianAutoUpdateJob.State -notin @('Completed', 'Failed', 'Stopped')) {
-                    Stop-Job -Job $guardianAutoUpdateJob -ErrorAction SilentlyContinue
-                }
-                Remove-Job -Job $guardianAutoUpdateJob -Force -ErrorAction SilentlyContinue
-            }
-        }
+        catch { } # Opcional: sem avisos
+        finally { $autoUpdateRelogio.Stop() }
 
         # =================================================================
         # ETAPA 4 — Garantir servico rodando
