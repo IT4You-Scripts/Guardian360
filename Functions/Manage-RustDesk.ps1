@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # Manage-RustDesk.ps1
 # Guardian 360 - Integracao com RustDesk
 # =============================================================================
@@ -399,8 +399,16 @@ key = '$RustDeskKey'
         }
 
         # =================================================================
-        # ETAPA 3B — Habilitar atualizacao automatica sem reiniciar servico
+        # ETAPA 3B — Auto update isolado; limite de 15 segundos SOMENTE aqui.
+        # Sem reiniciar RustDesk ou interferir nas demais rotinas.
         # =================================================================
+        $autoUpdateTemp = $null
+        $autoUpdateProcess = $null
+        try {
+            $autoUpdateTemp = Join-Path $env:TEMP ("Guardian-RustDesk-AutoUpdate-" + [guid]::NewGuid().ToString('N') + '.ps1')
+            $autoUpdateScript = @'
+param([string]$RustDeskExe, [string]$Config2File)
+'@ + "`r`nfunction Enable-RustDeskAutoUpdate {`r`n" + ${function:Enable-RustDeskAutoUpdate}.ToString() + "`r`n}`r`n" + @'
         try {
             $versaoExe = (Get-Item -LiteralPath $RustDeskExe -ErrorAction Stop).VersionInfo.ProductVersion
             if ($versaoExe -match '(\d+)\.(\d+)\.(\d+)') {
@@ -437,6 +445,27 @@ key = '$RustDeskKey'
         }
         catch {
             Write-Host "[RustDesk] AVISO: falha na preparacao de auto update: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+
+'@
+            [System.IO.File]::WriteAllText($autoUpdateTemp, $autoUpdateScript, [System.Text.UTF8Encoding]::new($false))
+
+            $autoUpdateProcess = Start-Process -FilePath (Join-Path $PSHOME 'pwsh.exe') `
+                -ArgumentList @('-NoProfile', '-NonInteractive', '-File',
+                    ('"' + $autoUpdateTemp + '"'), ('"' + $RustDeskExe + '"'), ('"' + $Config2File + '"')) `
+                -WindowStyle Hidden -PassThru -ErrorAction Stop
+
+            if (-not $autoUpdateProcess.WaitForExit(15000)) {
+                # Encerra apenas o PowerShell auxiliar DESTA rotina.
+                try { if (-not $autoUpdateProcess.HasExited) { $autoUpdateProcess.Kill() } } catch { }
+            }
+        }
+        catch { }  # Sem avisos por timeout ou falha desta rotina opcional.
+        finally {
+            if ($null -ne $autoUpdateProcess) { $autoUpdateProcess.Dispose() }
+            if ($autoUpdateTemp) {
+                Remove-Item -LiteralPath $autoUpdateTemp -Force -ErrorAction SilentlyContinue
+            }
         }
 
         # =================================================================
