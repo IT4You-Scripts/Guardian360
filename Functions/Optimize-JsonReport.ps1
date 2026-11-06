@@ -210,9 +210,19 @@ if ($indexSoftware -le 0) {
 $hardwareLines = $msg[0..($indexSoftware - 1)]
 $softwareLines = $msg[($indexSoftware + 1)..($msg.Count - 1)]
 
+# Alerta de seguranca da conta Administrador nativa (SID -500).
+# A coleta inclui a linha no fim do inventario; nao e um software instalado.
+$padraoAlertaAdministrador = '^\s*Alerta Administrador\s*:\s*Suspeita de senha vazia\s*$'
+$alertaAdministrador = $null
+
+if (@($softwareLines | Where-Object { $_ -match $padraoAlertaAdministrador }).Count -gt 0) {
+    $alertaAdministrador = 'Suspeita de senha vazia'
+    $jsonRaw | Add-Member -MemberType NoteProperty -Name 'alerta_administrador' -Value $alertaAdministrador -Force
+}
+
 $softwareList = $softwareLines |
     ForEach-Object { $_.Trim() } |
-    Where-Object { $_ -ne "" } |
+    Where-Object { $_ -ne "" -and $_ -notmatch $padraoAlertaAdministrador } |
     Sort-Object -Unique
 
 # ------------------------------------------------------------------------------
