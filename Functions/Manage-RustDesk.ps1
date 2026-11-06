@@ -399,17 +399,14 @@ key = '$RustDeskKey'
         }
 
         # =================================================================
-        # ETAPA 3B — Auto-update: mesma rotina validada, isolada por 15s.
-        # A rotina original acima/abaixo (ID, senha, servidor e service) nao muda.
-        # Sem reiniciar RustDesk e sem avisos quando ocorrer timeout.
+        # ETAPA 3B — Auto-update; isolado e limitado a 15 segundos.
+        # Nao altera nem reinicia o processo/servico RustDesk.
+        # As demais etapas permanecem identicas a versao ja validada.
         # =================================================================
-        $autoUpdateProcess = $null
-        $autoUpdateSaida = $null
-        $autoUpdateErro = $null
+        $guardianAutoUpdateJob = $null
         try {
-            $autoUpdateCodigo = @'
-$RustDeskExe = '__GUARDIAN_RUSTDESK_EXE__'
-$Config2File = '__GUARDIAN_CONFIG2_FILE__'
+            $guardianAutoUpdateJob = Start-Job -ArgumentList $RustDeskExe, $Config2File -ScriptBlock {
+                param([string]$RustDeskExe, [string]$Config2File)
     function Enable-RustDeskAutoUpdate {
         param([Parameter(Mandatory)][string]$FilePath)
 
@@ -462,7 +459,7 @@ $Config2File = '__GUARDIAN_CONFIG2_FILE__'
             }
 
             if (-not $versaoNormalizada -or $versaoNormalizada -lt [version]'1.4.6') {
-                Write-Host "[RustDesk] Atualizacao automatica nao aplicada: versao inferior a 1.4.6 ou desconhecida ($versaoExe)." -ForegroundColor Yellow
+                # Versao antiga: pula silenciosamente.
             }
             else {
                 # Configuracao do servico e dos perfis de usuario existentes.
@@ -478,54 +475,34 @@ $Config2File = '__GUARDIAN_CONFIG2_FILE__'
                 foreach ($arquivo in ($arquivosAutoUpdate | Select-Object -Unique)) {
                     try {
                         $estadoAutoUpdate = Enable-RustDeskAutoUpdate -FilePath $arquivo
-                        Write-Host "[RustDesk] Auto update ($estadoAutoUpdate): $arquivo" -ForegroundColor Cyan
+                        if ($estadoAutoUpdate -eq "habilitado") {
+                            Write-Output "[RustDesk] Auto update habilitado: $arquivo"
+                        }
                     }
                     catch {
-                        Write-Host "[RustDesk] AVISO: auto update nao aplicado em $arquivo : $($_.Exception.Message)" -ForegroundColor Yellow
+                        # Sem avisos na rotina opcional.
                     }
                 }
             }
         }
         catch {
-            Write-Host "[RustDesk] AVISO: falha na preparacao de auto update: $($_.Exception.Message)" -ForegroundColor Yellow
+            # Falha opcional: pula silenciosamente.
         }
-'@
-            # Injeta somente os dois caminhos na rotina ja validada.
-            $autoUpdateCodigo = $autoUpdateCodigo.Replace(
-                '__GUARDIAN_RUSTDESK_EXE__', $RustDeskExe.Replace("'", "''")
-            ).Replace(
-                '__GUARDIAN_CONFIG2_FILE__', $Config2File.Replace("'", "''")
-            )
-            $autoUpdateEncoded = [Convert]::ToBase64String(
-                [Text.Encoding]::Unicode.GetBytes($autoUpdateCodigo)
-            )
-            $autoUpdateToken = [guid]::NewGuid().ToString('N')
-            $autoUpdateSaida = Join-Path $env:TEMP ("guardian-rustdesk-auto-" + $autoUpdateToken + ".out")
-            $autoUpdateErro  = Join-Path $env:TEMP ("guardian-rustdesk-auto-" + $autoUpdateToken + ".err")
-            $autoUpdateProcess = Start-Process `
-                -FilePath (Join-Path $PSHOME 'pwsh.exe') `
-                -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $autoUpdateEncoded) `
-                -WindowStyle Hidden -PassThru `
-                -RedirectStandardOutput $autoUpdateSaida `
-                -RedirectStandardError $autoUpdateErro -ErrorAction Stop
 
-            if ($autoUpdateProcess.WaitForExit(15000)) {
-                # Mantem visivel a confirmacao que a versao anterior emitia.
-                if (Test-Path -LiteralPath $autoUpdateSaida) {
-                    Get-Content -LiteralPath $autoUpdateSaida -ErrorAction SilentlyContinue |
-                        ForEach-Object { if ($_ -match 'Auto update \(') { Write-Host $_ -ForegroundColor Cyan } }
-                }
             }
-            else {
-                # Limite exclusivamente desta rotina; nao encerra RustDesk.
-                try { if (-not $autoUpdateProcess.HasExited) { $autoUpdateProcess.Kill() } } catch { }
+            $terminou = Wait-Job -Job $guardianAutoUpdateJob -Timeout 15
+            if ($null -ne $terminou -and $guardianAutoUpdateJob.State -eq 'Completed') {
+                Receive-Job -Job $guardianAutoUpdateJob -ErrorAction SilentlyContinue 2>$null 3>$null 4>$null 5>$null 6>$null |
+                    ForEach-Object { if ($_ -is [string] -and $_.StartsWith('[RustDesk] Auto update habilitado:')) { Write-Host $_ -ForegroundColor Cyan } }
             }
         }
-        catch { } # Falhas nesta rotina opcional nao interrompem a vistoria.
+        catch { } # Opcional e silencioso, sem bloquear a vistoria.
         finally {
-            if ($null -ne $autoUpdateProcess) { $autoUpdateProcess.Dispose() }
-            foreach ($arqTmp in @($autoUpdateSaida, $autoUpdateErro)) {
-                if ($arqTmp) { Remove-Item -LiteralPath $arqTmp -Force -ErrorAction SilentlyContinue }
+            if ($null -ne $guardianAutoUpdateJob) {
+                if ($guardianAutoUpdateJob.State -notin @('Completed', 'Failed', 'Stopped')) {
+                    Stop-Job -Job $guardianAutoUpdateJob -ErrorAction SilentlyContinue
+                }
+                Remove-Job -Job $guardianAutoUpdateJob -Force -ErrorAction SilentlyContinue
             }
         }
 
