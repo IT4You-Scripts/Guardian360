@@ -1039,6 +1039,11 @@ $sistemaObj = [PSCustomObject]@{
     "Nome do Computador"  = $hardwareObj["Nome do Computador"]
     "Usuário Adm"         = $hardwareObj["Usuário Adm"]
     "Login ID"            = $hardwareObj["Login ID"]
+    "Usuário Logado"       = $hardwareObj["Usuário Logado"]
+    "Tipo de Conta"        = $hardwareObj["Tipo de Conta"]
+    "Permissão do Usuário" = $hardwareObj["Permissão do Usuário"]
+    "Guardian Elevado"     = $hardwareObj["Guardian Elevado"]
+    "Conta de Execução"    = $hardwareObj["Conta de Execução"]
     "Sistema Operacional" = $hardwareObj["Sistema Operacional"]
     "UUID SMBIOS"         = $uuidSistema
 }

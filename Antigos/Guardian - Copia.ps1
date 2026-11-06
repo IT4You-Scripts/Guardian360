@@ -762,6 +762,44 @@ Start-Logging
 Clear-Host
 Show-Header -Text 'Guardian 360 v1.5 — Manutenção e Otimização'
 
+# PRÉ-INICIALIZAÇÃO SILENCIOSA DO PAWNIO — antes das fases do Guardian.
+# Mantém a instalação/verificação original da telemetria como segunda checagem.
+# Não altera JSON, fases, PostgreSQL ou execução de outros componentes.
+if (-not $Simulado) {
+    try {
+        $pawnDriver = Get-CimInstance -ClassName Win32_SystemDriver -Filter "Name='PawnIO'" -ErrorAction Stop
+        $pawnReady = ($null -ne $pawnDriver -and $pawnDriver.State -eq 'Running')
+        if (-not $pawnReady) {
+            $pawnSetup = Join-Path $env:TEMP 'Guardian-PawnIO-2.2.0-setup.exe'
+            try {
+                Invoke-WebRequest -Uri 'https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe' -OutFile $pawnSetup -MaximumRedirection 5 -ErrorAction Stop
+                $pawnSignature = Get-AuthenticodeSignature -FilePath $pawnSetup
+                if ($pawnSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+                    throw "Assinatura do instalador PawnIO nao validada: $($pawnSignature.Status)"
+                }
+                $pawnProcess = Start-Process -FilePath $pawnSetup -ArgumentList '-install -silent' -PassThru -Wait -WindowStyle Hidden -ErrorAction Stop
+                if ($pawnProcess.ExitCode -ne 0) {
+                    throw "Instalador PawnIO terminou com codigo $($pawnProcess.ExitCode)"
+                }
+                # Aguarda a disponibilidade real do driver, nao apenas o fim da instalacao.
+                for ($pawnTry = 1; $pawnTry -le 10; $pawnTry++) {
+                    $pawnDriver = Get-CimInstance -ClassName Win32_SystemDriver -Filter "Name='PawnIO'" -ErrorAction SilentlyContinue
+                    if ($null -ne $pawnDriver -and $pawnDriver.State -eq 'Running') { break }
+                    if ($pawnTry -lt 10) { Start-Sleep -Seconds 2 }
+                }
+            }
+            finally {
+                Remove-Item -LiteralPath $pawnSetup -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    catch {
+        # Falha na pré-inicialização não pode impedir a vistoria.
+        # A rotina de telemetria mantém sua própria verificação/instalação.
+        Write-Log ("PawnIO: pre-inicializacao nao concluida: {0}" -f $_.Exception.Message) 'WARN'
+    }
+}
+
 try {
   # 2) Carregar funções do repositório
   $functionFiles = @(

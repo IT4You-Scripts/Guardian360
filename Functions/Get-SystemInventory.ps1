@@ -1,4 +1,148 @@
-﻿# Coleta informações do inventário de software hardware, com alertas de espaço em disco C: e Saúde do SSD
+﻿# GUARDIAN 2026-11-06: identidade do usuario interativo, independente da elevacao.
+# Nao substitui os campos legados "Usuario Adm" e "Login ID".
+function Get-GuardianInteractiveIdentity {
+    $resultado = [ordered]@{
+        'Usuário Logado'       = 'Não identificado'
+        'Tipo de Conta'        = 'Não identificado'
+        'Permissão do Usuário' = 'Não identificado'
+        'Guardian Elevado'     = 'Não identificado'
+        'Conta de Execução'    = 'Não identificado'
+    }
+
+    try {
+        $atual = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $resultado['Conta de Execução'] = $atual.Name
+        $principal = [Security.Principal.WindowsPrincipal]::new($atual)
+        $resultado['Guardian Elevado'] = if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -or
+            $atual.User.Value -eq 'S-1-5-18') { 'Sim' } else { 'Não' }
+    } catch {}
+
+    try {
+        # Lemos o token da sessao do usuario (nao o token do Guardian).
+        # WTSQueryUserToken funciona como SYSTEM; OpenProcessToken e a alternativa
+        # para o Guardian elevado por outra conta administrativa (ElevaGuardian).
+        if (-not ('GuardianInteractiveTokenV1' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class GuardianInteractiveTokenV1 {
+    [DllImport("wtsapi32.dll", SetLastError=true)]
+    public static extern bool WTSQueryUserToken(uint sessionId, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError=true)]
+    public static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError=true)]
+    private static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr buffer, int length, out int needed);
+    [DllImport("kernel32.dll")]
+    public static extern bool CloseHandle(IntPtr handle);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TokenGroups { public uint Count; public SidAndAttributes First; }
+    public static bool HasAdministratorsSid(IntPtr token) {
+        int needed;
+        GetTokenInformation(token, 2, IntPtr.Zero, 0, out needed); // TokenGroups
+        if (needed <= 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        IntPtr buffer = Marshal.AllocHGlobal(needed);
+        try {
+            if (!GetTokenInformation(token, 2, buffer, needed, out needed))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            uint count = (uint)Marshal.ReadInt32(buffer);
+            long offset = Marshal.OffsetOf(typeof(TokenGroups), "First").ToInt64();
+            int stride = Marshal.SizeOf(typeof(SidAndAttributes));
+            for (uint i=0; i<count; i++) {
+                IntPtr entry = IntPtr.Add(buffer, checked((int)(offset + (long)i*stride)));
+                IntPtr sidPtr = Marshal.ReadIntPtr(entry);
+                if (sidPtr != IntPtr.Zero && new SecurityIdentifier(sidPtr).IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid))
+                    return true; // inclui administradores com SID deny-only por UAC
+            }
+            return false;
+        } finally { Marshal.FreeHGlobal(buffer); }
+    }
+}
+'@ -ErrorAction Stop
+        }
+
+        $usuarioConsole = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName
+        $candidatos = @()
+        foreach ($p in @(Get-Process -Name explorer -ErrorAction SilentlyContinue)) {
+            $token = [IntPtr]::Zero
+            $identidade = $null
+            try {
+                if ($resultado['Conta de Execução'] -eq 'NT AUTHORITY\SYSTEM') {
+                    [void][GuardianInteractiveTokenV1]::WTSQueryUserToken([uint32]$p.SessionId, [ref]$token)
+                }
+                if ($token -eq [IntPtr]::Zero) {
+                    [void][GuardianInteractiveTokenV1]::OpenProcessToken($p.Handle, 0x0008, [ref]$token)
+                }
+                if ($token -eq [IntPtr]::Zero) { continue }
+                $identidade = [Security.Principal.WindowsIdentity]::new($token)
+                if (-not $identidade.User -or $identidade.User.Value -eq 'S-1-5-18') { continue }
+                $candidatos += [pscustomobject]@{
+                    Nome       = $identidade.Name
+                    Sid        = $identidade.User.Value
+                    Sessao     = $p.SessionId
+                    Admin      = [GuardianInteractiveTokenV1]::HasAdministratorsSid($token)
+                }
+            } catch {
+                # Falha isolada da sessao: nunca atribuir permissao por suposicao.
+            } finally {
+                if ($identidade) { $identidade.Dispose() }
+                if ($token -ne [IntPtr]::Zero) { [void][GuardianInteractiveTokenV1]::CloseHandle($token) }
+            }
+        }
+
+        # Se ha varias sessoes, dar preferencia ao usuario que o Windows
+        # identifica no console. Nao escolher uma sessao arbitrariamente.
+        $selecionados = @($candidatos | Where-Object { $usuarioConsole -and $_.Nome -ieq $usuarioConsole } |
+            Sort-Object Sid -Unique)
+        if ($selecionados.Count -eq 0) {
+            $selecionados = @($candidatos | Sort-Object Sid -Unique)
+        }
+        if ($selecionados.Count -ne 1) {
+            if ($usuarioConsole) { $resultado['Usuário Logado'] = $usuarioConsole }
+            return [pscustomobject]$resultado
+        }
+
+        $selecionado = $selecionados[0]
+        $resultado['Usuário Logado'] = $selecionado.Nome
+        $resultado['Permissão do Usuário'] = if ($selecionado.Admin) { 'Administrador' } else { 'Restrito' }
+
+        # Tipo de conta: somente classificar quando a origem for demonstravel.
+        $sid = $selecionado.Sid
+        if ($sid -match '^S-1-12-1-') {
+            $resultado['Tipo de Conta'] = 'Microsoft Entra ID'
+        } elseif ($selecionado.Nome -match '^AzureAD\\') {
+            $resultado['Tipo de Conta'] = 'Microsoft Entra ID'
+        } else {
+            $local = Get-LocalUser -SID ([Security.Principal.SecurityIdentifier]::new($sid)) -ErrorAction SilentlyContinue
+            if ($local) {
+                $origem = [string]$local.PrincipalSource
+                $resultado['Tipo de Conta'] = switch ($origem) {
+                    'MicrosoftAccount' { 'Microsoft'; break }
+                    'Local'            { 'Local'; break }
+                    'ActiveDirectory'  { 'Active Directory'; break }
+                    'AzureAD'          { 'Microsoft Entra ID'; break }
+                    default            { 'Não identificado' }
+                }
+            } elseif ($selecionado.Nome -match '^MicrosoftAccount\\') {
+                $resultado['Tipo de Conta'] = 'Microsoft'
+            } elseif ($selecionado.Nome -match '^([^\\]+)\\' -and $matches[1] -ine $env:COMPUTERNAME -and
+                      $matches[1] -ine 'NT AUTHORITY') {
+                # Nao confundir nomes de dominio com prova de AD.
+                $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
+                if ($cs.PartOfDomain -and $cs.Domain -ieq $matches[1]) {
+                    $resultado['Tipo de Conta'] = 'Active Directory'
+                }
+            }
+        }
+    } catch {
+        # A coleta de identidade nao pode impedir a vistoria.
+    }
+    return [pscustomobject]$resultado
+}
+
+# Coleta informações do inventário de software hardware, com alertas de espaço em disco C: e Saúde do SSD
 function Get-SystemInventory {
     # Fallback de log para ambientes que não tenham Write-Log
     if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
@@ -248,6 +392,9 @@ function Get-SystemInventory {
 
         $softwaresFinais = $listaSoftwares | Where-Object { $_ } | Sort-Object -Unique
 
+        # Coleta independente do usuario interativo (sem modificar identidade legada).
+        $guardianIdentidade = Get-GuardianInteractiveIdentity
+
         # 9. Montagem do Objeto (com null-safe)
         $soCaption = if ($cimOS) { $cimOS.Caption } else { "N/A" }
         $fabMod = if ($cimCS) { "$($cimCS.Manufacturer) $($cimCS.Model)" } else { "N/A" }
@@ -256,6 +403,11 @@ function Get-SystemInventory {
             "Nome do Computador"        = $env:COMPUTERNAME
             "Usuário Adm"               = $usuarioFormatado
             "Login ID"                  = $loginID
+            "Usuário Logado"             = $guardianIdentidade.'Usuário Logado'
+            "Tipo de Conta"              = $guardianIdentidade.'Tipo de Conta'
+            "Permissão do Usuário"        = $guardianIdentidade.'Permissão do Usuário'
+            "Guardian Elevado"           = $guardianIdentidade.'Guardian Elevado'
+            "Conta de Execução"          = $guardianIdentidade.'Conta de Execução'
             "Sistema Operacional"       = $soCaption
             "Processador (CPU)"         = $cpu
             "Placa-Mãe"                 = $placaMaeCompleta
