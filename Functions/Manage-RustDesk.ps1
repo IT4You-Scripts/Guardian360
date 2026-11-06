@@ -69,6 +69,53 @@ function Manage-RustDesk {
         return $true
     }
 
+    # =========================================================================
+    # Atualizacao automatica do RustDesk (Windows >= 1.4.6)
+    # Altera somente allow-auto-update em RustDesk2.toml, sem tocar no ID,
+    # senha, servidor, chave ou outras configuracoes.
+    # =========================================================================
+    function Enable-RustDeskAutoUpdate {
+        param([Parameter(Mandatory)][string]$FilePath)
+
+        if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+            return "ausente"
+        }
+
+        $original = [System.IO.File]::ReadAllText($FilePath)
+        $alterado = $original
+
+        # Opcao de servidor; deve ficar na secao [options].
+        $cabecalho = [regex]::Match($alterado, '(?m)^\s*\[options\]\s*$')
+        if ($cabecalho.Success) {
+            $inicio = $cabecalho.Index + $cabecalho.Length
+            $proxima = [regex]::Match($alterado.Substring($inicio), '(?m)^\s*\[[^\r\n]+\]\s*$')
+            $fim = if ($proxima.Success) { $inicio + $proxima.Index } else { $alterado.Length }
+            $secao = $alterado.Substring($inicio, $fim - $inicio)
+
+            $opcao = [regex]::new('(?m)^[ \t]*allow-auto-update[ \t]*=[ \t]*[^\r\n]*')
+            if ($opcao.IsMatch($secao)) {
+                $secaoNova = $opcao.Replace($secao, 'allow-auto-update = ''Y''', 1)
+            }
+            else {
+                $secaoNova = "`r`nallow-auto-update = 'Y'" + $secao
+            }
+            $alterado = $alterado.Substring(0, $inicio) + $secaoNova + $alterado.Substring($fim)
+        }
+        else {
+            $alterado = $alterado.TrimEnd("`r", "`n") + "`r`n`r`n[options]`r`nallow-auto-update = 'Y'`r`n"
+        }
+
+        if ($alterado -ceq $original) { return "ja_ativo" }
+
+        # Backup pontual antes da alteracao; gravacao UTF-8, como o restante
+        # do Manage-RustDesk (Set-Content -Encoding UTF8).
+        Copy-Item -LiteralPath $FilePath -Destination "$FilePath.guardian-auto-update.bak" -Force -ErrorAction Stop
+        [System.IO.File]::WriteAllText(
+            $FilePath, $alterado, [System.Text.UTF8Encoding]::new($false)
+        )
+        return "habilitado"
+    }
+
     # Resultado padrao
     $result = @{
         rustdesk_id      = $null
@@ -349,6 +396,47 @@ key = '$RustDeskKey'
         }
         catch {
             Write-Host "[RustDesk] ERRO na verificacao/configuracao: $($_.Exception.Message)" -ForegroundColor Red
+        }
+
+        # =================================================================
+        # ETAPA 3B — Habilitar atualizacao automatica sem reiniciar servico
+        # =================================================================
+        try {
+            $versaoExe = (Get-Item -LiteralPath $RustDeskExe -ErrorAction Stop).VersionInfo.ProductVersion
+            if ($versaoExe -match '(\d+)\.(\d+)\.(\d+)') {
+                $versaoNormalizada = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
+            }
+            else {
+                $versaoNormalizada = $null
+            }
+
+            if (-not $versaoNormalizada -or $versaoNormalizada -lt [version]'1.4.6') {
+                Write-Host "[RustDesk] Atualizacao automatica nao aplicada: versao inferior a 1.4.6 ou desconhecida ($versaoExe)." -ForegroundColor Yellow
+            }
+            else {
+                # Configuracao do servico e dos perfis de usuario existentes.
+                # Nao cria perfis nem sobrescreve as demais opcoes dos arquivos.
+                $arquivosAutoUpdate = @($Config2File)
+                $arquivosAutoUpdate += @(
+                    Get-ChildItem -Path 'C:\Users' -Directory -ErrorAction SilentlyContinue |
+                        ForEach-Object {
+                            Join-Path $_.FullName 'AppData\Roaming\RustDesk\config\RustDesk2.toml'
+                        } |
+                        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+                )
+                foreach ($arquivo in ($arquivosAutoUpdate | Select-Object -Unique)) {
+                    try {
+                        $estadoAutoUpdate = Enable-RustDeskAutoUpdate -FilePath $arquivo
+                        Write-Host "[RustDesk] Auto update ($estadoAutoUpdate): $arquivo" -ForegroundColor Cyan
+                    }
+                    catch {
+                        Write-Host "[RustDesk] AVISO: auto update nao aplicado em $arquivo : $($_.Exception.Message)" -ForegroundColor Yellow
+                    }
+                }
+            }
+        }
+        catch {
+            Write-Host "[RustDesk] AVISO: falha na preparacao de auto update: $($_.Exception.Message)" -ForegroundColor Yellow
         }
 
         # =================================================================
