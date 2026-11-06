@@ -160,6 +160,60 @@ catch {
 }
 
 # ============================================================================
+# RUSTDESK: HABILITAR ATUALIZACAO AUTOMATICA (sem reiniciar o aplicativo)
+# ============================================================================
+try {
+    $rustDeskInstalado = @(
+        "$env:ProgramFiles\RustDesk\RustDesk.exe",
+        "${env:ProgramFiles(x86)}\RustDesk\RustDesk.exe"
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+        Select-Object -First 1
+
+    if ($rustDeskInstalado) {
+        $arquivosRustDesk = @(
+            'C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config\RustDesk2.toml'
+        )
+        $arquivosRustDesk += @(
+            Get-ChildItem -LiteralPath 'C:\Users' -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    Join-Path $_.FullName 'AppData\Roaming\RustDesk\config\RustDesk2.toml'
+                }
+        )
+
+        foreach ($arquivoRustDesk in ($arquivosRustDesk | Select-Object -Unique)) {
+            if (-not (Test-Path -LiteralPath $arquivoRustDesk -PathType Leaf)) { continue }
+            try {
+                $conteudo = [System.IO.File]::ReadAllText($arquivoRustDesk)
+                $secao = [regex]::Match($conteudo, '(?m)^\s*\[options\]\s*(?:\r?\n|$)')
+                if (-not $secao.Success) { continue }
+
+                $inicio = $secao.Index + $secao.Length
+                $proximaSecao = [regex]::Match($conteudo.Substring($inicio), '(?m)^\s*\[[^\]\r\n]+\]\s*$')
+                $fim = if ($proximaSecao.Success) { $inicio + $proximaSecao.Index } else { $conteudo.Length }
+                $bloco = $conteudo.Substring($inicio, $fim - $inicio)
+
+                if ($bloco -match "(?m)^\s*allow-auto-update\s*=\s*'Y'\s*$") { continue }
+                if ($bloco -match '(?m)^\s*allow-auto-update\s*=') {
+                    $novoBloco = [regex]::Replace($bloco, "(?m)^(\s*allow-auto-update\s*=\s*).*$", "`$1'Y'")
+                } else {
+                    $quebraLinha = if ($conteudo.Contains("`r`n")) { "`r`n" } else { "`n" }
+                    $novoBloco = "allow-auto-update = 'Y'" + $quebraLinha + $bloco
+                }
+
+                $novoConteudo = $conteudo.Substring(0, $inicio) + $novoBloco + $conteudo.Substring($fim)
+                if ($novoConteudo -cne $conteudo) {
+                    [System.IO.File]::WriteAllText($arquivoRustDesk, $novoConteudo, [System.Text.UTF8Encoding]::new($false))
+                }
+            } catch {
+                # Nao interfere no funcionamento do Guardian Ghost.
+            }
+        }
+    }
+} catch {
+    # Nao interfere no funcionamento do Guardian Ghost.
+}
+
+# ============================================================================
 # CARREGAR E EXECUTAR REPAIR-SYSTEMINTEGRITY
 # ============================================================================
 try {
