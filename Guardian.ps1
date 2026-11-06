@@ -1011,6 +1011,124 @@ if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
     }
 }
 
+# ===============================================================================
+# Preflight NetTime + 7-Zip: somente antes do inventario (Fase 1).
+# Nao atualiza programas instalados; nao modifica W32Time ou politicas de dominio.
+# Falhas sao isoladas e nunca impedem a vistoria.
+# ===============================================================================
+function Test-GuardianProgramInstalled {
+    param([ValidateSet('NetTime','7-Zip')][string]$Programa)
+
+    # Caminhos padrao: permitem detectar o executavel mesmo sem entrada Uninstall.
+    $caminhos = if ($Programa -eq '7-Zip') {
+        @(
+            (Join-Path $env:ProgramFiles '7-Zip\7z.exe'),
+            $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} '7-Zip\7z.exe' })
+        )
+    } else {
+        @(
+            (Join-Path $env:ProgramFiles 'NetTime\NetTimeService.exe'),
+            $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} 'NetTime\NetTimeService.exe' })
+        )
+    }
+    foreach ($caminho in $caminhos) {
+        if ($caminho -and (Test-Path -LiteralPath $caminho -PathType Leaf)) { return $true }
+    }
+
+    foreach ($raiz in @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )) {
+        foreach ($entrada in @(Get-ItemProperty -Path $raiz -ErrorAction SilentlyContinue)) {
+            $nome = if ($entrada.PSObject.Properties['DisplayName']) { [string]$entrada.DisplayName } else { '' }
+            if ($Programa -eq 'NetTime' -and $nome -match '^NetTime(?:\s|$)') { return $true }
+            if ($Programa -eq '7-Zip'   -and $nome -match '^7-Zip(?:\s|$)') { return $true }
+        }
+    }
+    return $false
+}
+
+function Install-GuardianOptionalProgram {
+    param([ValidateSet('NetTime','7-Zip')][string]$Programa)
+
+    if (Test-GuardianProgramInstalled -Programa $Programa) {
+        Write-Log ("{0}: ja instalado; nenhuma acao necessaria." -f $Programa) 'INFO'
+        return
+    }
+
+    # Instaladores oficiais de versoes estaveis (sem atualizacao automatica).
+    # 7-Zip 26.05 x64: site oficial -> repositorio oficial ip7z.
+    # NetTime 3.14: versao estavel, nao a versao alpha 3.20.
+    if ($Programa -eq '7-Zip') {
+        $url = 'https://github.com/ip7z/7zip/releases/download/26.05/7z2605-x64.exe'
+        $argumentos = '/S'
+        if (-not [Environment]::Is64BitOperatingSystem -or
+            [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [System.Runtime.InteropServices.Architecture]::X64) {
+            Write-Log '7-Zip: instalador configurado apenas para Windows x64; instalacao ignorada neste equipamento.' 'WARN'
+            return
+        }
+    } else {
+        $url = 'https://www.timesynctool.com/NetTimeSetup-314.exe'
+        $argumentos = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-'
+    }
+
+    $diretorio = Join-Path ([IO.Path]::GetTempPath()) ('Guardian_OptionalApps_' + [guid]::NewGuid().ToString('N'))
+    $instalador = Join-Path $diretorio ($Programa.Replace('-','') + '.exe')
+    try {
+        New-Item -ItemType Directory -Path $diretorio -Force -ErrorAction Stop | Out-Null
+        Write-Log ("{0}: ausente; baixando instalador oficial." -f $Programa) 'INFO'
+        Invoke-WebRequest -Uri $url -OutFile $instalador -MaximumRedirection 5 -TimeoutSec 90 -ErrorAction Stop
+        $arquivo = Get-Item -LiteralPath $instalador -ErrorAction Stop
+        if ($arquivo.Length -lt 50000) { throw 'Arquivo baixado invalido ou incompleto.' }
+        # Nao executar binario com assinatura explicitamente invalida.
+        $assinatura = Get-AuthenticodeSignature -LiteralPath $instalador -ErrorAction Stop
+        if ($assinatura.Status -notin @('Valid','NotSigned')) {
+            throw ("Assinatura do instalador nao confiavel: {0}" -f $assinatura.Status)
+        }
+
+        $processo = Start-Process -FilePath $instalador -ArgumentList $argumentos -PassThru -WindowStyle Hidden -ErrorAction Stop
+        if (-not $processo.WaitForExit(180000)) {
+            try { $processo.Kill() } catch { }
+            throw 'Instalador ultrapassou o limite de 180 segundos.'
+        }
+        if ($processo.ExitCode -notin @(0,3010)) {
+            throw ("Instalador retornou codigo {0}" -f $processo.ExitCode)
+        }
+
+        # O instalador pode registrar o produto alguns segundos apos sair.
+        $confirmado = $false
+        for ($tentativa=0; $tentativa -lt 10; $tentativa++) {
+            if (Test-GuardianProgramInstalled -Programa $Programa) { $confirmado = $true; break }
+            Start-Sleep -Seconds 2
+        }
+        if ($confirmado) {
+            Write-Log ("{0}: instalado silenciosamente antes do inventario." -f $Programa) 'INFO'
+            if ($Programa -eq 'NetTime') {
+                $servico = Get-Service -Name 'NetTimeSvc' -ErrorAction SilentlyContinue
+                if (-not $servico) {
+                    Write-Log 'NetTime: programa instalado, mas servico NetTimeSvc nao localizado; verificar instalacao no teste.' 'WARN'
+                } elseif ($servico.Status -ne 'Running') {
+                    Write-Log ("NetTime: servico instalado, estado atual: {0}." -f $servico.Status) 'WARN'
+                }
+            }
+        } else {
+            Write-Log ("{0}: instalador terminou, mas o programa nao foi confirmado no Windows." -f $Programa) 'WARN'
+        }
+    } catch {
+        Write-Log ("{0}: falha na preparacao: {1}. Guardian prossegue." -f $Programa, $_.Exception.Message) 'WARN'
+    } finally {
+        try { Remove-Item -LiteralPath $diretorio -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+    }
+}
+
+if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
+    (-not $PulaFases -or $PulaFases -notcontains 1) -and -not $Simulado) {
+    foreach ($programaOpcional in @('NetTime','7-Zip')) {
+        try { Install-GuardianOptionalProgram -Programa $programaOpcional }
+        catch { Write-Log ("{0}: falha isolada: {1}" -f $programaOpcional, $_.Exception.Message) 'WARN' }
+    }
+}
+
 # === Loop principal com atualização da UI ===
 foreach ($phase in $Phases) {
     $id = [int]$phase.Id
