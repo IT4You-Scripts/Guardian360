@@ -399,16 +399,59 @@ key = '$RustDeskKey'
         }
 
         # =================================================================
-        # ETAPA 3B — Auto update isolado; limite de 15 segundos SOMENTE aqui.
-        # Sem reiniciar RustDesk ou interferir nas demais rotinas.
+        # ETAPA 3B — Auto-update: mesma rotina validada, isolada por 15s.
+        # A rotina original acima/abaixo (ID, senha, servidor e service) nao muda.
+        # Sem reiniciar RustDesk e sem avisos quando ocorrer timeout.
         # =================================================================
-        $autoUpdateTemp = $null
         $autoUpdateProcess = $null
+        $autoUpdateSaida = $null
+        $autoUpdateErro = $null
         try {
-            $autoUpdateTemp = Join-Path $env:TEMP ("Guardian-RustDesk-AutoUpdate-" + [guid]::NewGuid().ToString('N') + '.ps1')
-            $autoUpdateScript = @'
-param([string]$RustDeskExe, [string]$Config2File)
-'@ + "`r`nfunction Enable-RustDeskAutoUpdate {`r`n" + ${function:Enable-RustDeskAutoUpdate}.ToString() + "`r`n}`r`n" + @'
+            $autoUpdateCodigo = @'
+$RustDeskExe = '__GUARDIAN_RUSTDESK_EXE__'
+$Config2File = '__GUARDIAN_CONFIG2_FILE__'
+    function Enable-RustDeskAutoUpdate {
+        param([Parameter(Mandatory)][string]$FilePath)
+
+        if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+            return "ausente"
+        }
+
+        $original = [System.IO.File]::ReadAllText($FilePath)
+        $alterado = $original
+
+        # Opcao de servidor; deve ficar na secao [options].
+        $cabecalho = [regex]::Match($alterado, '(?m)^\s*\[options\]\s*$')
+        if ($cabecalho.Success) {
+            $inicio = $cabecalho.Index + $cabecalho.Length
+            $proxima = [regex]::Match($alterado.Substring($inicio), '(?m)^\s*\[[^\r\n]+\]\s*$')
+            $fim = if ($proxima.Success) { $inicio + $proxima.Index } else { $alterado.Length }
+            $secao = $alterado.Substring($inicio, $fim - $inicio)
+
+            $opcao = [regex]::new('(?m)^[ \t]*allow-auto-update[ \t]*=[ \t]*[^\r\n]*')
+            if ($opcao.IsMatch($secao)) {
+                $secaoNova = $opcao.Replace($secao, 'allow-auto-update = ''Y''', 1)
+            }
+            else {
+                $secaoNova = "`r`nallow-auto-update = 'Y'" + $secao
+            }
+            $alterado = $alterado.Substring(0, $inicio) + $secaoNova + $alterado.Substring($fim)
+        }
+        else {
+            $alterado = $alterado.TrimEnd("`r", "`n") + "`r`n`r`n[options]`r`nallow-auto-update = 'Y'`r`n"
+        }
+
+        if ($alterado -ceq $original) { return "ja_ativo" }
+
+        # Backup pontual antes da alteracao; gravacao UTF-8, como o restante
+        # do Manage-RustDesk (Set-Content -Encoding UTF8).
+        Copy-Item -LiteralPath $FilePath -Destination "$FilePath.guardian-auto-update.bak" -Force -ErrorAction Stop
+        [System.IO.File]::WriteAllText(
+            $FilePath, $alterado, [System.Text.UTF8Encoding]::new($false)
+        )
+        return "habilitado"
+    }
+
         try {
             $versaoExe = (Get-Item -LiteralPath $RustDeskExe -ErrorAction Stop).VersionInfo.ProductVersion
             if ($versaoExe -match '(\d+)\.(\d+)\.(\d+)') {
@@ -446,25 +489,43 @@ param([string]$RustDeskExe, [string]$Config2File)
         catch {
             Write-Host "[RustDesk] AVISO: falha na preparacao de auto update: $($_.Exception.Message)" -ForegroundColor Yellow
         }
-
 '@
-            [System.IO.File]::WriteAllText($autoUpdateTemp, $autoUpdateScript, [System.Text.UTF8Encoding]::new($false))
+            # Injeta somente os dois caminhos na rotina ja validada.
+            $autoUpdateCodigo = $autoUpdateCodigo.Replace(
+                '__GUARDIAN_RUSTDESK_EXE__', $RustDeskExe.Replace("'", "''")
+            ).Replace(
+                '__GUARDIAN_CONFIG2_FILE__', $Config2File.Replace("'", "''")
+            )
+            $autoUpdateEncoded = [Convert]::ToBase64String(
+                [Text.Encoding]::Unicode.GetBytes($autoUpdateCodigo)
+            )
+            $autoUpdateToken = [guid]::NewGuid().ToString('N')
+            $autoUpdateSaida = Join-Path $env:TEMP ("guardian-rustdesk-auto-" + $autoUpdateToken + ".out")
+            $autoUpdateErro  = Join-Path $env:TEMP ("guardian-rustdesk-auto-" + $autoUpdateToken + ".err")
+            $autoUpdateProcess = Start-Process `
+                -FilePath (Join-Path $PSHOME 'pwsh.exe') `
+                -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $autoUpdateEncoded) `
+                -WindowStyle Hidden -PassThru `
+                -RedirectStandardOutput $autoUpdateSaida `
+                -RedirectStandardError $autoUpdateErro -ErrorAction Stop
 
-            $autoUpdateProcess = Start-Process -FilePath (Join-Path $PSHOME 'pwsh.exe') `
-                -ArgumentList @('-NoProfile', '-NonInteractive', '-File',
-                    ('"' + $autoUpdateTemp + '"'), ('"' + $RustDeskExe + '"'), ('"' + $Config2File + '"')) `
-                -WindowStyle Hidden -PassThru -ErrorAction Stop
-
-            if (-not $autoUpdateProcess.WaitForExit(15000)) {
-                # Encerra apenas o PowerShell auxiliar DESTA rotina.
+            if ($autoUpdateProcess.WaitForExit(15000)) {
+                # Mantem visivel a confirmacao que a versao anterior emitia.
+                if (Test-Path -LiteralPath $autoUpdateSaida) {
+                    Get-Content -LiteralPath $autoUpdateSaida -ErrorAction SilentlyContinue |
+                        ForEach-Object { if ($_ -match 'Auto update \(') { Write-Host $_ -ForegroundColor Cyan } }
+                }
+            }
+            else {
+                # Limite exclusivamente desta rotina; nao encerra RustDesk.
                 try { if (-not $autoUpdateProcess.HasExited) { $autoUpdateProcess.Kill() } } catch { }
             }
         }
-        catch { }  # Sem avisos por timeout ou falha desta rotina opcional.
+        catch { } # Falhas nesta rotina opcional nao interrompem a vistoria.
         finally {
             if ($null -ne $autoUpdateProcess) { $autoUpdateProcess.Dispose() }
-            if ($autoUpdateTemp) {
-                Remove-Item -LiteralPath $autoUpdateTemp -Force -ErrorAction SilentlyContinue
+            foreach ($arqTmp in @($autoUpdateSaida, $autoUpdateErro)) {
+                if ($arqTmp) { Remove-Item -LiteralPath $arqTmp -Force -ErrorAction SilentlyContinue }
             }
         }
 
