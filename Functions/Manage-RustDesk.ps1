@@ -352,55 +352,6 @@ key = '$RustDeskKey'
         }
 
         # =================================================================
-        # ETAPA 3B — Auto update (somente TOML do servico; sem subprocessos)
-        # O controle Auto update da interface e uma opcao de servidor.
-        # A rotina nao para/reinicia o RustDesk e nao altera outras opcoes.
-        # Limite cooperativo de 15s, restrito a esta etapa.
-        # =================================================================
-        try {
-            $autoInicio = [System.Diagnostics.Stopwatch]::StartNew()
-            $autoVersao = (Get-Item -LiteralPath $RustDeskExe -ErrorAction Stop).VersionInfo.ProductVersion
-            if ($autoVersao -match '(\d+)\.(\d+)\.(\d+)' -and
-                ([version]"$($Matches[1]).$($Matches[2]).$($Matches[3])" -ge [version]'1.4.6')) {
-
-                if ($autoInicio.Elapsed.TotalSeconds -lt 15 -and
-                    (Test-Path -LiteralPath $Config2File -PathType Leaf)) {
-                    $autoOriginal = [System.IO.File]::ReadAllText($Config2File)
-                    $autoNovo = $autoOriginal
-                    $autoSecao = [regex]::Match($autoOriginal, '(?m)^\[options\][ \t]*\r?$')
-                    if ($autoSecao.Success) {
-                        $autoInicioSecao = $autoSecao.Index + $autoSecao.Length
-                        $autoResto = $autoOriginal.Substring($autoInicioSecao)
-                        $autoProximaSecao = [regex]::Match($autoResto, '(?m)^\[[^\r\n]+\][ \t]*\r?$')
-                        $autoFimSecao = if ($autoProximaSecao.Success) {
-                            $autoInicioSecao + $autoProximaSecao.Index
-                        } else { $autoOriginal.Length }
-                        $autoConteudoSecao = $autoOriginal.Substring($autoInicioSecao, $autoFimSecao - $autoInicioSecao)
-                        $autoChave = [regex]::new('(?m)^[ \t]*allow-auto-update[ \t]*=[ \t]*[^\r\n]*')
-                        if ($autoChave.IsMatch($autoConteudoSecao)) {
-                            $autoConteudoNovo = $autoChave.Replace($autoConteudoSecao, "allow-auto-update = 'Y'", 1)
-                        } else {
-                            $autoConteudoNovo = "`r`nallow-auto-update = 'Y'" + $autoConteudoSecao
-                        }
-                        $autoNovo = $autoOriginal.Substring(0, $autoInicioSecao) + $autoConteudoNovo + $autoOriginal.Substring($autoFimSecao)
-                    }
-                    if ($autoInicio.Elapsed.TotalSeconds -lt 15 -and $autoNovo -cne $autoOriginal) {
-                        if ($autoSecao.Success) {
-                            # Arquivo original preservado para restauracao, se necessario.
-                            Copy-Item -LiteralPath $Config2File -Destination "$Config2File.guardian-auto-update.bak" -Force -ErrorAction Stop
-                            [System.IO.File]::WriteAllText($Config2File, $autoNovo, [System.Text.UTF8Encoding]::new($false))
-                            $autoConferencia = [System.IO.File]::ReadAllText($Config2File)
-                            if ($autoConferencia -ceq $autoNovo) {
-                                Write-Host '[RustDesk] Auto update gravado no perfil do servico.' -ForegroundColor Cyan
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        catch { } # Etapa opcional: nenhuma falha impede a vistoria.
-
-        # =================================================================
         # ETAPA 4 — Garantir servico rodando
         # =================================================================
         $service = Get-Service -Name $RustDeskService -ErrorAction SilentlyContinue
