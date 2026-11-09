@@ -988,6 +988,29 @@ $CurrentStep = 0
  Write-Report ("Cliente: {0}" -f $Cliente)
 
 
+# Preflight PawnIO: antes da Fase 1 para aparecer no inventario de software.
+# Reutiliza a instalacao do modulo de telemetria; falhas nao bloqueiam o Guardian.
+if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
+    (-not $PulaFases -or $PulaFases -notcontains 1) -and -not $Simulado) {
+    try {
+        $scriptPawnIO = Join-Path $funcDir 'Get-HardwareTelemetry.ps1'
+        if (Test-Path -LiteralPath $scriptPawnIO -PathType Leaf) {
+            $preparoPawnIO = & $scriptPawnIO -PrepararPawnIO
+            $estadoPawnIO = [string]$preparoPawnIO.Estado
+            Write-Report ("PawnIO (antes do inventario): {0}" -f $estadoPawnIO)
+            foreach ($avisoPawnIO in @($preparoPawnIO.Avisos)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$avisoPawnIO)) {
+                    Write-Log ("PawnIO: {0}" -f $avisoPawnIO) 'WARN'
+                }
+            }
+        } else {
+            Write-Log 'PawnIO: modulo de telemetria ausente; inventario segue normalmente.' 'WARN'
+        }
+    } catch {
+        Write-Log ("PawnIO: preflight nao concluido: {0}. Inventario segue normalmente." -f $_.Exception.Message) 'WARN'
+    }
+}
+
 # === Loop principal com atualização da UI ===
 foreach ($phase in $Phases) {
     $id = [int]$phase.Id
