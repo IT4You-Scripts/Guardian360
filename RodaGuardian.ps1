@@ -505,8 +505,10 @@ try {
         -ArgumentList $argStringGuardian `
         -WorkingDirectory $workDir `
         -WindowStyle Normal `
-        -Wait `
         -PassThru
+
+    # Aguarda apenas o processo Guardian iniciado, nao todos os descendentes.
+    $procGuardian.WaitForExit()
 
     Show-Header "Guardian executado com sucesso!" -Color Green
 } catch {
