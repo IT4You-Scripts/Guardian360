@@ -1,0 +1,42 @@
+Guardian 360 - diagnostico de sensores da CPU
+Coletado em: 2026-11-14T17:02:27.8696900-03:00
+Amostra 1:
+  Detectado: Core Max [/intelcpu/0/temperature/0] = 51 C
+  Detectado: Core Average [/intelcpu/0/temperature/1] = 50 C
+  Detectado: CPU Core #1 [/intelcpu/0/temperature/2] = 51 C
+  Detectado: CPU Core #2 [/intelcpu/0/temperature/3] = 49 C
+  Detectado: CPU Package [/intelcpu/0/temperature/4] = 51 C
+  Detectado: CPU Core #1 Distance to TjMax [/intelcpu/0/temperature/5] = 49 C
+  Detectado: CPU Core #2 Distance to TjMax [/intelcpu/0/temperature/6] = 51 C
+  Criterio: package
+  Utilizado: CPU Package [/intelcpu/0/temperature/4] = 51 C
+Amostra 2:
+  Detectado: Core Max [/intelcpu/0/temperature/0] = 44 C
+  Detectado: Core Average [/intelcpu/0/temperature/1] = 42.5 C
+  Detectado: CPU Core #1 [/intelcpu/0/temperature/2] = 44 C
+  Detectado: CPU Core #2 [/intelcpu/0/temperature/3] = 41 C
+  Detectado: CPU Package [/intelcpu/0/temperature/4] = 44 C
+  Detectado: CPU Core #1 Distance to TjMax [/intelcpu/0/temperature/5] = 56 C
+  Detectado: CPU Core #2 Distance to TjMax [/intelcpu/0/temperature/6] = 59 C
+  Criterio: package
+  Utilizado: CPU Package [/intelcpu/0/temperature/4] = 44 C
+Amostra 3:
+  Detectado: Core Max [/intelcpu/0/temperature/0] = 44 C
+  Detectado: Core Average [/intelcpu/0/temperature/1] = 42.5 C
+  Detectado: CPU Core #1 [/intelcpu/0/temperature/2] = 44 C
+  Detectado: CPU Core #2 [/intelcpu/0/temperature/3] = 41 C
+  Detectado: CPU Package [/intelcpu/0/temperature/4] = 44 C
+  Detectado: CPU Core #1 Distance to TjMax [/intelcpu/0/temperature/5] = 56 C
+  Detectado: CPU Core #2 Distance to TjMax [/intelcpu/0/temperature/6] = 59 C
+  Criterio: package
+  Utilizado: CPU Package [/intelcpu/0/temperature/4] = 44 C
+Amostra 4:
+  Detectado: Core Max [/intelcpu/0/temperature/0] = 45 C
+  Detectado: Core Average [/intelcpu/0/temperature/1] = 44.5 C
+  Detectado: CPU Core #1 [/intelcpu/0/temperature/2] = 45 C
+  Detectado: CPU Core #2 [/intelcpu/0/temperature/3] = 44 C
+  Detectado: CPU Package [/intelcpu/0/temperature/4] = 45 C
+  Detectado: CPU Core #1 Distance to TjMax [/intelcpu/0/temperature/5] = 55 C
+  Detectado: CPU Core #2 Distance to TjMax [/intelcpu/0/temperature/6] = 56 C
+  Criterio: package
+  Utilizado: CPU Package [/intelcpu/0/temperature/4] = 45 C

@@ -42,9 +42,6 @@
             }
         }
 
-        if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
-            function Write-Log { param([string]$Message) }
-        }
 
         $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
         $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
@@ -99,7 +96,6 @@
                     }
                 }
             } catch {
-                Write-Log "Erro ao acessar registro: $_"
             }
         }
 

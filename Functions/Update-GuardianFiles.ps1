@@ -56,44 +56,44 @@
     # Lista de arquivos oficiais
     # -------------------------------
     $Files = @(
-        # Baixar versão nova sem sobrescrever a atual
-        @{ Url = "$BaseUrl/RodaGuardian.ps1";                        Path = "$BasePath\RodaGuardian.new" },
-        @{ Url = "$BaseUrl/ElevaGuardian.ps1";                       Path = "$BasePath\ElevaGuardian.new" },
-        @{ Url = "$BaseUrl/Functions/Update-GuardianFiles.ps1";      Path = "$BasePath\Functions\Update-GuardianFiles.new" },
-        
-        # Baixar versão nova sobrescrevendo as atuais
-        @{ Url = "$BaseUrl/Atualiza.ps1";                            Path = "$BasePath\Atualiza.ps1" },
-        @{ Url = "$BaseUrl/CriaCredenciais.ps1";                     Path = "$BasePath\CriaCredenciais.ps1" },
-        @{ Url = "$BaseUrl/Guardian.ps1";                            Path = "$BasePath\Guardian.ps1" },
-        @{ Url = "$BaseUrl/Prepara.ps1";                             Path = "$BasePath\Prepara.ps1" },
-        @{ Url = "$BaseUrl/Guardian-Ghost.ps1";                      Path = "$BasePath\Guardian-Ghost.ps1" },
-        @{ Url = "$BaseUrl/Assets/Images/logotipo.png";              Path = "$BasePath\Assets\Images\logotipo.png" },
-        @{ Url = "$BaseUrl/Assets/Images/guardian_bg.png";           Path = "$BasePath\Assets\Images\guardian_bg.png" },
-        @{ Url = "$BaseUrl/Assets/Images/guardian_end_bg.png";       Path = "$BasePath\Assets\Images\guardian_end_bg.png" },
-        @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1";          Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
-        @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1";      Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
-        @{ Url = "$BaseUrl/Functions/Clear-BrowserCache.ps1";        Path = "$BasePath\Functions\Clear-BrowserCache.ps1" },
-        @{ Url = "$BaseUrl/Functions/Clear-RecentFilesHistory.ps1";  Path = "$BasePath\Functions\Clear-RecentFilesHistory.ps1" },
-        @{ Url = "$BaseUrl/Functions/Clear-TempFiles.ps1";           Path = "$BasePath\Functions\Clear-TempFiles.ps1" },
-        @{ Url = "$BaseUrl/Functions/Clear-WindowsUpdateCache.ps1";  Path = "$BasePath\Functions\Clear-WindowsUpdateCache.ps1" },
-        @{ Url = "$BaseUrl/Functions/Confirm-MacriumBackup.ps1";     Path = "$BasePath\Functions\Confirm-MacriumBackup.ps1" },
-        @{ Url = "$BaseUrl/Functions/Get-SystemInventory.ps1";       Path = "$BasePath\Functions\Get-SystemInventory.ps1" },
-        @{ Url = "$BaseUrl/Functions/Manage-RustDesk.ps1";           Path = "$BasePath\Functions\Manage-RustDesk.ps1" },
-        @{ Url = "$BaseUrl/Functions/Optimize-HDD.ps1";              Path = "$BasePath\Functions\Optimize-HDD.ps1" },
-        @{ Url = "$BaseUrl/Functions/Optimize-JsonReport.ps1";       Path = "$BasePath\Functions\Optimize-JsonReport.ps1" },
-        @{ Url = "$BaseUrl/Functions/Optimize-NetworkSettings.ps1";  Path = "$BasePath\Functions\Optimize-NetworkSettings.ps1" },
-        @{ Url = "$BaseUrl/Functions/Optimize-PowerSettings.ps1";    Path = "$BasePath\Functions\Optimize-PowerSettings.ps1" },
-        @{ Url = "$BaseUrl/Functions/Optimize-SSD.ps1";              Path = "$BasePath\Functions\Optimize-SSD.ps1" },
-        @{ Url = "$BaseUrl/Functions/Remove-OldUpdateFiles.ps1";     Path = "$BasePath\Functions\Remove-OldUpdateFiles.ps1" },
-        @{ Url = "$BaseUrl/Functions/Repair-SystemIntegrity.ps1";    Path = "$BasePath\Functions\Repair-SystemIntegrity.ps1" },
-        @{ Url = "$BaseUrl/Functions/Scan-AntiMalware.ps1";          Path = "$BasePath\Functions\Scan-AntiMalware.ps1" },
-        @{ Url = "$BaseUrl/Functions/Send-LogToServer.ps1";          Path = "$BasePath\Functions\Send-LogToServer.ps1" },
-        @{ Url = "$BaseUrl/Functions/Show-GuardianEndUI.ps1";        Path = "$BasePath\Functions\Show-GuardianEndUI.ps1" },
-        @{ Url = "$BaseUrl/Functions/Show-GuardianUI.ps1";           Path = "$BasePath\Functions\Show-GuardianUI.ps1" },
-        @{ Url = "$BaseUrl/Functions/Update-MicrosoftStore.ps1";     Path = "$BasePath\Functions\Update-MicrosoftStore.ps1" },
-        @{ Url = "$BaseUrl/Functions/Update-WindowsOS.ps1";          Path = "$BasePath\Functions\Update-WindowsOS.ps1" },
-        @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1";         Path = "$BasePath\Functions\Update-WingetApps.ps1" },
-        @{ Url = "$BaseUrl/Functions/Write-JsonResult.ps1";          Path = "$BasePath\Functions\Write-JsonResult.ps1" }
+        # Lancadores e atualizador: staging .new para preservar a estrategia existente.
+        @{ Url = "$BaseUrl/RodaGuardian.ps1"; Path = "$BasePath\RodaGuardian.new" },
+        @{ Url = "$BaseUrl/ElevaGuardian.ps1"; Path = "$BasePath\ElevaGuardian.new" },
+        @{ Url = "$BaseUrl/Functions/Update-GuardianFiles.ps1"; Path = "$BasePath\Functions\Update-GuardianFiles.new" },
+        # Scripts principais (mantem o mesmo funcionamento de distribuicao).
+        @{ Url = "$BaseUrl/Atualiza.ps1"; Path = "$BasePath\Atualiza.ps1" },
+        @{ Url = "$BaseUrl/CriaCredenciais.ps1"; Path = "$BasePath\CriaCredenciais.ps1" },
+        @{ Url = "$BaseUrl/Guardian.ps1"; Path = "$BasePath\Guardian.ps1" },
+        @{ Url = "$BaseUrl/Prepara.ps1"; Path = "$BasePath\Prepara.ps1" },
+        @{ Url = "$BaseUrl/Guardian-Ghost.ps1"; Path = "$BasePath\Guardian-Ghost.ps1" },
+        # UI 29: apenas as 3 imagens efetivamente usadas pela interface WPF.
+        @{ Url = "$BaseUrl/Assets/Images/bg.png"; Path = "$BasePath\Assets\Images\bg.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_execucao.png"; Path = "$BasePath\Assets\Images\guardian_robot_execucao.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_final.png"; Path = "$BasePath\Assets\Images\guardian_robot_final.png" },
+        # Funcoes utilizadas / carregadas pelo Guardian 360 v2.0.
+        @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1"; Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
+        @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1"; Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
+        @{ Url = "$BaseUrl/Functions/Clear-BrowserCache.ps1"; Path = "$BasePath\Functions\Clear-BrowserCache.ps1" },
+        @{ Url = "$BaseUrl/Functions/Clear-RecentFilesHistory.ps1"; Path = "$BasePath\Functions\Clear-RecentFilesHistory.ps1" },
+        @{ Url = "$BaseUrl/Functions/Clear-TempFiles.ps1"; Path = "$BasePath\Functions\Clear-TempFiles.ps1" },
+        @{ Url = "$BaseUrl/Functions/Clear-WindowsUpdateCache.ps1"; Path = "$BasePath\Functions\Clear-WindowsUpdateCache.ps1" },
+        @{ Url = "$BaseUrl/Functions/Confirm-MacriumBackup.ps1"; Path = "$BasePath\Functions\Confirm-MacriumBackup.ps1" },
+        @{ Url = "$BaseUrl/Functions/Get-SystemInventory.ps1"; Path = "$BasePath\Functions\Get-SystemInventory.ps1" },
+        @{ Url = "$BaseUrl/Functions/Manage-RustDesk.ps1"; Path = "$BasePath\Functions\Manage-RustDesk.ps1" },
+        @{ Url = "$BaseUrl/Functions/Optimize-HDD.ps1"; Path = "$BasePath\Functions\Optimize-HDD.ps1" },
+        @{ Url = "$BaseUrl/Functions/Optimize-JsonReport.ps1"; Path = "$BasePath\Functions\Optimize-JsonReport.ps1" },
+        @{ Url = "$BaseUrl/Functions/Optimize-NetworkSettings.ps1"; Path = "$BasePath\Functions\Optimize-NetworkSettings.ps1" },
+        @{ Url = "$BaseUrl/Functions/Optimize-PowerSettings.ps1"; Path = "$BasePath\Functions\Optimize-PowerSettings.ps1" },
+        @{ Url = "$BaseUrl/Functions/Optimize-SSD.ps1"; Path = "$BasePath\Functions\Optimize-SSD.ps1" },
+        @{ Url = "$BaseUrl/Functions/Remove-OldUpdateFiles.ps1"; Path = "$BasePath\Functions\Remove-OldUpdateFiles.ps1" },
+        @{ Url = "$BaseUrl/Functions/Repair-SystemIntegrity.ps1"; Path = "$BasePath\Functions\Repair-SystemIntegrity.ps1" },
+        @{ Url = "$BaseUrl/Functions/Scan-AntiMalware.ps1"; Path = "$BasePath\Functions\Scan-AntiMalware.ps1" },
+        @{ Url = "$BaseUrl/Functions/Send-LogToServer.ps1"; Path = "$BasePath\Functions\Send-LogToServer.ps1" },
+        @{ Url = "$BaseUrl/Functions/Update-MicrosoftStore.ps1"; Path = "$BasePath\Functions\Update-MicrosoftStore.ps1" },
+        @{ Url = "$BaseUrl/Functions/Update-WindowsOS.ps1"; Path = "$BasePath\Functions\Update-WindowsOS.ps1" },
+        @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1"; Path = "$BasePath\Functions\Update-WingetApps.ps1" },
+        @{ Url = "$BaseUrl/Functions/Write-JsonResult.ps1"; Path = "$BasePath\Functions\Write-JsonResult.ps1" },
+        @{ Url = "$BaseUrl/Functions/Show-GuardianLiveUI.ps1"; Path = "$BasePath\Functions\Show-GuardianLiveUI.ps1" }
     )
 
     # --------------------------------------------------------------

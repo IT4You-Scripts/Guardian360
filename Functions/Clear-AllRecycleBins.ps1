@@ -20,7 +20,6 @@
 
         if (-not $drives) {
             Write-Host "Nenhuma unidade fixa encontrada." -ForegroundColor Yellow
-            Write-Log "Nenhuma unidade fixa encontrada para limpeza de lixeira."
             return "Nenhuma unidade fixa encontrada."
         }
 
@@ -83,7 +82,6 @@
         }
 
         Write-Host "Limpeza concluída." -ForegroundColor Green
-        Write-Log "Limpeza de todas as lixeiras concluída."
 
         # 🔥 retorna mensagem técnica rica
         $msg = ($results | ForEach-Object {
@@ -94,7 +92,6 @@
     }
     catch {
         Write-Host "Falha durante limpeza das lixeiras." -ForegroundColor Red
-        Write-Log "Erro em Clear-AllRecycleBins: $_"
         throw $_
     }
 }

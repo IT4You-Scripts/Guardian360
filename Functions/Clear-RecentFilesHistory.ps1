@@ -8,7 +8,6 @@
         $recentItems = [System.Environment]::GetFolderPath('Recent')
 
         if (-not (Test-Path $recentItems)) {
-            Write-Log "Pasta de itens recentes não encontrada."
             return "Pasta de itens recentes não encontrada."
         }
 
@@ -20,12 +19,10 @@
             Remove-Item "$recentItems\*" -Force -Recurse -Confirm:$false -ErrorAction Stop
         }
 
-        Write-Log "Histórico de arquivos recentes limpo. Itens removidos: $count"
         return "Histórico limpo. Itens removidos=$count"
     }
     catch {
         Write-Host "Erro durante a limpeza do histórico de arquivos recentes." -ForegroundColor Red
-        Write-Log "Erro em Clear-RecentFilesHistory: $_"
         throw $_
     }
 }

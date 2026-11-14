@@ -1,9 +1,8 @@
-function Update-MicrosoftStore {
+﻿function Update-MicrosoftStore {
     [CmdletBinding()]
     param()
 
     Write-Host "Iniciando atualização da Microsoft Store..." -ForegroundColor Cyan
-    Write-Log 'Iniciando atualização da Microsoft Store...' 'INFO'
 
     try {
 
@@ -11,7 +10,6 @@ function Update-MicrosoftStore {
         if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 
             Write-Host "Winget não está disponível. Phase ignorada." -ForegroundColor Yellow
-            Write-Log 'Winget não está disponível. Phase ignorada.' 'WARN'
 
             throw "Winget indisponível. Phase ignorada."
         }
@@ -40,13 +38,11 @@ function Update-MicrosoftStore {
         if ($proc.ExitCode -notin $acceptedExitCodes) {
 
             Write-Host ("Winget retornou erro inesperado. ExitCode={0}" -f $proc.ExitCode) -ForegroundColor Yellow
-            Write-Log ("Winget retornou erro inesperado ao atualizar Microsoft Store. ExitCode={0}" -f $proc.ExitCode) 'WARN'
 
             throw "ExitCode inesperado do winget: $($proc.ExitCode)"
         }
 
         Write-Host "Atualização da Microsoft Store concluída." -ForegroundColor Green
-        Write-Log 'Atualização da Microsoft Store concluída.' 'INFO'
 
         return [PSCustomObject]@{
             MensagemTecnica = "Atualização da Microsoft Store concluída. ExitCode=$($proc.ExitCode)"
@@ -56,7 +52,6 @@ function Update-MicrosoftStore {
     catch {
 
         Write-Host "ERRO durante Update-MicrosoftStore: $_" -ForegroundColor Red
-        Write-Log ("Falha ao iniciar winget (Microsoft Store): {0}" -f $_.Exception.Message) 'WARN'
 
         throw
     }

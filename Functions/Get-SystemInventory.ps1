@@ -188,10 +188,6 @@ public static class GuardianAdmin500BlankPasswordProbeV1 {
 
 # Coleta informações do inventário de software hardware, com alertas de espaço em disco C: e Saúde do SSD
 function Get-SystemInventory {
-    # Fallback de log para ambientes que não tenham Write-Log
-    if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
-        function Write-Log { param([string]$Message) }
-    }
 
     #Write-Host "Iniciando coleta de informações do inventário de Hardware e Software..." -ForegroundColor Cyan
     #Write-Host ""
@@ -383,7 +379,6 @@ function Get-SystemInventory {
             }
         } catch {
             $smartFalhou = $true
-            Write-Log ("Telemetria/SMART: {0}" -f $_)
         }
 
         # Monta string da Saúde dos Discos
@@ -476,23 +471,18 @@ function Get-SystemInventory {
         #Write-Host "Informações do Inventário" -ForegroundColor Green
         $Criar_Inventario_Sistema | Format-List
 
-        Write-Log "Informações do Inventário"
-        $Criar_Inventario_Sistema | Format-List | Out-String | ForEach-Object { Write-Log $_ }
 
         if ($alertaEspacoC) {
             Write-Host $alertaEspacoC -ForegroundColor White -BackgroundColor Red
-            Write-Log $alertaEspacoC
         }
 
         foreach ($alerta in $alertasSSD) {
             Write-Host $alerta -ForegroundColor White -BackgroundColor DarkBlue
-            Write-Log $alerta
         }
 
         if ($itensNaoReconhecidos.Count -gt 0) {
             $msgResumo = "Atenção: não foi possível reconhecer: $( $itensNaoReconhecidos -join ', ' )"
             Write-Host $msgResumo -ForegroundColor White
-            Write-Log $msgResumo
         }
 
         #Write-Host ""
@@ -501,6 +491,5 @@ function Get-SystemInventory {
     } catch {
         $msgErro = "ERRO CRÍTICO: $_"
         Write-Host $msgErro -ForegroundColor Red
-        Write-Log $msgErro
     }
 }

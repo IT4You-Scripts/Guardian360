@@ -1,4 +1,4 @@
-# ============================================
+﻿# ============================================
 # Função: Write-JsonResult
 # ============================================
 function Write-JsonResult {
@@ -24,9 +24,6 @@ function Write-JsonResult {
     }
 
     # Log opcional
-    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-        Write-Log ("[JSON] {0} -> {1}" -f $Phase, $mensagemSegura)
-    }
 
     return $jsonObject
 }

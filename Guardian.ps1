@@ -57,7 +57,9 @@ param(
   [int[]]$ExecutaFases,  # Se não for informado, executa todas as fases
   [int[]]$PulaFases,     # Se não for informado, nenhuma fase será pulada
   [ValidateSet('INFO','WARN','ERROR','DEBUG')][string]$LogLevel = 'INFO',
-  [switch]$Simulado,     # Modo ensaio: não executa ações destrutivas
+  [switch]$Simulado,
+  [switch]$Dev,
+  [switch]$EnviarApi,     # Modo ensaio: não executa ações destrutivas
   [string]$FileServer,   # Host/IP do servidor de arquivos para envio do log (opcional)
   [string]$Cliente       # Nome do nosso Cliente (preferencialmente, nome da Empresa onde ele trabalha)
 )
@@ -81,8 +83,16 @@ if (Test-Path $argJsonPath) {
     if (-not $PulaFases)    { $PulaFases    = $jsonArgs.PulaFases }
     if (-not $LogLevel)     { $LogLevel     = $jsonArgs.LogLevel }
     if (-not $Simulado)     { $Simulado     = $jsonArgs.Simulado }
+    if (-not $Dev)          { $Dev          = [bool]$jsonArgs.Dev }
+    if (-not $EnviarApi)    { $EnviarApi    = [bool]$jsonArgs.EnviarApi }
 }
 
+
+# -Debug e um parametro comum do PowerShell (CmdletBinding). Nao duplica-lo no param.
+$script:GuardianDebugMode = ($PSBoundParameters.ContainsKey('Debug') -or ($null -ne (Get-Variable -Name jsonArgs -ErrorAction SilentlyContinue) -and [bool]$jsonArgs.DebugMode))
+# -Debug controla a visibilidade do console; nao habilita tracing de cmdlets nativos.
+# Evita mensagens DEPURAR: NetIPAddress ... emitidas por modulos do Windows.
+$DebugPreference = 'SilentlyContinue'
 
 if ([string]::IsNullOrWhiteSpace($Cliente)) {
     $Cliente = 'Cliente não identificado'
@@ -123,35 +133,9 @@ if ($clienteNorm.Length -gt 0) {
 }
 
 if ($blocked) {
-    # Somente as tres tarefas conhecidas, somente na pasta exclusiva \Guardian\.
-    # Principal: nome variavel, mas deve ser '1. ...Guardian...' e executar um lancador oficial.
-    # System/Ghost: nomes exatos. Outras tarefas nao sao afetadas.
-    if (-not $Simulado) {
-        try {
-            $tarefas = @(Get-ScheduledTask -TaskPath '\Guardian\' -ErrorAction Stop)
-            foreach ($tarefa in $tarefas) {
-                $nome = [string]$tarefa.TaskName
-                $principal = ($nome -match '^1\.\s+.*Guardian' -and
-                              $nome -notmatch '(?i)System|Ghost' -and
-                              @($tarefa.Actions | Where-Object {
-                                  (($_.Execute + ' ' + $_.Arguments) -match '(?i)(?:ElevaGuardian|RodaGuardian)\.ps1')
-                              }).Count -gt 0)
-                if ($nome -ceq '2. Guardian System' -or
-                    $nome -ceq '3. Guardian Ghost' -or
-                    $principal) {
-                    try {
-                        Unregister-ScheduledTask -TaskPath '\Guardian\' -TaskName $nome -Confirm:$false -ErrorAction Stop
-                    } catch { }
-                }
-            }
-        } catch { }
-    }
-
-    $argJsonPath = 'C:\Guardian\guardian_arg.json'
-    if (Test-Path -LiteralPath $argJsonPath) {
-        try { Remove-Item -LiteralPath $argJsonPath -Force -ErrorAction SilentlyContinue } catch { }
-    }
-    # Cliente bloqueado nunca inicia a vistoria, mesmo se a remocao falhar.
+    # Segurança v2.0: não remover tarefas automaticamente durante o offboarding.
+    # Clientes desativados continuam bloqueados para execução. Remoções exigem
+    # procedimento administrativo específico e separado do Guardian.
     exit 0
 }
 
@@ -161,6 +145,11 @@ if ($blocked) {
 
 # --- BLOCO DE ELEVAÇÃO E DETECÇÃO DO POWERSHELL 7 ---
 # Se não estiver como Admin, reinicia com privilégios elevados
+# No -Dev, nunca relançar sem repassar o switch: exige terminal já elevado.
+if ($Dev -and -not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host '  ERRO  Execute o PowerShell 7 como Administrador para usar -Dev.' -ForegroundColor Red
+    exit 1
+}
 if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     try {
         $scriptPath = $PSCommandPath
@@ -179,6 +168,10 @@ if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
 
 # Se já está como Admin, mas não no PowerShell 7, reinicia nele (sem prompt)
 if ($PSVersionTable.PSVersion.Major -lt 7) {
+    if ($Dev) {
+        Write-Host '  ERRO  O modo -Dev exige PowerShell 7; execucao interrompida.' -ForegroundColor Red
+        exit 1
+    }
     try {
         $scriptPath = $PSCommandPath
         $pwshPath = (Get-Command pwsh.exe -ErrorAction SilentlyContinue)?.Source
@@ -218,17 +211,12 @@ function Ajusta-Fases {
 }
 
 
-# ✅ Ajusta os parâmetros
-$ExecutaFases = Ajusta-Fases $ExecutaFases
-$PulaFases    = Ajusta-Fases $PulaFases
-
-# Remove duplicados e ordena
-$ExecutaFases = $ExecutaFases | Sort-Object -Unique
-$PulaFases    = $PulaFases | Sort-Object -Unique
-
-# Log para confirmar
-Write-Host "ExecutaFases ajustado: $($ExecutaFases -join ', ')"
-Write-Host "PulaFases ajustado: $($PulaFases -join ', ')"
+# Selecao efetiva: Fase 1 obrigatoria; Fase 2 exclusiva do Guardian Ghost.
+$ExecutaFases = @(Ajusta-Fases $ExecutaFases | Where-Object { $_ -ge 1 -and $_ -le 9 -and $_ -ne 2 } | Sort-Object -Unique)
+$PulaFases = @(Ajusta-Fases $PulaFases | Where-Object { $_ -ge 3 -and $_ -le 9 } | Sort-Object -Unique)
+if ($ExecutaFases.Count -gt 0 -and $ExecutaFases -notcontains 1) {
+    $ExecutaFases = @(1) + $ExecutaFases | Sort-Object -Unique
+}
 
 #endregion
 
@@ -243,18 +231,10 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 $root    = Split-Path -Parent $PSCommandPath
 $funcDir = Join-Path $root 'Functions'
 
-# Início: Ajuste Mínimo de Pasta/Arquivo de Log
-$baseLogDir  = Join-Path $root 'Logs'
-$stamp       = Get-Date -Format 'yyyyMMdd_HHmm'
-$year        = Get-Date -Format 'yyyy'
-$monthNumber = Get-Date -Format 'MM'
-$monthName   = (Get-Culture).DateTimeFormat.GetMonthName([int]$monthNumber)
-$monthFolder = ("{0}. {1}" -f $monthNumber, (Get-Culture).TextInfo.ToTitleCase($monthName.ToLower()))
-$logDir      = Join-Path (Join-Path $baseLogDir $year) $monthFolder
-New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-$computer    = $env:COMPUTERNAME.ToUpper()
-$logFile     = Join-Path $logDir ("{0}_{1}.log" -f $computer, $stamp)
-# Fim: Ajuste Mínimo de Pasta/Arquivo de Log
+# v2: nenhuma pasta ou arquivo LOG e criado. Resultados ficam na memoria.
+$computer = $env:COMPUTERNAME.ToUpper()
+$logFile = $null  # Compatibilidade temporaria; nunca sera escrito.
+
 
 
 
@@ -332,92 +312,54 @@ if ($hasStyle) {
 }
 
 
-function Write-Report {
-  param([string]$Text)
-  if ([string]::IsNullOrEmpty($Text)) {
-    "" | Out-File -FilePath $logFile -Append -Encoding UTF8
-    return
-  }
-  $Text | Out-File -FilePath $logFile -Append -Encoding UTF8
-}
-
-function Write-Log {
-  param([string]$Message,[ValidateSet('INFO','WARN','ERROR','DEBUG')][string]$Level='INFO')
-  $levelsPriority = @{ 'ERROR'=3; 'WARN'=2; 'INFO'=1; 'DEBUG'=0 }
-  if ($levelsPriority[$Level] -lt $levelsPriority[$LogLevel]) { return }
-  $line = "[{0:u}] [{1}] {2}" -f (Get-Date), $Level, $Message
-
-  # Arquivo: filtrar para manter só o que deve ir ao log final
-  $shouldWriteRawToFile = $false
-  $rawToWrite = $null
-
-  if ($global:ConciseLog) {
-    if ($global:CurrentStepTitle -eq 'Get-SystemInventory') {
-      if ($Message -match '^Iniciando:' -or $Message -match '^Informações do Inventário' -or $Message -eq '') {
-        $shouldWriteRawToFile = $false
-      } else {
-        $shouldWriteRawToFile = $true
-        $rawToWrite = $Message
-      }
+# GUARDIAN 360 v2 - camada central de apresentacao (somente console).
+# Eventos de INFO/DEBUG permanecem na memoria dos resultados das etapas, nao no terminal.
+# Falhas e avisos relevantes continuam visiveis; nenhum arquivo de log e produzido.
+function Write-GuardianStatus {
+    param([string]$Message,[ValidateSet('INFO','WARN','ERROR','DEBUG')][string]$Level='INFO')
+    if ([string]::IsNullOrWhiteSpace($Message)) { return }
+    $msg = $Message.Trim() -replace '^\[(INFO|ALERTA|AVISO|ERRO|WARN|ERROR)\]\s*',''
+    if ($msg -match '(?i)^N[aã]o existe a parti[cç][aã]o D\.?$') { return }
+    if ($msg -match '(?i)^\[?INFO\]?\s*N[aã]o existe a parti[cç][aã]o D\.?$') { return }
+    if ($Level -eq 'INFO' -or $Level -eq 'DEBUG') {
+        # INFO tecnico nao e um evento a ser exibido na UI minimalista.
+        return
     }
-  } else {
-    $shouldWriteRawToFile = $false
-  }
-
-  if ($shouldWriteRawToFile) {
-    Write-Report -Text $rawToWrite
-  } elseif (-not $global:ConciseLog) {
-    $line | Out-File -FilePath $logFile -Append -Encoding UTF8
-  }
-
-  switch ($Level) {
-    'ERROR' { Write-Host ("{0}[ALERTA]{1} {2}" -f $Yellow, $Reset, $Message) }
-    'WARN'  { Write-Host ("{0}[AVISO]{1}  {2}" -f $Yellow, $Reset, $Message) }
-    'DEBUG' { Write-Host ("{0}[DEBUG]{1}  {2}" -f $Gray,   $Reset, $Message) }
-    default { Write-Host (""  -f $Gray,   $Reset, $Message) }
-  }
+    $fg = if ($Level -eq 'ERROR') { 'Red' } else { 'Yellow' }
+    $tag = if ($Level -eq 'ERROR') { 'ERRO' } else { 'AVISO' }
+    Microsoft.PowerShell.Utility\Write-Host ('  {0,-10}{1}' -f $tag, $msg) -ForegroundColor $fg
 }
 
-
-
-#function Show-Header {
-#  param([string]$Text)
-#  $bar = '─' * ($Text.Length + 2)
-#  Write-Host ("{0}┌{1}┐{2}" -f $Cyan, $bar, $Reset)
-#  Write-Host ("{0}│ {1} │{2}" -f $Cyan, $Text, $Reset)
-#  Write-Host ("{0}└{1}┘{2}" -f $Cyan, $bar, $Reset)
-#}
-
+# Futuro adaptador da interface WPF: uma mensagem operacional por evento.
+function Write-GuardianConsoleEvent {
+    param([string]$Text,[ValidateSet('OK','WARN','ERROR','NOTE')][string]$Kind='OK')
+    $tag = switch ($Kind) { 'OK' {'OK'} 'WARN' {'AVISO'} 'ERROR' {'ERRO'} default {'INFO'} }
+    $color = switch ($Kind) { 'WARN' {'Yellow'} 'ERROR' {'Red'} default {'White'} }
+    Microsoft.PowerShell.Utility\Write-Host ('  {0,-10}' -f $tag) -ForegroundColor $color -NoNewline
+    Microsoft.PowerShell.Utility\Write-Host $Text -ForegroundColor White
+}
 
 function Show-Header {
-    param(
-        [string]$Text,
-        [string]$Color = $Cyan  # Cor padrão é a mesma que você já usa
-    )
-
-    $bar = '─' * ($Text.Length + 2)
-    Write-Host ("{0}┌{1}┐{2}" -f $Color, $bar, $Reset)
-    Write-Host ("{0}│ {1} │{2}" -f $Color, $Text, $Reset)
-    Write-Host ("{0}└{1}┘{2}" -f $Color, $bar, $Reset)
+    param([string]$Text,[string]$Color = $Cyan)
+    Microsoft.PowerShell.Utility\Write-Host ''
+    Microsoft.PowerShell.Utility\Write-Host '  GUARDIAN 360' -ForegroundColor White -NoNewline
+    Microsoft.PowerShell.Utility\Write-Host '   v2.0' -ForegroundColor White -NoNewline
+    if ($Dev) { Microsoft.PowerShell.Utility\Write-Host '   DEV' -ForegroundColor White }
+    else { Microsoft.PowerShell.Utility\Write-Host '' }
+    Microsoft.PowerShell.Utility\Write-Host ('  ' + ('─' * 51)) -ForegroundColor DarkGray
 }
-
-
 function Show-Phase {
-  param([int]$Id,[string]$Title)
-  Write-Host ""
-  Write-Host ""
-  Write-Host ("{0}► Fase {1}:{2} {3}" -f $Cyan, $Id, $Reset, $Title)
+    param([int]$Id,[string]$Title)
+    Microsoft.PowerShell.Utility\Write-Host ''
+    Microsoft.PowerShell.Utility\Write-Host ('  {0,-10}' -f ('{0:00}' -f $Id)) -ForegroundColor Cyan -NoNewline
+    Microsoft.PowerShell.Utility\Write-Host $Title -ForegroundColor Cyan
 }
 
-function Show-StepStart { param([string]$Name) Write-Host ("  {0}•{1} Iniciando: {2} ..." -f $Gray, $Reset, $Name) }
-
+function Show-StepStart { param([string]$Name) }
 function Show-StepEnd {
-  param([string]$Name,[TimeSpan]$Elapsed,[bool]$Ok)
-  if ($Ok) {
-    Write-Host ("  {0}►{1} {2} concluída com sucesso em {3}" -f $Green, $Reset, $Name, (Format-Elapsed $Elapsed))
-  } else {
-    Write-Host ("  {0}!{1} {2} finalizada com alertas (veja o log). Tempo: {3}" -f $Yellow, $Reset, $Name, (Format-Elapsed $Elapsed))
-  }
+    param([string]$Name,[TimeSpan]$Elapsed,[bool]$Ok)
+    if ($Ok) { Write-GuardianConsoleEvent -Text $Name -Kind OK }
+    else { Write-GuardianConsoleEvent -Text $Name -Kind ERROR }
 }
 
 function Test-IsAdmin { ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
@@ -425,7 +367,7 @@ function Test-IsAdmin { ([Security.Principal.WindowsPrincipal][Security.Principa
 function Test-AdminOrExit {
   if (-not (Test-IsAdmin)) {
     Show-Header -Text 'Permissão insuficiente'
-    Write-Log "A execução requer privilégios administrativos. Agende como Admin/SYSTEM. Encerrando." 'ERROR'
+    Write-GuardianStatus "A execução requer privilégios administrativos. Agende como Admin/SYSTEM. Encerrando." 'ERROR'
     Pause
     exit 1
   }
@@ -433,14 +375,14 @@ function Test-AdminOrExit {
 
 function Initialize-Pwsh7 {
   if ($PSVersionTable.PSVersion.Major -ge 7) { return }
-  Write-Log 'PowerShell 7+ não detectado. Tentando instalação silenciosa...' 'INFO'
+  Write-GuardianStatus 'PowerShell 7+ não detectado. Tentando instalação silenciosa...' 'INFO'
   $installed = $false
   try {
     if (Get-Command winget -ErrorAction SilentlyContinue) {
       winget install --id Microsoft.PowerShell --source winget --accept-source-agreements --accept-package-agreements --silent | Out-Null
       $installed = $true
     }
-  } catch { Write-Log ("Falha com winget: {0}" -f $_.Exception.Message) 'WARN' }
+  } catch { Write-GuardianStatus ("Falha com winget: {0}" -f $_.Exception.Message) 'WARN' }
 
   if (-not $installed) {
     try {
@@ -449,30 +391,30 @@ function Initialize-Pwsh7 {
       Invoke-WebRequest -Uri $url -OutFile $msi -UseBasicParsing
       Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet /norestart" -Wait
       $installed = $true
-    } catch { Write-Log ("Falha no download/instalação do MSI: {0}" -f $_.Exception.Message) 'WARN' }
+    } catch { Write-GuardianStatus ("Falha no download/instalação do MSI: {0}" -f $_.Exception.Message) 'WARN' }
   }
 
   if ($installed) {
     $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue)?.Source
     if ($null -ne $pwsh) {
-      Write-Log 'Reiniciando no PowerShell 7 (silencioso)...' 'INFO'
+      Write-GuardianStatus 'Reiniciando no PowerShell 7 (silencioso)...' 'INFO'
       Start-Process $pwsh -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -WindowStyle Hidden
       exit 0
     }
   }
 
-  Write-Log 'PS7 não disponível. Continuando no host atual sem interromper.' 'WARN'
+  Write-GuardianStatus 'PS7 não disponível. Continuando no host atual sem interromper.' 'WARN'
 }
 
 function Start-Logging {
   $dataHoraFormatada = Get-Date -Format "dd/MM/yyyy 'às' HH'h' mm'min'"
-  Write-Log    ("Guardian v1.5 ({0})" -f $dataHoraFormatada) 'INFO'
-  Write-Log "____________________________________________________________________________________________________________________________________"
-  Write-Report ("Guardian v1.5 ({0})" -f $dataHoraFormatada)
-  Write-Report "____________________________________________________________________________________________________________________________________"
+  Write-GuardianStatus    ("Guardian v1.5 ({0})" -f $dataHoraFormatada) 'INFO'
+  Write-GuardianStatus "____________________________________________________________________________________________________________________________________"
+
+
 }
 
-function Stop-Logging { Write-Log 'Fim da execução Guardian' 'INFO' }
+function Stop-Logging { }
 
 function Get-RebootPending {
     try {
@@ -554,7 +496,7 @@ public class Kernel32 {
 '@
 }
 
-function Invoke-QuickEditLog { param([string]$Message, [string]$Level = 'INFO') try { if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log $Message $Level } } catch {} }
+function Invoke-QuickEditLog { param([string]$Message, [string]$Level = 'INFO') try { if (Get-Command Write-GuardianStatus -ErrorAction SilentlyContinue) { Write-GuardianStatus $Message $Level } } catch {} }
 
 function Get-ConsoleInputMode {
     $handle = [Kernel32]::GetStdHandle(-10)
@@ -627,7 +569,7 @@ namespace Win32 {
 
 $script:_Console_OrigBgColor = $null
 
-function Invoke-ConsoleLog { param([string]$Message,[string]$Level='DEBUG') try { if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log $Message $Level } } catch {} }
+function Invoke-ConsoleLog { param([string]$Message,[string]$Level='DEBUG') try { if (Get-Command Write-GuardianStatus -ErrorAction SilentlyContinue) { Write-GuardianStatus $Message $Level } } catch {} }
 function Test-HasRawUI { try { return ($null -ne $Host -and $null -ne $Host.UI -and $null -ne $Host.UI.RawUI) } catch { return $false } }
 
 function Expand-ConsoleWindow {
@@ -697,17 +639,33 @@ function Invoke-GuardianStep {
     )
 
     $label = Get-StepLabel $Title
-    Write-Log ("Iniciando: {0}" -f $Title) 'INFO'
-    Show-StepStart -Name $label
+    $isWingetStep = ($Title -eq 'Update-WingetApps')
+    if ($isWingetStep) {
+        Microsoft.PowerShell.Utility\Write-Host ''
+        Microsoft.PowerShell.Utility\Write-Host ('=' * 112) -ForegroundColor DarkGray
+    }
+    Write-GuardianStatus ("Iniciando: {0}" -f $Title) 'INFO'
 
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $ok = $true
     $global:CurrentStepTitle = $Title
     $stepOutput = $null
 
+    # Interceptor limitado a ESTA etapa. Silencia apenas a saida decorativa
+    # das funcoes legadas. Nao altera o retorno tecnico nem captura stdout
+    # de programas nativos, incluindo as barras azuis do winget.exe.
+    function Write-Host {
+        [CmdletBinding()]
+        param([Parameter(ValueFromRemainingArguments=$true)][object[]]$Object,
+              [object]$ForegroundColor,[object]$BackgroundColor,[switch]$NoNewline,
+              [string]$Separator=' ')
+    }
+    # Oculta apenas o ProgressRecord amarelo do PowerShell; WinGet e nativo.
+    $ProgressPreference = 'SilentlyContinue'
+
     try {
         if ($Simulado) {
-            Write-Log ("SIMULADO: ação não executada para '{0}'." -f $Title) 'DEBUG'
+            Write-GuardianStatus ("SIMULADO: ação não executada para '{0}'." -f $Title) 'DEBUG'
         }
         else {
             # 🔴 CAPTURA TUDO que a função produzir
@@ -716,7 +674,7 @@ function Invoke-GuardianStep {
     }
     catch {
         $ok = $false
-        Write-Log ("Etapa '{0}' registrou erro: {1}" -f $Title, $_.ToString()) 'ERROR'
+        Write-GuardianStatus ("Etapa '{0}' registrou erro: {1}" -f $Title, $_.ToString()) 'ERROR'
         $Mensagem = $_.ToString()
     }
     finally {
@@ -746,6 +704,10 @@ function Invoke-GuardianStep {
         Mensagem     = $Mensagem
     })
 
+    if ($isWingetStep) {
+        Microsoft.PowerShell.Utility\Write-Host ('=' * 112) -ForegroundColor DarkGray
+        Microsoft.PowerShell.Utility\Write-Host ''
+    }
     Show-StepEnd -Name $label -Elapsed $sw.Elapsed -Ok:$ok
 }
 
@@ -753,19 +715,83 @@ function Invoke-GuardianStep {
 
 
 
+# =========================================================================
+# Guardian 360 v2.0 - interface de acompanhamento independente (sem arquivo IPC)
+# O motor permanece dono da manutencao, da telemetria e do JSON definitivo.
+# A UI recebe SOMENTE informacoes de andamento, por TCP localhost.
+# =========================================================================
+$script:GuardianUiPort = 0
+$script:GuardianUiProcess = $null
+$script:GuardianUiAvailable = $false
+
+function Initialize-GuardianLiveUI {
+    try {
+        # Windows SYSTEM (sessao 0) nao tem desktop interativo para apresentar WPF.
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        if ($identity -match '(?i)(^|\\)SYSTEM$') { return }
+        $uiScript = Join-Path $PSScriptRoot 'Functions\Show-GuardianLiveUI.ps1'
+        if (-not (Test-Path -LiteralPath $uiScript)) {
+            Microsoft.PowerShell.Utility\Write-Host '  AVISO  Interface WPF nao instalada; manutencao continua.' -ForegroundColor Yellow
+            return
+        }
+        $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+        $probe.Start()
+        $script:GuardianUiPort = [int]$probe.LocalEndpoint.Port
+        $probe.Stop()
+        $pwshExe = (Get-Command pwsh.exe -ErrorAction Stop).Source
+        $uiArgs = '-NoProfile -STA -ExecutionPolicy Bypass -File "{0}" -Port {1} -Cliente "{2}" -Computador "{3}" -EnginePid {4}' -f $uiScript, $script:GuardianUiPort, ($Cliente -replace '"',''), ($env:COMPUTERNAME -replace '"',''), $PID
+        # Apenas o console hospedeiro do pwsh fica oculto. A janela WPF tem
+        # ShowInTaskbar=True e e apresentada por ShowDialog(), separadamente.
+        $script:GuardianUiProcess = Start-Process -FilePath $pwshExe -ArgumentList $uiArgs -WindowStyle Hidden -PassThru -ErrorAction Stop
+        $script:GuardianUiAvailable = $true
+        Start-Sleep -Milliseconds 750
+    } catch {
+        $script:GuardianUiAvailable = $false
+        Microsoft.PowerShell.Utility\Write-Host ('  AVISO  Nao foi possivel iniciar a interface: {0}' -f $_.Exception.Message) -ForegroundColor Yellow
+    }
+}
+
+function Send-GuardianLiveEvent {
+    param([string]$Type, [string]$Label = '', [int]$Percent = 0, [string]$Status = '', [hashtable]$Data = @{})
+    if (-not $script:GuardianUiAvailable -or $script:GuardianUiPort -le 0) { return }
+    try {
+        $payload = @{ type=$Type; label=$Label; percent=$Percent; status=$Status; data=$Data } | ConvertTo-Json -Compress -Depth 4
+        $client = [System.Net.Sockets.TcpClient]::new()
+        try {
+            $connection = $client.BeginConnect([System.Net.IPAddress]::Loopback, $script:GuardianUiPort, $null, $null)
+            if (-not $connection.AsyncWaitHandle.WaitOne(200)) { return }
+            $client.EndConnect($connection)
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
+            $stream = $client.GetStream()
+            $stream.WriteTimeout = 200
+            $stream.Write($bytes,0,$bytes.Length)
+            $stream.Flush()
+        } finally { $client.Dispose() }
+    } catch { } # Uma UI fechada nunca pode interromper o motor.
+}
+
 # 1) Pré-requisitos para o Script poder rodar corretamente (sem prompts)
 Test-AdminOrExit
 Initialize-Pwsh7
 Enable-QuickEditProtection
 Enable-ConsoleAppearance -ForceMaximize
-Start-Logging
 Clear-Host
-Show-Header -Text 'Guardian 360 v1.5 — Manutenção e Otimização'
+Show-Header -Text 'Guardian 360 v2.0'
+Initialize-GuardianLiveUI
+Send-GuardianLiveEvent -Type 'start' -Label 'Preparando manutenção preventiva' -Percent 0
+
+# v2 console: inicializa o estado antes do bloco protegido.
+# Caso uma falha ocorra antes da montagem do relatorio, o finally permanece seguro.
+$script:GuardianRelatorioEmMemoria = $null
+$script:GuardianJsonDestino = $null
+$script:GuardianFalhaGeral = $false
+$script:GuardianTasksPadronizadas = $false
+$jsonResults = @()
+$global:GuardianEnvioApiStatus = 'Nao iniciado'
 
 try {
   # 2) Carregar funções do repositório
   $functionFiles = @(
-    'Show-GuardianUI.ps1',
     'Get-SystemInventory.ps1',
     'Repair-SystemIntegrity.ps1',
     'Optimize-PowerSettings.ps1',
@@ -785,16 +811,15 @@ try {
     'Scan-AntiMalware.ps1',
     'Confirm-MacriumBackup.ps1',
     'Send-LogToServer.ps1',
-    'Show-GuardianEndUI.ps1',
     'Write-JsonResult.ps1'
   )
   foreach ($ff in $functionFiles) {
     $path = Join-Path $funcDir $ff
     if (-not (Test-Path $path)) {
-      Write-Log ("Arquivo de função não encontrado: {0}" -f $path) 'ERROR'
+      Write-GuardianStatus ("Arquivo de função não encontrado: {0}" -f $path) 'ERROR'
       continue
     }
-    try { . $path } catch { Write-Log ("Falha ao carregar {0}: {1}" -f $ff, $_.ToString()) 'ERROR' }
+    try { . $path } catch { Write-GuardianStatus ("Falha ao carregar {0}: {1}" -f $ff, $_.ToString()) 'ERROR' }
   }
 
   # 3) Detectores de cenário
@@ -889,15 +914,6 @@ $hasHDD = ($hddList.Count -gt 0)
     @{ Id=1; Title='Inventário de Hardware e Software'; Steps=@(
         @{ Name='Get-SystemInventory';   Action={ Get-SystemInventory } }
       )},
-    @{ Id=2; Title='Integridade do Sistema'; Steps=@(
-        @{ Name='Repair-SystemIntegrity'; Action={
-            # Fase 2 desativada no Guardian principal — roda separadamente via Guardian Ghost
-            return [PSCustomObject]@{
-                IntegridadeSistema = 100
-                MensagemTecnica    = "System Integrity executado separadamente via Guardian Ghost"
-            }
-        } }
-      )},
     @{ Id=3; Title='Otimizações Estruturais'; Steps=@(
         @{ Name='Optimize-PowerSettings';    Action={ Optimize-PowerSettings } },
         @{ Name='Optimize-NetworkSettings';  Action={ Optimize-NetworkSettings } }
@@ -910,19 +926,19 @@ $hasHDD = ($hddList.Count -gt 0)
         #@{ Name='Clear-RecentFilesHistory';  Action={ Clear-RecentFilesHistory } }
       )},
     @{ Id=5; Title='Atualizações do Windows'; Steps=@(
-        @{ Name='Update-WindowsOS'; Action={ if($hasInet){ Update-WindowsOS } else { Write-Log 'Sem internet: pulando Update-WindowsOS' 'WARN' } } },
-        @{ Name='Update-MicrosoftStore'; Action={ if($hasInet){ Update-MicrosoftStore } else { Write-Log 'Sem internet: pulando Update-MicrosoftStore' 'WARN' } } }
+        @{ Name='Update-WindowsOS'; Action={ if($hasInet){ Update-WindowsOS } else { Write-GuardianStatus 'Sem internet: pulando Update-WindowsOS' 'WARN' } } },
+        @{ Name='Update-MicrosoftStore'; Action={ if($hasInet){ Update-MicrosoftStore } else { Write-GuardianStatus 'Sem internet: pulando Update-MicrosoftStore' 'WARN' } } }
       )},
     @{ Id=6; Title='Atualizações dos programas instalados'; Steps=@(
         # @{ Name='Block-AppUpdates';  Action={ Block-AppUpdates } },
-        @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps -AtualizarUsuario:($script:GuardianViaEleva -or ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18')) } else { Write-Log 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
+        @{ Name='Update-WingetApps';    Action={ if($hasInet){ Update-WingetApps -AtualizarUsuario:($script:GuardianViaEleva -or ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18')) } else { Write-GuardianStatus 'Sem internet: pulando Update-WingetApps' 'WARN' } } }
       )},
     @{ Id=7; Title='Pós-atualização / Componentes'; Steps=@(
         @{ Name='Remove-OldUpdateFiles'; Action={ Remove-OldUpdateFiles } }
       )},
     @{ Id=8; Title='Otimização de Armazenamento'; Steps=@(
-        @{ Name='Optimize-SSD'; Action={ if($hasSSD){ Optimize-SSD } else { Write-Log 'Nenhum SSD detectado: pulando Optimize-SSD' 'INFO' } } },
-        @{ Name='Optimize-HDD'; Action={ if($hasHDD){ Optimize-HDD } else { Write-Log 'Nenhum HDD detectado: pulando Optimize-HDD' 'INFO' } } }
+        @{ Name='Optimize-SSD'; Action={ if($hasSSD){ Optimize-SSD } else { Write-GuardianStatus 'Nenhum SSD detectado: pulando Optimize-SSD' 'INFO' } } },
+        @{ Name='Optimize-HDD'; Action={ if($hasHDD){ Optimize-HDD } else { Write-GuardianStatus 'Nenhum HDD detectado: pulando Optimize-HDD' 'INFO' } } }
       )},
     @{ Id=9; Title='Segurança'; Steps=@(
         @{ Name='Scan-AntiMalware';       Action={ Scan-AntiMalware } }        
@@ -936,56 +952,37 @@ $hasHDD = ($hddList.Count -gt 0)
 
   # Exibe a UI amigável enquanto o script continua rodand
   # Show-GuardianUI
-  Show-GuardianUI | Out-Null
+  # v2 laboratorio: interface WPF desativada durante a validacao do motor.
   
 
 
 # Adicione no início do script:
-Add-Type -AssemblyName System.Windows.Forms
+function DoEvents { }  # v2 console
 
-function DoEvents {
-    [System.Windows.Forms.Application]::DoEvents() | Out-Null
-}
-
-
-# Adicione no início do script (após definir $Phases):
-Add-Type -AssemblyName System.Windows.Forms
-
-function DoEvents {
-    [System.Windows.Forms.Application]::DoEvents() | Out-Null
-}
-
-# === Cálculo do total de passos que serão executados ===
+# Plano efetivo: sem Fase 2 e com Fase 1 obrigatoria.
+$script:GuardianSelectedPhases = @($Phases | Where-Object {
+    (-not $ExecutaFases -or $ExecutaFases -contains $_.Id) -and
+    (-not $PulaFases -or $PulaFases -notcontains $_.Id)
+})
+$script:GuardianPhaseCount = @($script:GuardianSelectedPhases).Count
 $TotalSteps = 0
-foreach ($phase in $Phases) {
-    $id = [int]$phase.Id
-    if ($ExecutaFases -and ($ExecutaFases -notcontains $id)) { continue }
-    if ($PulaFases -and ($PulaFases -contains $id)) { continue }
-
-    # Garante que Steps seja tratado como array
-    $steps = @($phase.Steps)
-    $TotalSteps += $steps.Count
+foreach ($plannedPhase in $script:GuardianSelectedPhases) {
+    $TotalSteps += @($plannedPhase.Steps).Count
 }
-
+$CurrentPhaseOrdinal = 0
 
 # Ajusta a barra de progresso para refletir isso
-if ($global:GuardianProgressBar) {
-    $global:GuardianProgressBar.Dispatcher.Invoke({
-        $global:GuardianProgressBar.Minimum = 0
-        $global:GuardianProgressBar.Maximum = $TotalSteps
-        $global:GuardianProgressBar.Value = 0
-    })
-}
+# v2 console: nao ha controle WPF nesta etapa.
 
 # Contador de passos concluídos
 $CurrentStep = 0
 
 
  Write-Host ""
- Write-Host ("► Cliente: {0}{1}{2}" -f $Cyan, $Cliente, $Reset)
+ Write-Host ('  {0,-12} {1}' -f 'Cliente', $Cliente) -ForegroundColor White
+Write-Host ('  {0,-12} {1}' -f 'Computador', $env:COMPUTERNAME) -ForegroundColor White
 
- Write-Report ""
- Write-Report ("Cliente: {0}" -f $Cliente)
+
 
 
 # Preflight PawnIO: antes da Fase 1 para aparecer no inventario de software.
@@ -997,17 +994,17 @@ if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
         if (Test-Path -LiteralPath $scriptPawnIO -PathType Leaf) {
             $preparoPawnIO = & $scriptPawnIO -PrepararPawnIO
             $estadoPawnIO = [string]$preparoPawnIO.Estado
-            Write-Report ("PawnIO (antes do inventario): {0}" -f $estadoPawnIO)
+
             foreach ($avisoPawnIO in @($preparoPawnIO.Avisos)) {
                 if (-not [string]::IsNullOrWhiteSpace([string]$avisoPawnIO)) {
-                    Write-Log ("PawnIO: {0}" -f $avisoPawnIO) 'WARN'
+                    Write-GuardianStatus ("PawnIO: {0}" -f $avisoPawnIO) 'WARN'
                 }
             }
         } else {
-            Write-Log 'PawnIO: modulo de telemetria ausente; inventario segue normalmente.' 'WARN'
+            Write-GuardianStatus 'PawnIO: modulo de telemetria ausente; inventario segue normalmente.' 'WARN'
         }
     } catch {
-        Write-Log ("PawnIO: preflight nao concluido: {0}. Inventario segue normalmente." -f $_.Exception.Message) 'WARN'
+        Write-GuardianStatus ("PawnIO: preflight nao concluido: {0}. Inventario segue normalmente." -f $_.Exception.Message) 'WARN'
     }
 }
 
@@ -1052,7 +1049,7 @@ function Install-GuardianOptionalProgram {
     param([ValidateSet('NetTime','7-Zip')][string]$Programa)
 
     if (Test-GuardianProgramInstalled -Programa $Programa) {
-        Write-Log ("{0}: ja instalado; nenhuma acao necessaria." -f $Programa) 'INFO'
+        Write-GuardianStatus ("{0}: ja instalado; nenhuma acao necessaria." -f $Programa) 'INFO'
         return
     }
 
@@ -1064,7 +1061,7 @@ function Install-GuardianOptionalProgram {
         $argumentos = '/S'
         if (-not [Environment]::Is64BitOperatingSystem -or
             [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [System.Runtime.InteropServices.Architecture]::X64) {
-            Write-Log '7-Zip: instalador configurado apenas para Windows x64; instalacao ignorada neste equipamento.' 'WARN'
+            Write-GuardianStatus '7-Zip: instalador configurado apenas para Windows x64; instalacao ignorada neste equipamento.' 'WARN'
             return
         }
     } else {
@@ -1076,7 +1073,7 @@ function Install-GuardianOptionalProgram {
     $instalador = Join-Path $diretorio ($Programa.Replace('-','') + '.exe')
     try {
         New-Item -ItemType Directory -Path $diretorio -Force -ErrorAction Stop | Out-Null
-        Write-Log ("{0}: ausente; baixando instalador oficial." -f $Programa) 'INFO'
+        Write-GuardianStatus ("{0}: ausente; baixando instalador oficial." -f $Programa) 'INFO'
         Invoke-WebRequest -Uri $url -OutFile $instalador -MaximumRedirection 5 -TimeoutSec 90 -ErrorAction Stop
         $arquivo = Get-Item -LiteralPath $instalador -ErrorAction Stop
         if ($arquivo.Length -lt 50000) { throw 'Arquivo baixado invalido ou incompleto.' }
@@ -1102,20 +1099,20 @@ function Install-GuardianOptionalProgram {
             Start-Sleep -Seconds 2
         }
         if ($confirmado) {
-            Write-Log ("{0}: instalado silenciosamente antes do inventario." -f $Programa) 'INFO'
+            Write-GuardianStatus ("{0}: instalado silenciosamente antes do inventario." -f $Programa) 'INFO'
             if ($Programa -eq 'NetTime') {
                 $servico = Get-Service -Name 'NetTimeSvc' -ErrorAction SilentlyContinue
                 if (-not $servico) {
-                    Write-Log 'NetTime: programa instalado, mas servico NetTimeSvc nao localizado; verificar instalacao no teste.' 'WARN'
+                    Write-GuardianStatus 'NetTime: programa instalado, mas servico NetTimeSvc nao localizado; verificar instalacao no teste.' 'WARN'
                 } elseif ($servico.Status -ne 'Running') {
-                    Write-Log ("NetTime: servico instalado, estado atual: {0}." -f $servico.Status) 'WARN'
+                    Write-GuardianStatus ("NetTime: servico instalado, estado atual: {0}." -f $servico.Status) 'WARN'
                 }
             }
         } else {
-            Write-Log ("{0}: instalador terminou, mas o programa nao foi confirmado no Windows." -f $Programa) 'WARN'
+            Write-GuardianStatus ("{0}: instalador terminou, mas o programa nao foi confirmado no Windows." -f $Programa) 'WARN'
         }
     } catch {
-        Write-Log ("{0}: falha na preparacao: {1}. Guardian prossegue." -f $Programa, $_.Exception.Message) 'WARN'
+        Write-GuardianStatus ("{0}: falha na preparacao: {1}. Guardian prossegue." -f $Programa, $_.Exception.Message) 'WARN'
     } finally {
         try { Remove-Item -LiteralPath $diretorio -Recurse -Force -ErrorAction SilentlyContinue } catch { }
     }
@@ -1125,76 +1122,84 @@ if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
     (-not $PulaFases -or $PulaFases -notcontains 1) -and -not $Simulado) {
     foreach ($programaOpcional in @('NetTime','7-Zip')) {
         try { Install-GuardianOptionalProgram -Programa $programaOpcional }
-        catch { Write-Log ("{0}: falha isolada: {1}" -f $programaOpcional, $_.Exception.Message) 'WARN' }
+        catch { Write-GuardianStatus ("{0}: falha isolada: {1}" -f $programaOpcional, $_.Exception.Message) 'WARN' }
     }
 }
 
 # === Loop principal com atualização da UI ===
-foreach ($phase in $Phases) {
+foreach ($phase in $script:GuardianSelectedPhases) {
     $id = [int]$phase.Id
-    if ($ExecutaFases -and ($ExecutaFases -notcontains $id)) { continue }
-    if ($PulaFases -and ($PulaFases -contains $id)) { continue }
+    $CurrentPhaseOrdinal++
 
     # Atualiza UI com fase atual
-    if ($global:GuardianPhaseText) {
-        $global:GuardianPhaseText.Dispatcher.Invoke({
-            $global:GuardianPhaseText.Text = "Fase ${id}: $($phase.Title)"
-        })
-    }
+# v2 console: nao ha controle WPF nesta etapa.
 
     DoEvents
 
     Write-Host ""
-    Write-Host "=================================================================================================" -ForegroundColor DarkGray
     Show-Phase -Id $phase.Id -Title $phase.Title
-    Write-Log ("=== Fase {0}: {1} ===" -f $phase.Id, $phase.Title) 'INFO'
+    Send-GuardianLiveEvent -Type 'phase' -Label ('Fase {0:00} de 09 · {1}' -f $phase.Id, $phase.Title) -Percent ([int][Math]::Floor((($CurrentPhaseOrdinal - 1) / [Math]::Max(1,$script:GuardianPhaseCount)) * 95))
+    Write-GuardianStatus ("=== Fase {0}: {1} ===" -f $phase.Id, $phase.Title) 'INFO'
 
     # Executa cada passo da fase
     foreach ($step in $phase.Steps) {
         # Atualiza UI com nome do passo atual e progresso
         $CurrentStep++
-        if ($global:GuardianPhaseText) {
-            $global:GuardianPhaseText.Dispatcher.Invoke({
-                $global:GuardianPhaseText.Text = "Fase ${id}: $($phase.Title)`nExecutando: $($step.Name)`nProgresso: $CurrentStep de $TotalSteps"
-            })
-        }
+# v2 console: nao ha controle WPF nesta etapa.
 
         DoEvents
 
         # Executa o passo
         Invoke-GuardianStep -Title $step.Name -Action $step.Action
+        Send-GuardianLiveEvent -Type 'step' -Label $step.Name -Percent ([int][Math]::Min(95,[Math]::Floor(($CurrentStep / [Math]::Max(1,$TotalSteps)) * 95)))
 
         # Inventario complementar; falhas nesta leitura nao interrompem a manutencao.
+        # Dados somente para a WPF: leitura passiva, sem mudar o inventario/API/JSON.
+        if ($id -eq 1 -and $step.Name -eq 'Get-SystemInventory' -and $script:GuardianUiAvailable) {
+            try {
+                $cpuInfo = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+                $csInfo = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+                $gpuInfo = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -First 1
+                $partition = Get-Partition -DriveLetter ($env:SystemDrive.TrimEnd(':')) -ErrorAction SilentlyContinue
+                $osDisk = if ($partition) { $partition | Get-Disk -ErrorAction SilentlyContinue }
+                $driveText = if ($osDisk) { '{0} · {1:N0} GB' -f $osDisk.FriendlyName, ($osDisk.Size / 1GB) } else { 'Não identificado' }
+                $ramText = if ($csInfo.TotalPhysicalMemory) { '{0:N0} GB' -f [Math]::Round(($csInfo.TotalPhysicalMemory / 1GB), 0, [MidpointRounding]::AwayFromZero) } else { 'Não disponível' }
+                $osInfo = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+                $displayVersion = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue).DisplayVersion
+                $osVersion = if ($displayVersion) { [string]$displayVersion } elseif ($osInfo) { [string]$osInfo.Version } else { '' }
+                $osText = if ($osInfo) { ('{0} · {1}' -f $osInfo.Caption, $osVersion).TrimEnd(' ', '·') } else { 'Não disponível' }
+                Send-GuardianLiveEvent -Type 'inventory' -Data @{
+                    cpu = if ($cpuInfo.Name) { [string]$cpuInfo.Name } else { 'Não disponível' }
+                    ram = $ramText
+                    gpu = if ($gpuInfo.Name) { [string]$gpuInfo.Name } else { 'Não disponível' }
+                    storage = $driveText
+                    os = $osText
+                }
+            } catch { } # O painel complementar nunca interrompe a manutencao.
+        }
+
         if ($id -eq 1 -and $step.Name -eq 'Get-SystemInventory') {
             try {
                 $script:TeamViewerInfo = Get-GuardianTeamViewerInfo
                 if ($script:TeamViewerInfo.Instalado) {
                     $tvLabel = if ($script:TeamViewerInfo.ID) { $script:TeamViewerInfo.ID } else { 'indisponivel' }
-                    Write-Report ("TeamViewer: instalado; versao={0}; ID={1}; status={2}" -f `
-                        $script:TeamViewerInfo.Versao, $tvLabel, $script:TeamViewerInfo.Status) 'INFO'
-                } else {
-                    Write-Report 'TeamViewer: nao instalado.' 'INFO'
                 }
             } catch {
                 $script:TeamViewerInfo = [pscustomobject]@{
                     Instalado = $false; ID = $null; Versao = $null; Status = 'ErroLeitura'
                 }
-                Write-Report 'TeamViewer: falha na coleta do identificador.' 'WARN'
+
             }
         }
 
         # Atualiza barra de progresso proporcional
-        if ($global:GuardianProgressBar) {
-            $global:GuardianProgressBar.Dispatcher.Invoke({
-                $global:GuardianProgressBar.Value = $CurrentStep
-            })
-        }
+# v2 console: nao ha controle WPF nesta etapa.
 
         DoEvents
     }
 
     #if ($id -eq 5 -and (Get-RebootPending)) {
-    #    Write-Log 'Reinicialização pendente detectada após Atualizações.' 'WARN'
+    #    Write-GuardianStatus 'Reinicialização pendente detectada após Atualizações.' 'WARN'
     #    Write-Host ("{0}› Uma reinicialização está pendente. Ela pode ser realizada fora desta janela de manutenção.{1}" -f $Yellow, $Reset)
     #}
 }
@@ -1204,25 +1209,8 @@ foreach ($phase in $Phases) {
 
 
 
-# 6) Resumo final seguro
-Write-Host ""
-Write-Host "=================================================================================================" -ForegroundColor DarkGray
-Write-Host ""
-Show-Header -Text 'Resumo da Manutenção Automatizada'
-Write-Host ""
-
-# Descobre o comprimento máximo do rótulo para alinhamento
-$maxLabel = 0
-foreach ($r in $global:Results) { 
-    $label = if ($r.PSObject.Properties['Etapa']) { $r.Etapa } `
-             elseif ($r.PSObject.Properties['Phase']) { $r.Phase } `
-             else { 'Desconhecida' }
-    if ($label.Length -gt $maxLabel) { $maxLabel = $label.Length }
-}
-Write-Report ""
-Write-Report "Resumo da Manutenção Automatizada"
-Write-Report ""
-
+# 6) Preparar resultados estruturados; o resumo visual sera apresentado
+# somente no FINAL do bloco finally, apos JSON, API e agendamentos.
 # Inicializa array para JSON
 $jsonResults = @()
 
@@ -1245,14 +1233,6 @@ foreach ($r in $global:Results) {
 
     $statusPlain = if ($sucesso) { 'OK' } else { 'ALERTA' }
 
-    $labelPadded = $etapa.PadRight($maxLabel)
-    $elapsedTxt  = Format-Elapsed $tempo
-    $statusConsole = if ($sucesso) { "{0}OK{1}" -f $Green, $Reset } else { "{0}ALERTA{1}" -f $Yellow, $Reset }
-
-    # Exibe no console e grava no log
-    Write-Host ("- {0}  -> {1} (Tempo: {2})" -f $labelPadded, $statusConsole, $elapsedTxt)
-    Write-Report ("- {0}  -> {1} (Tempo: {2})" -f $labelPadded, $statusPlain, $elapsedTxt)
-
     # Adiciona resultado seguro ao array do JSON
     $jsonResults += [PSCustomObject]@{
         Phase    = $etapa        # No JSON final, você mantém Phase
@@ -1264,21 +1244,12 @@ foreach ($r in $global:Results) {
 
 
 # Confirma o backup do Macrium (se a função estiver presente)
-if (Get-Command Confirm-MacriumBackup -ErrorAction SilentlyContinue) { Confirm-MacriumBackup }
+if (Get-Command Confirm-MacriumBackup -ErrorAction SilentlyContinue) { Confirm-MacriumBackup 6>$null }
 
-# Finaliza cronômetro
-$scriptStart.Stop()
-$global:tempoFormatado = Format-Elapsed $scriptStart.Elapsed
-Write-Host ""
-Write-Host ("{0}PS.:{1} Duração total da execução: {2}{3}" -f $Gray, $Reset, $global:tempoFormatado, $Reset)
-Write-Report ""
-Write-Report ("Duração total da execução: {0}" -f $global:tempoFormatado)
+# O cronometro sera interrompido somente apos todas as tarefas finais.
+# Resultado consolidado em memoria; mensagem tecnica omitida do console.
 
-Write-Host ""
-Write-Host ("{0}Arquivo log: {1} {2}" -f $Gray, $Reset, $logFile)
-Write-Host ""
-Write-Report ""
-Write-Report ("Arquivo log:  {0}" -f $logFile)
+
 
 # ============================================================================== 
 # Criação do JSON local seguindo a mesma lógica do log
@@ -1306,47 +1277,30 @@ $jsonObject = [PSCustomObject]@{
     Fases              = $jsonResults
 }
 
-# Salva JSON com tratamento de erro
-try {
-    $jsonObject | ConvertTo-Json -Depth 5 -Compress | Set-Content -Path $jsonFilePath -Encoding UTF8
-
-    Write-Host ("{0}Arquivo Json:{1} {2}" -f $Gray, $Reset, $jsonFilePath)
-    Write-Report ("Arquivo Json: {0}" -f $jsonFilePath) 'INFO'
-
-} catch {
-    Write-Report ("Falha ao criar JSON: {0}" -f $_.Exception.Message) 'ERROR'
-}
-
-
-Write-Host ""
-Write-Host "=================================================================================================" -ForegroundColor DarkGray
-
+# O objeto permanece em memoria; consolidacao e serializacao ocorrem no finally.
+$script:GuardianRelatorioEmMemoria = $jsonObject
+$script:GuardianJsonDestino = $jsonFilePath
 # Fecha a tela gráfica do Guardian ao terminar o script, se estiver aberta
-if ($global:GuardianUIWindow) {
-    try {
-        $global:GuardianUIWindow.Close()
-    } catch {
-        Write-Log "Falha ao fechar a UI: $($_.Exception.Message)" 'WARN'
-    }
-}
+# v2 console: nao ha controle WPF nesta etapa.
 
 # Exibe a UI amigável enquanto o script continua rodando
-Show-GuardianEndUI | Out-Null
+# v2 laboratorio: sem interface de encerramento.
 
 # Pausa breve para garantir que a UI feche antes do término do script
 Start-Sleep -Milliseconds 500
 
 #region Envio do Log para Servidor de Arquivos
 #if ($FileServer -and $FileServer.Trim() -ne '') {
-#    Write-Log ("Enviando log para o servidor: {0}" -f $FileServer) 'INFO'
+#    Write-GuardianStatus ("Enviando log para o servidor: {0}" -f $FileServer) 'INFO'
 #    Send-LogToServer -Server $FileServer
 #} else {
-#    Write-Log "Nenhum servidor informado: pulando envio do log." 'INFO'
+#    Write-GuardianStatus "Nenhum servidor informado: pulando envio do log." 'INFO'
 #}
 #endregion
 
 } catch {
-    Write-Log ("FALHA GERAL (capturada): {0}" -f $_.ToString()) 'ERROR'
+    $script:GuardianFalhaGeral = $true
+    Write-GuardianStatus ("FALHA GERAL (capturada): {0}" -f $_.ToString()) 'ERROR'
 } finally {
 
     $argJsonPath = "C:\Guardian\guardian_arg.json"
@@ -1355,7 +1309,40 @@ Start-Sleep -Milliseconds 500
     }
 
 
-    & "C:\Guardian\Functions\Optimize-JsonReport.ps1" -Pasta "C:\Guardian\Json"
+    if ($script:GuardianRelatorioEmMemoria) {
+        try {
+            # Telemetria pertence exclusivamente ao motor e entra no relatorio em memoria.
+            # Um erro de coleta bloqueia o envio para evitar dados incompletos na API.
+            $telemetryPath = Join-Path $funcDir 'Get-HardwareTelemetry.ps1'
+            if (-not (Test-Path -LiteralPath $telemetryPath -PathType Leaf)) {
+                throw 'Modulo Get-HardwareTelemetry.ps1 ausente.'
+            }
+            $telemetryOutput = @(& $telemetryPath -ErrorAction Stop)
+            $telemetryObjects = @($telemetryOutput | Where-Object {
+                $null -ne $_ -and $_.PSObject.Properties.Name -contains 'schema_version'
+            })
+            if ($telemetryObjects.Count -ne 1) {
+                throw ("Telemetria: esperado um objeto, obtidos {0}." -f $telemetryObjects.Count)
+            }
+            $telemetryData = $telemetryObjects[0]
+            if ($telemetryData.schema_version -ne 1 -or
+                $telemetryData.status -notin @('ok', 'parcial') -or
+                [string]$telemetryData.computador -ine [string]$script:GuardianRelatorioEmMemoria.NomeComputador) {
+                throw 'Telemetria invalida ou identificador de computador divergente.'
+            }
+            $script:GuardianRelatorioEmMemoria | Add-Member -NotePropertyName 'telemetria' -NotePropertyValue $telemetryData -Force
+
+            & "C:\Guardian\Functions\Optimize-JsonReport.ps1" `
+                -Relatorio $script:GuardianRelatorioEmMemoria `
+                -JsonDestino $script:GuardianJsonDestino `
+                -NaoEnviarApi:([bool]$Simulado) -ErrorAction Stop
+        } catch {
+            $global:GuardianEnvioApiStatus = 'Nao enviado (relatorio invalido)'
+            Write-Host ("  ERRO  Falha na consolidacao do JSON: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        }
+    } else {
+        Write-Host '  ERRO  Relatorio em memoria indisponivel; nenhum JSON enviado.' -ForegroundColor Red
+    }
 
     # =========================================================================
     # Gravar guardian.json com data da execucao bem-sucedida
@@ -1365,361 +1352,100 @@ Start-Sleep -Milliseconds 500
         $guardianResult = @{
             ultima_execucao = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
         }
-        $guardianResult | ConvertTo-Json | Set-Content -Path $guardianJsonPath -Encoding UTF8 -Force
+        if (-not $Dev -and (Test-Path -LiteralPath $script:GuardianJsonDestino)) { $guardianResult | ConvertTo-Json | Set-Content -Path $guardianJsonPath -Encoding UTF8 -Force }
     } catch {}
 
 
-# PADRONIZAÇÃO DAS TAREFAS NO AGENDADOR (via XML — testado e aprovado)
-# =========================================================================
+# GUARDA DE SEGURANÇA DOS AGENDAMENTOS — UI 10
+# Validação NÃO DESTRUTIVA: nenhuma tarefa é registrada, renomeada ou removida.
+# A normalização automática será retomada após auditoria dos XMLs do laboratório.
+$script:GuardianTasksPadronizadas = $false
+$script:GuardianTasksVerificadas = $false
 try {
-    $taskFolder = "\Guardian\"
-
-    # ----- TASK DO GUARDIAN (dias 1-10, 12:00, ociosidade 10min, aguardar 2h) -----
-    $guardianTasks = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
-                     Where-Object {
-                         $_.TaskName -like "*Guardian*" -and
-                         $_.TaskName -notlike "*Ghost*" -and
-                         $_.TaskName -notlike "*System*" -and
-                         $_.TaskName -notmatch '^\s*[23]\.\s'
-                     }
-
-    foreach ($task in $guardianTasks) {
-        $xmlStr = Export-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder
-        $xml = [xml]$xmlStr
-        $ns = $xml.Task.NamespaceURI
-
-        $oldTriggers = $xml.Task.SelectSingleNode("*[local-name()='Triggers']")
-        if ($oldTriggers) { $xml.Task.RemoveChild($oldTriggers) | Out-Null }
-
-        $newTriggers = $xml.CreateElement("Triggers", $ns)
-        $calTrigger = $xml.CreateElement("CalendarTrigger", $ns)
-
-        $startEl = $xml.CreateElement("StartBoundary", $ns)
-        $startEl.InnerText = "2026-01-01T12:00:00"
-        $calTrigger.AppendChild($startEl) | Out-Null
-
-        $enabledEl = $xml.CreateElement("Enabled", $ns)
-        $enabledEl.InnerText = "true"
-        $calTrigger.AppendChild($enabledEl) | Out-Null
-
-        $monthlyEl = $xml.CreateElement("ScheduleByMonth", $ns)
-
-        $daysEl = $xml.CreateElement("DaysOfMonth", $ns)
-        1..10 | ForEach-Object {
-            $dayEl = $xml.CreateElement("Day", $ns)
-            $dayEl.InnerText = $_
-            $daysEl.AppendChild($dayEl) | Out-Null
-        }
-        $monthlyEl.AppendChild($daysEl) | Out-Null
-
-        $monthsEl = $xml.CreateElement("Months", $ns)
-        @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
-            $mEl = $xml.CreateElement($_, $ns)
-            $monthsEl.AppendChild($mEl) | Out-Null
-        }
-        $monthlyEl.AppendChild($monthsEl) | Out-Null
-        $calTrigger.AppendChild($monthlyEl) | Out-Null
-        $newTriggers.AppendChild($calTrigger) | Out-Null
-
-        $principals = $xml.Task.SelectSingleNode("*[local-name()='Principals']")
-        $xml.Task.InsertBefore($newTriggers, $principals) | Out-Null
-
-        $actionArgsNode = $xml.Task.SelectSingleNode("*[local-name()='Actions']/*[local-name()='Exec']/*[local-name()='Arguments']")
-        if ($actionArgsNode -and $actionArgsNode.InnerText -notmatch '(?i)(^|\s)-WindowStyle\s+Hidden(\s|$)') {
-            $actionArgsNode.InnerText = "-WindowStyle Hidden " + $actionArgsNode.InnerText
-        }
-
-        $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
-
-        # A tarefa principal também deve aparecer com a opção "Oculto" habilitada.
-        $hiddenNode = $settingsNode.SelectSingleNode("*[local-name()='Hidden']")
-        if ($hiddenNode) { $hiddenNode.InnerText = "true" }
-        else {
-            $hiddenEl = $xml.CreateElement("Hidden", $ns)
-            $hiddenEl.InnerText = "true"
-            $settingsNode.AppendChild($hiddenEl) | Out-Null
-        }
-
-        # Permitir iniciar também quando o computador estiver usando bateria.
-        $batteryNode = $settingsNode.SelectSingleNode("*[local-name()='DisallowStartIfOnBatteries']")
-        if ($batteryNode) { $batteryNode.InnerText = "false" }
-        else {
-            $batteryEl = $xml.CreateElement("DisallowStartIfOnBatteries", $ns)
-            $batteryEl.InnerText = "false"
-            $settingsNode.AppendChild($batteryEl) | Out-Null
-        }
-
-        $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
-        if ($roiNode) { $roiNode.InnerText = "true" }
-        else {
-            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "true"
-            $settingsNode.AppendChild($roiEl) | Out-Null
-        }
-
-        $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
-        if (-not $idleSettings) {
-            $idleSettings = $xml.CreateElement("IdleSettings", $ns)
-            $settingsNode.AppendChild($idleSettings) | Out-Null
-        }
-        foreach ($child in @($idleSettings.ChildNodes)) { $idleSettings.RemoveChild($child) | Out-Null }
-
-        $durEl = $xml.CreateElement("Duration", $ns); $durEl.InnerText = "PT10M"
-        $idleSettings.AppendChild($durEl) | Out-Null
-        $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"
-        $idleSettings.AppendChild($waitEl) | Out-Null
-        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "false"
-        $idleSettings.AppendChild($stopEl) | Out-Null
-        $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
-        $idleSettings.AppendChild($restartEl) | Out-Null
-
-        $nomePrincipalNovo = if ($task.TaskName -like "1. *") { $task.TaskName } else { "1. $($task.TaskName)" }
-        Register-ScheduledTask -TaskName $nomePrincipalNovo -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
-        if ($task.TaskName -ne $nomePrincipalNovo) {
-            Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
-        }
-        Write-Host "[Guardian] Task '$($task.TaskName)' padronizada: dias 1-10, 12:00." -ForegroundColor Green
-    }
-
-
-    # ----- TASK GUARDIAN SYSTEM (dias 11-20, 15:00, SYSTEM, sem ociosidade) -----
-    # Usa a acao da task principal como modelo e preserva seus argumentos.
-    $guardianPrincipal = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
-                         Where-Object {
-                             $_.TaskName -like "1. *Guardian*" -and
-                             $_.TaskName -notlike "*Ghost*" -and
-                             $_.TaskName -notlike "*System*"
-                         } |
-                         Select-Object -First 1
-
-    if ($guardianPrincipal) {
-        try {
-            $acaoPrincipal = $guardianPrincipal.Actions | Select-Object -First 1
-            $executeSystem = $acaoPrincipal.Execute
-            $argumentsSystem = $acaoPrincipal.Arguments
-            $workingDirSystem = $acaoPrincipal.WorkingDirectory
-
-            # Sob SYSTEM nao ha necessidade de ElevaGuardian.
-            $executeSystem = $executeSystem -replace '(?i)ElevaGuardian\.ps1','RodaGuardian.ps1'
-            $argumentsSystem = $argumentsSystem -replace '(?i)ElevaGuardian\.ps1','RodaGuardian.ps1'
-
-            $actionSystemParams = @{
-                Execute  = $executeSystem
-                Argument = $argumentsSystem
-            }
-            if (-not [string]::IsNullOrWhiteSpace($workingDirSystem)) {
-                $actionSystemParams.WorkingDirectory = $workingDirSystem
-            }
-            $actionSystem = New-ScheduledTaskAction @actionSystemParams
-
-            # Cria uma task base valida e depois troca somente o trigger mensal via XML,
-            # usando o mesmo metodo ja empregado pelo Guardian Ghost.
-            $triggerSystemBase = New-ScheduledTaskTrigger -Daily -At "15:00"
-            $principalSystem = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-            $settingsSystem = New-ScheduledTaskSettingsSet `
-                -AllowStartIfOnBatteries `
-                -DontStopIfGoingOnBatteries `
-                -StartWhenAvailable `
-                -ExecutionTimeLimit (New-TimeSpan -Hours 6) `
-                -Hidden
-
-            Register-ScheduledTask `
-                -TaskName "2. Guardian System" `
-                -TaskPath $taskFolder `
-                -Action $actionSystem `
-                -Trigger $triggerSystemBase `
-                -Settings $settingsSystem `
-                -Principal $principalSystem `
-                -Description "Guardian System - fallback do Guardian principal. Dias 11-20 as 15:00." `
-                -Force | Out-Null
-
-            $systemXml = [xml](Export-ScheduledTask -TaskName "2. Guardian System" -TaskPath $taskFolder)
-            try {
-                $principalXmlCompat = [xml](Export-ScheduledTask -TaskName $guardianPrincipal.TaskName -TaskPath $taskFolder)
-                if ($principalXmlCompat.Task.version) { $systemXml.Task.version = $principalXmlCompat.Task.version }
-            } catch {}
-            $ns = $systemXml.Task.NamespaceURI
-
-            $oldTriggers = $systemXml.Task.SelectSingleNode("*[local-name()='Triggers']")
-            if ($oldTriggers) { $systemXml.Task.RemoveChild($oldTriggers) | Out-Null }
-
-            $newTriggers = $systemXml.CreateElement("Triggers", $ns)
-            $calTrigger = $systemXml.CreateElement("CalendarTrigger", $ns)
-
-            $startEl = $systemXml.CreateElement("StartBoundary", $ns)
-            $startEl.InnerText = "2026-01-11T15:00:00"
-            $calTrigger.AppendChild($startEl) | Out-Null
-
-            $enabledEl = $systemXml.CreateElement("Enabled", $ns)
-            $enabledEl.InnerText = "true"
-            $calTrigger.AppendChild($enabledEl) | Out-Null
-
-            $monthlyEl = $systemXml.CreateElement("ScheduleByMonth", $ns)
-            $daysEl = $systemXml.CreateElement("DaysOfMonth", $ns)
-            11..20 | ForEach-Object {
-                $dayEl = $systemXml.CreateElement("Day", $ns)
-                $dayEl.InnerText = $_
-                $daysEl.AppendChild($dayEl) | Out-Null
-            }
-            $monthlyEl.AppendChild($daysEl) | Out-Null
-
-            $monthsEl = $systemXml.CreateElement("Months", $ns)
-            @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
-                $mEl = $systemXml.CreateElement($_, $ns)
-                $monthsEl.AppendChild($mEl) | Out-Null
-            }
-            $monthlyEl.AppendChild($monthsEl) | Out-Null
-            $calTrigger.AppendChild($monthlyEl) | Out-Null
-            $newTriggers.AppendChild($calTrigger) | Out-Null
-
-            $principals = $systemXml.Task.SelectSingleNode("*[local-name()='Principals']")
-            $systemXml.Task.InsertBefore($newTriggers, $principals) | Out-Null
-
-            Register-ScheduledTask -TaskName "2. Guardian System" -TaskPath $taskFolder -Xml ($systemXml.OuterXml) -Force | Out-Null
-            Unregister-ScheduledTask -TaskName "Guardian System" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
-            Write-Host "[Guardian System] Task criada/corrigida: dias 11-20, 15:00, SYSTEM, sem ociosidade." -ForegroundColor Green
-        }
-        catch {
-            Write-Host "[Guardian System] Nao foi possivel criar/corrigir a task: $($_.Exception.Message)" -ForegroundColor Yellow
-        }
-    }
-    else {
-        Write-Host "[Guardian System] Task principal nao encontrada; nenhuma configuracao foi inventada." -ForegroundColor Yellow
-    }
-
-    # ----- TASK DO GUARDIAN GHOST (dias 21-25, 12:00, ociosidade 10min, aguardar 2h) -----
-    $ghostTask = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
-                 Where-Object { $_.TaskName -in @("3. Guardian Ghost","3. Guardian Ghost") }
-
-    $ghostPrecisaAjustar = $false
-
-    if (-not $ghostTask) {
-        $ghostPrecisaAjustar = $true
-    }
-    else {
-        $trigger = $ghostTask.Triggers | Select-Object -First 1
-        if ($trigger -and $trigger.CimClass.CimClassName -eq 'MSFT_TaskMonthlyTrigger') {
-            $diasAtuais = @($trigger.DaysOfMonth) | Sort-Object
-            $diasEsperados = @(21,22,23,24,25)
-            if ($null -ne (Compare-Object $diasAtuais $diasEsperados -SyncWindow 0)) {
-                $ghostPrecisaAjustar = $true
-            }
-        }
-        else {
-            $ghostPrecisaAjustar = $true
-        }
-    }
-
-    if ($ghostPrecisaAjustar) {
-        $pwshPath7 = (Get-Command pwsh.exe -ErrorAction SilentlyContinue)?.Source
-        if (-not $pwshPath7) { $pwshPath7 = "powershell.exe" }
-
-        # Passo 1: Criar task base com cmdlets
-        $action = New-ScheduledTaskAction `
-            -Execute $pwshPath7 `
-            -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Guardian\Guardian-Ghost.ps1"'
-        $triggerGhost = New-ScheduledTaskTrigger -Daily -At "12:00"
-        $principalGhost = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
-        $settingsGhost = New-ScheduledTaskSettingsSet `
-            -AllowStartIfOnBatteries `
-            -DontStopIfGoingOnBatteries `
-            -StartWhenAvailable `
-            -ExecutionTimeLimit (New-TimeSpan -Hours 6) `
-            -Hidden
-
-        Register-ScheduledTask `
-            -TaskName "3. Guardian Ghost" `
-            -TaskPath $taskFolder `
-            -Action $action `
-            -Trigger $triggerGhost `
-            -Settings $settingsGhost `
-            -Principal $principalGhost `
-            -Description "Guardian Ghost - System Integrity (Fase 2) silenciosa. Roda 1x/mes entre dias 21-25." `
-            -Force | Out-Null
-
-        # Passo 2: Exportar e corrigir trigger + idle via XML
-        $xml = [xml](Export-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder)
-        try {
-            if ($guardianPrincipal) {
-                $principalXmlCompat = [xml](Export-ScheduledTask -TaskName $guardianPrincipal.TaskName -TaskPath $taskFolder)
-                if ($principalXmlCompat.Task.version) { $xml.Task.version = $principalXmlCompat.Task.version }
-            }
-        } catch {}
-        $ns = $xml.Task.NamespaceURI
-
-        $oldTriggers = $xml.Task.SelectSingleNode("*[local-name()='Triggers']")
-        if ($oldTriggers) { $xml.Task.RemoveChild($oldTriggers) | Out-Null }
-
-        $newTriggers = $xml.CreateElement("Triggers", $ns)
-        $calTrigger = $xml.CreateElement("CalendarTrigger", $ns)
-
-        $startEl = $xml.CreateElement("StartBoundary", $ns)
-        $startEl.InnerText = "2026-01-21T12:00:00"
-        $calTrigger.AppendChild($startEl) | Out-Null
-
-        $enabledEl = $xml.CreateElement("Enabled", $ns)
-        $enabledEl.InnerText = "true"
-        $calTrigger.AppendChild($enabledEl) | Out-Null
-
-        $monthlyEl = $xml.CreateElement("ScheduleByMonth", $ns)
-
-        $daysEl = $xml.CreateElement("DaysOfMonth", $ns)
-        21..25 | ForEach-Object {
-            $dayEl = $xml.CreateElement("Day", $ns)
-            $dayEl.InnerText = $_
-            $daysEl.AppendChild($dayEl) | Out-Null
-        }
-        $monthlyEl.AppendChild($daysEl) | Out-Null
-
-        $monthsEl = $xml.CreateElement("Months", $ns)
-        @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
-            $mEl = $xml.CreateElement($_, $ns)
-            $monthsEl.AppendChild($mEl) | Out-Null
-        }
-        $monthlyEl.AppendChild($monthsEl) | Out-Null
-        $calTrigger.AppendChild($monthlyEl) | Out-Null
-        $newTriggers.AppendChild($calTrigger) | Out-Null
-
-        $principals = $xml.Task.SelectSingleNode("*[local-name()='Principals']")
-        $xml.Task.InsertBefore($newTriggers, $principals) | Out-Null
-
-        $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
-
-        $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
-        if ($roiNode) { $roiNode.InnerText = "true" }
-        else {
-            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "true"
-            $settingsNode.AppendChild($roiEl) | Out-Null
-        }
-
-        $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
-        if (-not $idleSettings) {
-            $idleSettings = $xml.CreateElement("IdleSettings", $ns)
-            $settingsNode.AppendChild($idleSettings) | Out-Null
-        }
-        foreach ($child in @($idleSettings.ChildNodes)) { $idleSettings.RemoveChild($child) | Out-Null }
-
-        $durEl = $xml.CreateElement("Duration", $ns); $durEl.InnerText = "PT10M"
-        $idleSettings.AppendChild($durEl) | Out-Null
-        $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"
-        $idleSettings.AppendChild($waitEl) | Out-Null
-        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "false"
-        $idleSettings.AppendChild($stopEl) | Out-Null
-        $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
-        $idleSettings.AppendChild($restartEl) | Out-Null
-
-        Register-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
-        Unregister-ScheduledTask -TaskName "Guardian Ghost" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
-        Write-Host "[Guardian Ghost] Task criada/corrigida: dias 21-25, 12:00." -ForegroundColor Green
+    $tasks = @(Get-ScheduledTask -TaskPath '\Guardian\' -ErrorAction Stop)
+    $principal = @($tasks | Where-Object {
+        $_.TaskName -match '^1\.\s+Guardian(?:\s|$)' -and
+        $_.TaskName -notmatch '(?i)System|Ghost'
+    })
+    $system = @($tasks | Where-Object { $_.TaskName -eq '2. Guardian System' })
+    $ghost = @($tasks | Where-Object { $_.TaskName -eq '3. Guardian Ghost' })
+    $missing = @()
+    if ($principal.Count -ne 1) { $missing += 'Guardian principal' }
+    if ($system.Count -ne 1) { $missing += 'Guardian System' }
+    if ($ghost.Count -ne 1) { $missing += 'Guardian Ghost' }
+    if ($missing.Count -eq 0) {
+        $script:GuardianTasksVerificadas = $true
+    } else {
+        Write-GuardianConsoleEvent -Text ('Agendamentos incompletos: ' + ($missing -join ', ')) -Kind WARN
     }
 }
 catch {
-    Write-Host "[Tasks] Erro na padronização: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-GuardianConsoleEvent -Text ('Não foi possível consultar os agendamentos: ' + $_.Exception.Message) -Kind WARN
 }
-# =========================================================================
 
-
-
+    if ($script:GuardianTasksVerificadas) { Write-GuardianConsoleEvent 'Agendamentos verificados' }
+    if ($scriptStart -and $scriptStart.IsRunning) { $scriptStart.Stop() }
+    $qtdEtapas = @($jsonResults).Count
+    $qtdFases = @($script:GuardianSelectedPhases).Count
+    $qtdAvisos = @($jsonResults | Where-Object { $_.Status -ne 'OK' }).Count
+    $wingetInconsistente = @($jsonResults | Where-Object {
+        $_.Phase -match 'Winget' -and $_.Mensagem -isnot [string] -and
+        $_.Mensagem -and $_.Mensagem.AtualizacaoBemSucedida -eq $false
+    }).Count -gt 0
+    $integridadeSuspeita = @($jsonResults | Where-Object {
+        $_.Phase -match 'Registro e dos arquivos' -and $_.Mensagem -isnot [string] -and
+        $_.Mensagem -and ($_.Mensagem.SfcCorrompido -eq $true -or $_.Mensagem.DismCorrompido -eq $true)
+    }).Count -gt 0
+    $resumoJsonOk = $false
+    if ($script:GuardianJsonDestino) { $resumoJsonOk = Test-Path -LiteralPath $script:GuardianJsonDestino -PathType Leaf }
+    $pendencias = @()
+    if ($wingetInconsistente) { $pendencias += 'Winget: resultado interno exige verificacao' }
+    if ($integridadeSuspeita) { $pendencias += 'Integridade: divergencia nos dados da fase 02' }
+    if (-not $script:GuardianTasksVerificadas) { $pendencias += 'Agendamentos: validação incompleta' }
+    foreach ($p in $pendencias) { Write-GuardianConsoleEvent $p WARN }
+    $statusOk = (-not $script:GuardianFalhaGeral -and $resumoJsonOk)
+    $statusTexto = if (-not $statusOk) { 'EXECUCAO COM FALHA' } elseif ($qtdAvisos -gt 0 -or $pendencias.Count -gt 0) { 'CONCLUIDO COM RESSALVAS' } else { 'CONCLUIDO' }
+    Write-Host ''
+    Write-Host ('  ' + ('─' * 51)) -ForegroundColor DarkGray
+    Write-Host ('  {0}' -f $statusTexto) -ForegroundColor $(if ($statusOk -and $pendencias.Count -eq 0 -and $qtdAvisos -eq 0) { 'White' } else { 'Yellow' })
+    Write-Host ('  Fases         {0} / {0}' -f $qtdFases) -ForegroundColor White
+    Write-Host ('  Etapas        {0}' -f $qtdEtapas) -ForegroundColor White
+    Write-Host ('  Tempo         {0}' -f (Format-Elapsed $scriptStart.Elapsed)) -ForegroundColor White
+    Write-Host ('  Relatorio     {0}' -f $(if ($resumoJsonOk) { 'JSON gerado' } else { 'Indisponivel' })) -ForegroundColor White
+    Write-Host ('  API           {0}' -f $global:GuardianEnvioApiStatus) -ForegroundColor White
+    Write-Host ('  ' + ('─' * 51)) -ForegroundColor DarkGray
+    # A nota exibida na WPF e lida APENAS do JSON definitivo ja consolidado.
+    # Nenhum arquivo temporario nem alteracao de esquema/API.
+    $uiHealth = @{}
+    $finalReport = $null
+    if ($resumoJsonOk) {
+        try {
+            $finalReport = Get-Content -LiteralPath $script:GuardianJsonDestino -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+            if ($finalReport.SaudeGeral -and $null -ne $finalReport.SaudeGeral.Nota) {
+                $uiHealth = @{
+                    score = [int][Math]::Round([double]$finalReport.SaudeGeral.Nota)
+                    classification = [string]$finalReport.SaudeGeral.Classificacao
+                }
+            }
+        } catch { } # A ausencia da nota nao muda o resultado da manutencao.
+    }
+    # Dados complementares são enviados exclusivamente à WPF a partir do JSON consolidado.
+    $uiHealth.duration = Format-Elapsed $scriptStart.Elapsed
+    if ($resumoJsonOk -and $null -ne $finalReport -and $finalReport.PSObject.Properties.Name -contains 'telemetria' -and $null -ne $finalReport.telemetria -and $null -ne $finalReport.telemetria.eventos_windows) {
+        $ev = $finalReport.telemetria.eventos_windows
+        function Convert-GuardianEventTotal {
+            param($Value)
+            if ($null -eq $Value -or $null -eq $Value.total) { return 'Não disponível' }
+            return [string]$Value.total
+        }
+        $uiHealth.events = @{
+            whea = Convert-GuardianEventTotal $ev.whea
+            bsod = Convert-GuardianEventTotal $ev.telas_azuis
+            shutdown = Convert-GuardianEventTotal $ev.desligamentos_inesperados
+            disk = Convert-GuardianEventTotal $ev.erros_disco
+        }
+    }
+    Send-GuardianLiveEvent -Type 'complete' -Label $statusTexto -Percent 100 -Status $(if (-not $statusOk) { 'error' } elseif ($qtdAvisos -gt 0 -or $pendencias.Count -gt 0) { 'warning' } else { 'ok' }) -Data $uiHealth
     Disable-QuickEditProtection
     Disable-ConsoleAppearance
-    Stop-Logging
 }

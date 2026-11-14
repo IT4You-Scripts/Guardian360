@@ -18,9 +18,6 @@ function Confirm-MacriumBackup {
         Write-Host -NoNewline ("[{0}] " -f $Tag) -ForegroundColor $Color
         Write-Host $Message
 
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
-            Write-Log ("[{0}] {1}" -f $Tag, $Message)
-        }
         if (Get-Command Write-Report -ErrorAction SilentlyContinue) {
             Write-Report ("[{0}] {1}" -f $Tag, $Message)
         }
@@ -76,7 +73,6 @@ function Confirm-MacriumBackup {
 
         # Cabeçalho
         Write-Host "`n`nMacrium Reflect"
-        if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log "Macrium Reflect" }
         if (Get-Command Write-Report -ErrorAction SilentlyContinue) {
             Write-Report ""
             Write-Report "Macrium Reflect"

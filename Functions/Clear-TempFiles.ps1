@@ -10,7 +10,6 @@
 
         if (-not $isAdmin) {
             Write-Host "Execute este script como Administrador para limpeza completa." -ForegroundColor Yellow
-            Write-Log "Clear-TempFiles: execução sem privilégios administrativos."
             throw "Permissão insuficiente: requer administrador."
         }
 
@@ -66,13 +65,11 @@
         } catch {}
 
         Write-Host "Limpeza profunda concluída com sucesso!" -ForegroundColor Green
-        Write-Log "Clear-TempFiles concluído com sucesso."
 
         return ($mensagens -join " | ")
     }
     catch {
         Write-Host "Erro durante a limpeza de arquivos temporários." -ForegroundColor Red
-        Write-Log "Erro em Clear-TempFiles: $_"
         throw $_
     }
 }

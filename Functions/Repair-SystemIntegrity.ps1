@@ -12,7 +12,6 @@
             $pxml = Test-Path "$env:windir\winsxs\pending.xml"
             return ($cbs -or $wu -or $pfr -or $pxml)
         } catch {
-            Write-Log "ALERTA: Falha ao verificar reinicialização pendente: $($_.Exception.Message)"
             return $false
         }
     }
@@ -20,7 +19,6 @@
     try {
         $pendingBefore = Test-PendingReboot
         if ($pendingBefore) {
-            Write-Log "ALERTA: Reinicialização pendente detectada ANTES da manutenção."
         }
 
         $cleanupArgs = "/Online /Cleanup-Image /StartComponentCleanup /Quiet /NoRestart"
@@ -28,7 +26,6 @@
         $cleanupExit = $cleanupProc.ExitCode
 
         if ($cleanupExit -ne 0 -and $cleanupExit -ne 3010) {
-            Write-Log "ERRO: StartComponentCleanup falhou (ExitCode=$cleanupExit)."
         }
 
         $dismArgs = "/Online /Cleanup-Image /RestoreHealth"
@@ -40,21 +37,18 @@
         $dismExit = $dismProc.ExitCode
 
         if ($dismExit -eq 3010) {
-            Write-Log "ALERTA: DISM concluiu com sucesso, mas requer reinicialização (3010)."
         } elseif ($dismExit -ne 0) {
-            Write-Log "ERRO: DISM RestoreHealth falhou (ExitCode=$dismExit)."
         }
 
         $sfcProc = Start-Process sfc.exe -ArgumentList "/scannow" -Wait -PassThru -NoNewWindow
         $sfcExit = $sfcProc.ExitCode
 
         switch ($sfcExit) {
-            1 { Write-Log "ALERTA: SFC encontrou e reparou corrupção de arquivos." }
-            2 { Write-Log "ERRO: SFC encontrou corrupção que NÃO pôde ser reparada." }
-            3 { Write-Log "ERRO: SFC não conseguiu executar a verificação." }
+            1 { }
+            2 { }
+            3 { }
             Default {
                 if ($sfcExit -ne 0) {
-                    Write-Log "ALERTA: SFC retornou código inesperado ($sfcExit)."
                 }
             }
         }
@@ -70,18 +64,14 @@
                 $qtdRepaired = ($srRepaired | Measure-Object).Count
 
                 if ($qtdCannot -gt 0) {
-                    Write-Log "ERRO: SFC - itens não reparados: $qtdCannot."
                 } elseif ($qtdRepaired -gt 0 -and $sfcExit -eq 1) {
-                    Write-Log "ALERTA: SFC - itens reparados: $qtdRepaired."
                 }
             } else {
-                Write-Log "ALERTA: CBS.log não encontrado para sumarizar resultados do SFC."
             }
         }
 
         $pendingAfter = Test-PendingReboot
         if ($pendingAfter -or $dismExit -eq 3010 -or $cleanupExit -eq 3010) {
-            Write-Log "ALERTA: Reinicialização recomendada após a manutenção."
         }
 
         $msg = "SFC/DISM finalizados. ExitCodes: SFC=$sfcExit, DISM=$dismExit, Cleanup=$cleanupExit. PendingBefore=$pendingBefore, PendingAfter=$pendingAfter"
@@ -96,7 +86,6 @@
         }
     }
     catch {
-        Write-Log "ERRO: Falha durante a manutenção preventiva: $($_.Exception.Message)"
         throw
     }
 }

@@ -37,14 +37,12 @@
         }
 
         Write-Host "Cache dos navegadores limpo com sucesso." -ForegroundColor Green
-        Write-Log "Cache dos navegadores limpo."
 
         # 🔥 Retorna mensagem técnica para o Guardian
         return "Cache dos navegadores limpo com sucesso."
     }
     catch {
         Write-Host "Não foi possível limpar o cache dos navegadores." -ForegroundColor Red
-        Write-Log "Erro ao limpar cache dos navegadores: $_"
 
         throw $_
     }

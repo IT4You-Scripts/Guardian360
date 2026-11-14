@@ -7,7 +7,6 @@ function Optimize-SSD {
 
     try {
         Write-Host "Iniciando otimização de unidades SSD (ReTrim)..." -ForegroundColor Cyan
-        Write-Log "Iniciando Optimize-SSD."
 
         $fallbackSuccessDrives = @()
         $failedDrives = @()
@@ -24,7 +23,6 @@ function Optimize-SSD {
             }
         }
         catch {
-            Write-Log "Get-Volume falhou; usando fallback WMI."
             $usePrimary = $false
 
             $volumes = Get-CimInstance -Class Win32_LogicalDisk `
@@ -33,7 +31,6 @@ function Optimize-SSD {
             if (-not $volumes -or $volumes.Count -eq 0) {
                 $msg = "Nenhuma unidade elegível encontrada para otimização."
                 Write-Host "Nenhuma unidade SSD encontrada para otimização." -ForegroundColor Yellow
-                Write-Log "Nenhuma unidade encontrada após fallback WMI."
                 return $msg
             }
         }
@@ -49,12 +46,11 @@ function Optimize-SSD {
             # Método principal (Optimize-Volume)
             if ($usePrimary) {
                 try {
-                    Optimize-Volume -DriveLetter $vol.DriveLetter -ReTrim -ErrorAction Stop | Out-Null
+                    Optimize-Volume -DriveLetter $vol.DriveLetter -ReTrim -ErrorAction Stop -ProgressAction SilentlyContinue | Out-Null
                     Write-Host " -> Sucesso." -ForegroundColor Green
                     $success = $true
                 }
                 catch {
-                    Write-Log ("Falha no Optimize-Volume para {0}. Tentando fallback Defrag." -f $driveArg)
                 }
             }
 
@@ -70,7 +66,6 @@ function Optimize-SSD {
                 }
                 catch {
                     Write-Host " -> Falha ao otimizar." -ForegroundColor Yellow
-                    Write-Log ("Erro no fallback para {0}: {1}" -f $driveArg, $_)
                     $failedDrives += $driveArg
                 }
             }
@@ -86,13 +81,11 @@ function Optimize-SSD {
         }
 
         Write-Host $finalMsg -ForegroundColor Green
-        Write-Log $finalMsg
 
         return $finalMsg
     }
     catch {
         Write-Host "ERRO crítico durante a otimização de SSDs: $_" -ForegroundColor Red
-        Write-Log ("ERRO crítico durante Optimize-SSD: {0}" -f $_)
 
         $erro = $_ | Format-List * -Force | Out-String
         throw $erro.Trim()

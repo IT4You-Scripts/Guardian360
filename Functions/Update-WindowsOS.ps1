@@ -1,9 +1,8 @@
-function Update-WindowsOS {
+﻿function Update-WindowsOS {
     [CmdletBinding()]
     param()
 
     Write-Host "Iniciando atualização do Windows (Windows Update)..." -ForegroundColor Cyan
-    Write-Log 'Iniciando atualização do Windows (Windows Update)...' 'INFO'
 
     $wuScript = @'
 try {
@@ -45,13 +44,11 @@ catch {
 
         if ($proc.ExitCode -ne 0) {
             Write-Host ("Windows Update retornou erro. ExitCode={0}" -f $proc.ExitCode) -ForegroundColor Red
-            Write-Log ("Windows Update retornou erro. ExitCode={0}" -f $proc.ExitCode) 'ERROR'
 
             throw "Windows Update retornou erro. ExitCode=$($proc.ExitCode)"
         }
 
         Write-Host "Atualização do Windows concluída." -ForegroundColor Green
-        Write-Log 'Atualização do Windows concluída.' 'INFO'
 
         return [PSCustomObject]@{
             MensagemTecnica = "Atualização do Windows concluída. ExitCode=$($proc.ExitCode)"
@@ -61,7 +58,6 @@ catch {
     catch {
 
         Write-Host "ERRO durante Update-WindowsOS: $_" -ForegroundColor Red
-        Write-Log ("Falha durante Update-WindowsOS: {0}" -f $_) 'ERROR'
 
         throw
     }
