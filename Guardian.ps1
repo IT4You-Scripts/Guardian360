@@ -890,18 +890,30 @@ $hasHDD = ($hddList.Count -gt 0)
                   break
               }
           }
+          # O ClientID pode residir na chave principal ou em VersionN (ex.: Version13).
+          # Apenas leitura: nunca abre o TeamViewer, nem altera o Registro.
           foreach ($key in $keys) {
-              $item = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
-              if ($null -eq $item) { continue }
-              if (-not $info.Versao -and $item.PSObject.Properties['Version']) {
-                  $info.Versao = [string]$item.Version
+              $candidateKeys = @($key)
+              $candidateKeys += @(
+                  Get-ChildItem -LiteralPath $key -ErrorAction SilentlyContinue |
+                      Where-Object { $_.PSChildName -match '^Version\d+$' } |
+                      Sort-Object { if ($_.PSChildName -match '^Version(\d+)$') { [int]$Matches[1] } else { 0 } } -Descending |
+                      ForEach-Object { $_.PSPath }
+              )
+              foreach ($candidateKey in $candidateKeys) {
+                  $item = Get-ItemProperty -LiteralPath $candidateKey -ErrorAction SilentlyContinue
+                  if ($null -eq $item) { continue }
+                  if (-not $info.Versao -and $item.PSObject.Properties['Version']) {
+                      $info.Versao = [string]$item.Version
+                  }
+                  $id = if ($item.PSObject.Properties['ClientID']) { ([string]$item.ClientID).Trim() } else { '' }
+                  if ($id -match '^[0-9]+$' -and $id -ne '0') {
+                      $info.ID = $id
+                      $info.Status = 'OK'
+                      break
+                  }
               }
-              $id = if ($item.PSObject.Properties['ClientID']) { [string]$item.ClientID } else { '' }
-              if ($id -match '^\d+$' -and $id -ne '0') {
-                  $info.ID = $id
-                  $info.Status = 'OK'
-                  break
-              }
+              if ($info.ID) { break }
           }
       } catch {
           $info.Status = 'ErroLeitura'
