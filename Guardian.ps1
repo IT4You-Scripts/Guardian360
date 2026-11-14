@@ -121,7 +121,9 @@ function Normalize-ClienteName {
     return $n
 }
 
-$clienteNorm = Normalize-ClienteName -Nome $Cliente
+# Sanitiza as aspas introduzidas pelo RodaGuardian/Agendador sem alterar os argumentos dos lancadores.
+$Cliente = Normalize-ClienteName -Nome $Cliente
+$clienteNorm = $Cliente
 $blocked = $false
 if ($clienteNorm.Length -gt 0) {
     foreach ($dc in $DisabledClients) {
@@ -1150,7 +1152,7 @@ foreach ($phase in $script:GuardianSelectedPhases) {
 
     Write-Host ""
     Show-Phase -Id $phase.Id -Title $phase.Title
-    Send-GuardianLiveEvent -Type 'phase' -Label ('Fase {0:00} de 09 · {1}' -f $phase.Id, $phase.Title) -Percent ([int][Math]::Floor((($CurrentPhaseOrdinal - 1) / [Math]::Max(1,$script:GuardianPhaseCount)) * 95))
+    Send-GuardianLiveEvent -Type 'phase' -Label ('Tarefa {0:00} de {1:00} · {2}' -f $CurrentPhaseOrdinal, $script:GuardianPhaseCount, $phase.Title) -Percent ([int][Math]::Floor((($CurrentPhaseOrdinal - 1) / [Math]::Max(1,$script:GuardianPhaseCount)) * 95))
     Write-GuardianStatus ("=== Fase {0}: {1} ===" -f $phase.Id, $phase.Title) 'INFO'
 
     # Executa cada passo da fase
