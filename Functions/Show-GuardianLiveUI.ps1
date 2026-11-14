@@ -12,6 +12,78 @@ param(
 )
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+Add-Type -AssemblyName System.Windows.Forms
+
+# A UI roda em outro pwsh.exe. Resolve o monitor do console do Guardian
+# (EnginePid), inclusive quando o console e hospedado pelo Windows Terminal.
+# Se a tarefa nao possuir console interativo, usa o monitor principal.
+if (-not ('GuardianConsoleMonitor' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class GuardianConsoleMonitor {
+    [DllImport("kernel32.dll", SetLastError = true)] public static extern bool FreeConsole();
+    [DllImport("kernel32.dll", SetLastError = true)] public static extern bool AttachConsole(uint processId);
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int count);
+}
+'@
+}
+
+function Get-GuardianConsoleScreen {
+    param([int]$EngineProcessId)
+    $primary = [System.Windows.Forms.Screen]::PrimaryScreen
+    if ($EngineProcessId -le 0) { return $primary }
+
+    # 1. Janela visivel do proprio motor ou de um processo ancestral
+    # (WindowsTerminal.exe, powershell.exe, conhost.exe etc.).
+    $processId = $EngineProcessId
+    for ($i = 0; $i -lt 5 -and $processId -gt 0; $i++) {
+        try {
+            $proc = [Diagnostics.Process]::GetProcessById($processId)
+            $handle = $proc.MainWindowHandle
+            if ($handle -ne [IntPtr]::Zero -and [GuardianConsoleMonitor]::IsWindowVisible($handle)) {
+                return [System.Windows.Forms.Screen]::FromHandle($handle)
+            }
+            $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction Stop
+            $parentId = [int]$cim.ParentProcessId
+            if ($parentId -le 0 -or $parentId -eq $processId) { break }
+            $processId = $parentId
+        } catch { break }
+    }
+
+    # 2. Console classico: o dono da janela e conhost.exe e o motor pode
+    # nao possuir MainWindowHandle. A associacao e apenas temporaria.
+    try {
+        [void][GuardianConsoleMonitor]::FreeConsole()
+        if ([GuardianConsoleMonitor]::AttachConsole([uint32]$EngineProcessId)) {
+            try {
+                $consoleHandle = [GuardianConsoleMonitor]::GetConsoleWindow()
+                if ($consoleHandle -ne [IntPtr]::Zero -and [GuardianConsoleMonitor]::IsWindowVisible($consoleHandle)) {
+                    return [System.Windows.Forms.Screen]::FromHandle($consoleHandle)
+                }
+            } finally { [void][GuardianConsoleMonitor]::FreeConsole() }
+        }
+    } catch { }
+
+    # 3. Ao iniciar pela interface do Windows Terminal, o terminal pode
+    # ser o primeiro plano e nao estar acessivel como processo ancestral.
+    try {
+        $foreground = [GuardianConsoleMonitor]::GetForegroundWindow()
+        if ($foreground -ne [IntPtr]::Zero -and [GuardianConsoleMonitor]::IsWindowVisible($foreground)) {
+            $title = [System.Text.StringBuilder]::new(260)
+            [void][GuardianConsoleMonitor]::GetWindowText($foreground, $title, $title.Capacity)
+            if ($title.ToString() -match '(?i)PowerShell|Windows Terminal|pwsh') {
+                return [System.Windows.Forms.Screen]::FromHandle($foreground)
+            }
+        }
+    } catch { }
+    return $primary
+}
+
 
 function Get-GuardianBitmapImage {
     param([string]$Path)
@@ -34,7 +106,7 @@ function Get-GuardianBitmapImage {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" AllowsTransparency="False" ResizeMode="CanMinimize"
         Width="1050" Height="600" MinWidth="560" MinHeight="390"
-        Background="#000000" Foreground="#F4F6F8" WindowStartupLocation="CenterScreen"
+        Background="#000000" Foreground="#F4F6F8" WindowStartupLocation="Manual"
         FontFamily="Segoe UI" Title="Guardian 360 v2.0" ShowInTaskbar="True">
   <Border BorderBrush="#29383E" BorderThickness="1" CornerRadius="10" Background="#000000">
     <Grid>
@@ -260,20 +332,43 @@ $robotExecImage = Get-GuardianBitmapImage -Path $robotExecPath
 $robotFinalImage = Get-GuardianBitmapImage -Path $robotFinalPath
 $backgroundImage = Get-GuardianBitmapImage -Path $backgroundPath
 
-# WPF utiliza unidades independentes de DPI: respeita a escala do Windows.
-# Ajusta a janela à área útil do monitor principal sem alterar resolução ou DPI.
-$workArea = [System.Windows.SystemParameters]::WorkArea
+# Centraliza no MESMO monitor do console do Guardian. Se nao houver
+# console visivel, seleciona o monitor principal. Mantem as dimensoes da UI 29.
+$guardianScreen = Get-GuardianConsoleScreen -EngineProcessId $EnginePid
 $preferredWidth = 1050.0
 $preferredHeight = 600.0
-$targetWidth = [Math]::Min($preferredWidth, [Math]::Max(440.0, $workArea.Width - 32.0))
-$targetHeight = [Math]::Min($preferredHeight, [Math]::Max(360.0, $workArea.Height - 32.0))
 
 $xmlReader = [System.Xml.XmlNodeReader]::new($xaml)
 $window = [Windows.Markup.XamlReader]::Load($xmlReader)
-$window.MinWidth = [Math]::Min(560.0, $targetWidth)
-$window.MinHeight = [Math]::Min(390.0, $targetHeight)
-$window.Width = $targetWidth
-$window.Height = $targetHeight
+# SourceInitialized fornece o HwndSource para converter pixels de monitor
+# em unidades WPF (DIP), respeitando a escala de exibicao do Windows.
+$window.Add_SourceInitialized({
+    try {
+        $source = [System.Windows.Interop.HwndSource]::FromVisual($window)
+        $scaleX = $source.CompositionTarget.TransformFromDevice.M11
+        $scaleY = $source.CompositionTarget.TransformFromDevice.M22
+        $bounds = $guardianScreen.WorkingArea
+        $areaLeft = $bounds.Left * $scaleX
+        $areaTop = $bounds.Top * $scaleY
+        $areaWidth = $bounds.Width * $scaleX
+        $areaHeight = $bounds.Height * $scaleY
+        $targetWidth = [Math]::Min($preferredWidth, [Math]::Max(440.0, $areaWidth - 32.0))
+        $targetHeight = [Math]::Min($preferredHeight, [Math]::Max(360.0, $areaHeight - 32.0))
+        $window.MinWidth = [Math]::Min(560.0, $targetWidth)
+        $window.MinHeight = [Math]::Min(390.0, $targetHeight)
+        $window.Width = $targetWidth
+        $window.Height = $targetHeight
+        $window.Left = $areaLeft + [Math]::Max(0, ($areaWidth - $targetWidth) / 2)
+        $window.Top = $areaTop + [Math]::Max(0, ($areaHeight - $targetHeight) / 2)
+    } catch {
+        # Sem console/monitor valido, comportamento anterior: centralizar.
+        $area = [System.Windows.SystemParameters]::WorkArea
+        $window.Width = [Math]::Min($preferredWidth, [Math]::Max(440.0, $area.Width - 32.0))
+        $window.Height = [Math]::Min($preferredHeight, [Math]::Max(360.0, $area.Height - 32.0))
+        $window.Left = $area.Left + ($area.Width - $window.Width) / 2
+        $window.Top = $area.Top + ($area.Height - $window.Height) / 2
+    }
+})
 
 $phaseText = $window.FindName('PhaseText')
 $activityText = $window.FindName('ActivityText')
