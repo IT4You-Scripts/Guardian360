@@ -23,6 +23,27 @@ param (
     [string]$Cliente
 )
 
+# Oculta o console do proprio launcher na execucao normal.
+# A LiveUI e uma janela WPF independente e permanece visivel.
+if (-not $PSBoundParameters.ContainsKey('Debug') -and -not $Maximized) {
+    try {
+        if (-not ('GuardianLauncherConsoleVisibility' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class GuardianLauncherConsoleVisibility {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+'@ -ErrorAction Stop
+        }
+        $launcherConsole = [GuardianLauncherConsoleVisibility]::GetConsoleWindow()
+        if ($launcherConsole -ne [IntPtr]::Zero) {
+            [void][GuardianLauncherConsoleVisibility]::ShowWindow($launcherConsole, 0)
+        }
+    } catch { }
+}
+
 # -------------------------------
 # Função para cabeçalho estilizado
 # -------------------------------
@@ -83,8 +104,6 @@ if (Test-Path $guardianJsonPath) {
 
 $BaseUrl  = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main/Functions/Update-GuardianFiles.ps1"
 $DestPath = "C:\Guardian\Functions\Update-GuardianFiles.ps1"
-# Garante a pasta do atualizador mesmo em uma instalacao nova.
-New-Item -ItemType Directory -Path (Split-Path -Parent $DestPath) -Force -ErrorAction Stop | Out-Null
 $NoCache  = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmss')"
 
 # Remove o arquivo antigo
@@ -481,11 +500,12 @@ if ($LogLevel)       { $argList += '-LogLevel'; $argList += $LogLevel }
 if ($Simulado)       { $argList += '-Simulado' }
 if ($FileServer)     { $argList += '-FileServer'; $argList += $FileServer }
 if ($Cliente)        { $argList += '-Cliente'; $argList += "`"$Cliente`"" }
+if ($PSBoundParameters.ContainsKey('Debug')) { $argList += '-Debug' }
 
 # -------------------------------
 # Configuração da janela
 # -------------------------------
-$winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } else { 'Normal' }
+$winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } elseif ($PSBoundParameters.ContainsKey('Debug')) { 'Normal' } else { 'Hidden' }
 
 # -------------------------------
 # Log do comando final para debug
@@ -506,7 +526,7 @@ try {
         -FilePath $PwshPath `
         -ArgumentList $argStringGuardian `
         -WorkingDirectory $workDir `
-        -WindowStyle Normal `
+        -WindowStyle $winStyle `
         -PassThru
 
     # Aguarda apenas o processo Guardian iniciado, nao todos os descendentes.

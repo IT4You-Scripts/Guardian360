@@ -24,6 +24,27 @@ param (
     [string]$Cliente
 )
 
+# Oculta o console do proprio launcher na execucao normal.
+# A LiveUI e uma janela WPF independente e permanece visivel.
+if (-not $PSBoundParameters.ContainsKey('Debug') -and -not $Maximized) {
+    try {
+        if (-not ('GuardianLauncherConsoleVisibility' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class GuardianLauncherConsoleVisibility {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+'@ -ErrorAction Stop
+        }
+        $launcherConsole = [GuardianLauncherConsoleVisibility]::GetConsoleWindow()
+        if ($launcherConsole -ne [IntPtr]::Zero) {
+            [void][GuardianLauncherConsoleVisibility]::ShowWindow($launcherConsole, 0)
+        }
+    } catch { }
+}
+
 # -------------------------------
 # Funções auxiliares
 # -------------------------------
@@ -77,8 +98,6 @@ if (Test-Path $guardianJsonPath) {
 
 $BaseUrl  = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main/Functions/Update-GuardianFiles.ps1"
 $DestPath = "C:\Guardian\Functions\Update-GuardianFiles.ps1"
-# Garante a pasta do atualizador mesmo em uma instalacao nova.
-New-Item -ItemType Directory -Path (Split-Path -Parent $DestPath) -Force -ErrorAction Stop | Out-Null
 $NoCache  = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmss')"
 
 # Remove o arquivo antigo
@@ -158,6 +177,7 @@ $argsObj = @{
     PulaFases     = $PulaFases
     LogLevel      = $LogLevel
     Simulado      = [bool]$Simulado
+    DebugMode     = [bool]$PSBoundParameters.ContainsKey('Debug')
 }
 
 try {
@@ -179,7 +199,7 @@ if ($NonInteractive) { $argString += " -NonInteractive" }
 # -------------------------------
 # Configuração da janela
 # -------------------------------
-$winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } else { 'Normal' }
+$winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } elseif ($PSBoundParameters.ContainsKey('Debug')) { 'Normal' } else { 'Hidden' }
 
 # -------------------------------
 # Log do comando final
