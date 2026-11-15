@@ -104,11 +104,11 @@ function Get-GuardianBitmapImage {
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        WindowStyle="None" AllowsTransparency="False" ResizeMode="CanMinimize"
+        WindowStyle="None" AllowsTransparency="True" ResizeMode="CanMinimize"
         Width="1050" Height="600" MinWidth="560" MinHeight="390"
-        Background="#000000" Foreground="#F4F6F8" WindowStartupLocation="Manual"
+        Background="Transparent" Foreground="#F4F6F8" WindowStartupLocation="Manual"
         FontFamily="Segoe UI" Title="Guardian 360 v2.0" ShowInTaskbar="True">
-  <Border BorderBrush="#29383E" BorderThickness="1" CornerRadius="10" Background="#000000">
+  <Border BorderBrush="#29383E" BorderThickness="1" CornerRadius="12" Background="#000000">
     <Grid>
       <Grid.RowDefinitions>
         <RowDefinition Height="47"/>
@@ -117,7 +117,7 @@ function Get-GuardianBitmapImage {
         <RowDefinition Height="76"/>
       </Grid.RowDefinitions>
 
-      <Border Grid.Row="0" Background="#11181B" BorderBrush="#263237" BorderThickness="0,0,0,1">
+      <Border Grid.Row="0" Background="#11181B" BorderBrush="#263237" BorderThickness="0,0,0,1" CornerRadius="11,11,0,0">
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="44"/></Grid.ColumnDefinitions>
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="22,0,0,0">
@@ -128,7 +128,7 @@ function Get-GuardianBitmapImage {
           <Button x:Name="MinButton" Grid.Column="1" Height="30" BorderThickness="0" Background="Transparent" Cursor="Hand" ToolTip="Minimizar">
             <Button.Template>
               <ControlTemplate TargetType="{x:Type Button}">
-                <Border x:Name="MinSurface" Background="Transparent" SnapsToDevicePixels="True">
+                <Border x:Name="MinSurface" Background="Transparent" CornerRadius="0,10,0,0" SnapsToDevicePixels="True">
                   <Grid>
                     <Path Data="M 0,0 L 9,0" Stroke="#D6E4EA" StrokeThickness="1" Width="9" Height="1" Stretch="None" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                   </Grid>
