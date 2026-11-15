@@ -918,13 +918,58 @@ $hasHDD = ($hddList.Count -gt 0)
               if ($info.ID) { break }
           }
 
-          # Fallback oficial: em algumas instalacoes o ClientID nao existe no Registro.
-          # Nao instala modulos nem altera a configuracao do TeamViewer.
+          # Fallback oficial para instalacoes sem ClientID no Registro.
+          # Instala TeamViewerPS sob demanda apenas quando o TeamViewer esta presente
+          # e nenhuma chave do Registro forneceu um ID. Sem prompt ou Write-Log.
           if (-not $info.ID) {
               try {
                   $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
                   if (-not $teamViewerCmd) {
-                      Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
+                      try {
+                          Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
+                      } catch { }
+                      $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
+                  }
+                  if (-not $teamViewerCmd -and (Get-Command -Name 'Install-Module' -ErrorAction SilentlyContinue)) {
+                      # AllUsers e compartilhado entre administradores, usuarios e SYSTEM.
+                      # Sem elevacao, usa CurrentUser em vez de falhar por permissao.
+                      $scope = 'CurrentUser'
+                      try {
+                          $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+                          if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+                              $scope = 'AllUsers'
+                          }
+                      } catch { }
+
+                      # Instalacao isolada e limitada a 60 s; nunca aguarda interacao.
+                      $installJob = $null
+                      try {
+                          $installJob = Start-Job -ScriptBlock {
+                              param([string]$InstallScope)
+                              $ProgressPreference = 'SilentlyContinue'
+                              $WarningPreference = 'SilentlyContinue'
+                              $InformationPreference = 'SilentlyContinue'
+                              $ConfirmPreference = 'None'
+                              $ErrorActionPreference = 'Stop'
+                              Install-Module -Name 'TeamViewerPS' -Scope $InstallScope -Repository 'PSGallery' -Force -AllowClobber -Confirm:$false -ErrorAction Stop *> $null
+                          } -ArgumentList $scope -ErrorAction Stop
+                          $finished = Wait-Job -Job $installJob -Timeout 60 -ErrorAction SilentlyContinue
+                          if ($finished) {
+                              Receive-Job -Job $installJob -ErrorAction Stop *> $null
+                          } else {
+                              Stop-Job -Job $installJob -ErrorAction SilentlyContinue
+                          }
+                      } catch {
+                          # Galeria indisponivel: nao comprometer a vistoria.
+                      } finally {
+                          if ($installJob) {
+                              Remove-Job -Job $installJob -Force -ErrorAction SilentlyContinue
+                          }
+                      }
+
+                      try {
+                          Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
+                      } catch { }
                       $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
                   }
                   if ($teamViewerCmd) {
@@ -936,7 +981,7 @@ $hasHDD = ($hddList.Count -gt 0)
                       }
                   }
               } catch {
-                  # Modulo ausente ou indisponivel: manter IDIndisponivel, sem interromper o Guardian.
+                  # Sem identificador: prosseguir com IDIndisponivel, sem interromper o Guardian.
               }
           }
       } catch {
