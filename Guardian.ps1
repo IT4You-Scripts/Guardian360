@@ -1586,15 +1586,21 @@ catch {
                     $scoreReasons.Backup = ('Imagem de backup mais recente: {0} dia(s).' -f [Math]::Max(0,$backupDays))
                 } else { $scoreReasons.Backup = 'Data da imagem de backup não disponível.' }
 
-                # Rede: mesmo critério de preferência utilizado na pontuação.
+                # Rede: a justificativa visual deve descrever o adaptador realmente conectado.
+                # Nao modifica o criterio nem a pontuacao calculada pelo Optimize-JsonReport.
                 $nets = @($inventoryData.Redes | Where-Object { $null -ne $_ })
-                $net = $nets | Where-Object { $_.Adaptador -eq 'Ethernet' } | Select-Object -First 1
-                if (-not $net) { $net = $nets | Where-Object { $_.Adaptador -eq 'Wi-Fi' } | Select-Object -First 1 }
-                if (-not $net) { $net = $nets | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1 }
+                $activeNets = @($nets | Where-Object { ([string]$_.Status).Trim() -match '^(Up|Connected|Conectado)$' })
+                $net = $activeNets | Where-Object { ([string]$_.Adaptador) -match '^(Wi-Fi|WiFi|WLAN|Wireless|Rede sem fio)' } | Select-Object -First 1
+                if (-not $net) { $net = $activeNets | Where-Object { ([string]$_.Adaptador) -match '^Ethernet' } | Select-Object -First 1 }
+                if (-not $net) { $net = $activeNets | Select-Object -First 1 }
                 if ($net) {
-                    $scoreReasons.Rede = ('Adaptador {0}: {1}; velocidade {2}.' -f [string]$net.Adaptador,
-                        [string]$net.Status, $(if ($net.Velocidade) { [string]$net.Velocidade } else { 'não informada' }))
-                } else { $scoreReasons.Rede = 'Nenhum adaptador elegível identificado na avaliação.' }
+                    $networkName = [string]$net.Adaptador
+                    $networkType = if ($networkName -match '^(Wi-Fi|WiFi|WLAN|Wireless|Rede sem fio)') { 'Rede sem fio' } else { $networkName }
+                    $networkSpeed = if ($net.Velocidade -and ([string]$net.Velocidade).Trim() -notmatch '^(0(\s*\w+)?|0\s*[kmg]?bps)$') { [string]$net.Velocidade } else { 'não informada' }
+                    $scoreReasons.Rede = ('{0} conectada; velocidade {1}.' -f $networkType, $networkSpeed)
+                } elseif ($nets.Count -gt 0) {
+                    $scoreReasons.Rede = 'Nenhum adaptador de rede ativo identificado nesta vistoria.'
+                } else { $scoreReasons.Rede = 'Nenhum adaptador de rede identificado no inventário.' }
 
                 # Segurança: não confundir ausência de confirmação com malware detectado.
                 $defenderPhase = @($scorePhases | Where-Object { $_.Phase -match 'Windows Defender' } | Select-Object -First 1)
