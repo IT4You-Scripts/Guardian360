@@ -248,7 +248,7 @@ function Get-GuardianBitmapImage {
                   <TextBlock x:Name="DurationValue" Text="" FontSize="12" Foreground="#E8F0F2"/>
                 </StackPanel>
                 <StackPanel Grid.Column="2">
-                  <TextBlock Text="ETAPAS IGNORADAS" FontSize="9" Foreground="#78939C"/>
+                  <TextBlock Text="ETAPA IGNORADA" FontSize="9" Foreground="#78939C"/>
                   <TextBlock x:Name="SkippedPhasesValue" Text="Nenhuma" FontSize="11" Foreground="#E8F0F2" TextWrapping="Wrap" Margin="0,4,0,0"/>
                 </StackPanel>
               </Grid>
