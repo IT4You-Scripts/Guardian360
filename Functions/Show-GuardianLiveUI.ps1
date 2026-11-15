@@ -211,6 +211,7 @@ function Get-GuardianBitmapImage {
               <TextBlock x:Name="ActivityText" Text="Inicializando o Guardian..." Foreground="#F2F5F6" FontSize="13" Margin="0,7,0,0" TextWrapping="Wrap"/>
               <StackPanel Margin="0,18,0,0">
                 <Border Height="1" Background="#28383D" Margin="0,0,0,12"/>
+                <TextBlock Text="INVENTÁRIO" FontSize="10" Foreground="#64D5EB" FontWeight="SemiBold" Margin="0,0,0,12"/>
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -241,8 +242,11 @@ function Get-GuardianBitmapImage {
                   <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="ERROS DE DISCO" FontSize="9" Foreground="#78939C"/><TextBlock x:Name="DiskEventsValue" Text="Não disponível" Foreground="#E8F0F2" FontSize="12"/></StackPanel>
                 </Grid>
               </StackPanel>
-              <Grid x:Name="DurationPanel" Visibility="Collapsed" Margin="0,18,0,0">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <StackPanel x:Name="DurationPanel" Visibility="Collapsed" Margin="0,20,0,0">
+                <Border Height="1" Background="#28383D" Margin="0,0,0,12"/>
+                <TextBlock Text="RESUMO DA VISTORIA" FontSize="10" Foreground="#64D5EB" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
                   <TextBlock Text="TEMPO DE EXECUÇÃO" FontSize="9" Foreground="#78939C"/>
                   <TextBlock x:Name="DurationValue" Text="" FontSize="12" Foreground="#E8F0F2"/>
@@ -251,7 +255,8 @@ function Get-GuardianBitmapImage {
                   <TextBlock Text="ETAPA IGNORADA" FontSize="9" Foreground="#78939C"/>
                   <TextBlock x:Name="SkippedPhasesValue" Text="Nenhuma" FontSize="11" Foreground="#E8F0F2" TextWrapping="Wrap" Margin="0,4,0,0"/>
                 </StackPanel>
-              </Grid>
+                </Grid>
+              </StackPanel>
               <Grid x:Name="HealthPanel" Visibility="Collapsed" Margin="0,16,0,0">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center"><TextBlock Text="SAÚDE GERAL DO SISTEMA" FontSize="10" Foreground="#78939C"/><TextBlock x:Name="HealthClass" Text="" FontSize="13" Foreground="#E8F0F2"/></StackPanel>
