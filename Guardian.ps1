@@ -1007,8 +1007,7 @@ $hasHDD = ($hddList.Count -gt 0)
         #@{ Name='Clear-RecentFilesHistory';  Action={ Clear-RecentFilesHistory } }
       )},
     @{ Id=5; Title='Atualizações do Windows'; Steps=@(
-        @{ Name='Update-WindowsOS'; Action={ if($hasInet){ Update-WindowsOS } else { Write-GuardianStatus 'Sem internet: pulando Update-WindowsOS' 'WARN' } } },
-        @{ Name='Update-MicrosoftStore'; Action={ if($hasInet){ Update-MicrosoftStore } else { Write-GuardianStatus 'Sem internet: pulando Update-MicrosoftStore' 'WARN' } } }
+        @{ Name='Update-WindowsOS'; Action={ if($hasInet){ Update-WindowsOS } else { Write-GuardianStatus 'Sem internet: pulando Update-WindowsOS' 'WARN' } } }
       )},
     @{ Id=6; Title='Atualizações dos programas instalados'; Steps=@(
         # @{ Name='Block-AppUpdates';  Action={ Block-AppUpdates } },
@@ -1229,6 +1228,9 @@ foreach ($phase in $script:GuardianSelectedPhases) {
 # v2 console: nao ha controle WPF nesta etapa.
 
         DoEvents
+
+        # Atualiza a atividade antes de executar a funcao, preservando o progresso ao final.
+        Send-GuardianLiveEvent -Type 'activity' -Label (Get-StepLabel $step.Name)
 
         # Executa o passo
         Invoke-GuardianStep -Title $step.Name -Action $step.Action
