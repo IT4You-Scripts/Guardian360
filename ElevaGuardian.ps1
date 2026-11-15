@@ -77,6 +77,8 @@ if (Test-Path $guardianJsonPath) {
 
 $BaseUrl  = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main/Functions/Update-GuardianFiles.ps1"
 $DestPath = "C:\Guardian\Functions\Update-GuardianFiles.ps1"
+# Garante a pasta do atualizador mesmo em uma instalacao nova.
+New-Item -ItemType Directory -Path (Split-Path -Parent $DestPath) -Force -ErrorAction Stop | Out-Null
 $NoCache  = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmss')"
 
 # Remove o arquivo antigo
@@ -156,7 +158,6 @@ $argsObj = @{
     PulaFases     = $PulaFases
     LogLevel      = $LogLevel
     Simulado      = [bool]$Simulado
-    DebugMode     = [bool]$PSBoundParameters.ContainsKey('Debug')
 }
 
 try {
@@ -178,7 +179,7 @@ if ($NonInteractive) { $argString += " -NonInteractive" }
 # -------------------------------
 # Configuração da janela
 # -------------------------------
-$winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } elseif ($PSBoundParameters.ContainsKey('Debug')) { 'Normal' } else { 'Hidden' }
+$winStyle = if ($NoWindow) { 'Hidden' } elseif ($Maximized) { 'Maximized' } else { 'Normal' }
 
 # -------------------------------
 # Log do comando final

@@ -776,7 +776,7 @@ function Send-GuardianLiveEvent {
 Test-AdminOrExit
 Initialize-Pwsh7
 Enable-QuickEditProtection
-Enable-ConsoleAppearance -ForceMaximize:$script:GuardianDebugMode
+Enable-ConsoleAppearance -ForceMaximize
 Clear-Host
 Show-Header -Text 'Guardian 360 v2.0'
 Initialize-GuardianLiveUI
