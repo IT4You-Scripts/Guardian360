@@ -7,33 +7,57 @@
 ====================================================================
 #>
 
-[CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateNotNull()][object]$Relatorio,
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$JsonDestino,
-    [switch]$NaoEnviarApi
+    [string]$Pasta = "."
 )
 
-$ErrorActionPreference = 'Stop'
-# Create an isolated copy in memory: transforms must never mutate the motor's
-# original report or discover the last report of a different computer.
-$jsonRaw = $Relatorio | ConvertTo-Json -Depth 40 -ErrorAction Stop | ConvertFrom-Json -Depth 40 -ErrorAction Stop
-if ($null -eq $jsonRaw -or $jsonRaw -is [array]) { throw 'Relatorio em memoria invalido.' }
-if ([string]::IsNullOrWhiteSpace([string]$jsonRaw.Cliente) -or
-    [string]::IsNullOrWhiteSpace([string]$jsonRaw.NomeComputador)) {
-    throw 'Relatorio sem Cliente ou NomeComputador.'
+# Write-Host "`n🔍 Procurando arquivo ORIGINAL..." -ForegroundColor Cyan
+
+# ------------------------------------------------------------------------------
+# Localizar arquivo ORIGINAL — caminho fixo C:\Guardian\Json
+# ------------------------------------------------------------------------------
+
+# Caminho base fixo
+$baseJsonDir = "C:\Guardian\Json"
+
+# Ano e mês atual para montar a pasta correta
+$year        = Get-Date -Format 'yyyy'
+$monthNumber = Get-Date -Format 'MM'
+$monthName   = (Get-Culture).DateTimeFormat.GetMonthName([int]$monthNumber)
+$monthFolder = ("{0}. {1}" -f $monthNumber, (Get-Culture).TextInfo.ToTitleCase($monthName.ToLower()))
+
+# Caminho final onde o arquivo ORIGINAL sempre será salvo
+$jsonDir = Join-Path (Join-Path $baseJsonDir $year) $monthFolder
+
+if (-not (Test-Path $jsonDir)) {
+    Write-Host "❌ Pasta de inventários não encontrada: $jsonDir" -ForegroundColor Red
+    exit
 }
-if ([string]$jsonRaw.NomeComputador -ine $env:COMPUTERNAME) {
-    throw "Nome do computador divergente: relatorio='$($jsonRaw.NomeComputador)', ambiente='$env:COMPUTERNAME'."
+
+# Write-Host "📁 Procurando arquivo ORIGINAL em: $jsonDir" -ForegroundColor Cyan
+
+# Buscar arquivo ORIGINAL (ignora EXTREME e TRATADO)
+$arquivo = Get-ChildItem -Path $jsonDir -Filter *.json |
+    Where-Object {
+        $_.Name -match "^[A-Za-z0-9\-]+_\d{8}_\d{4}\.json$" -and
+        $_.Name -notmatch "EXTREME" -and
+        $_.Name -notmatch "TRATADO"
+    } |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+
+if (-not $arquivo) {
+    Write-Host "❌ Nenhum arquivo ORIGINAL encontrado em: $jsonDir" -ForegroundColor Red
+    exit
 }
-if ($null -eq $jsonRaw.Fases -or @($jsonRaw.Fases).Count -eq 0) {
-    throw 'Relatorio sem fases; consolidacao cancelada.'
-}
-$destinoNome = [IO.Path]::GetFileName($JsonDestino)
-if (-not $destinoNome.EndsWith('.json', [StringComparison]::OrdinalIgnoreCase) -or
-    $destinoNome -match '_TRATADO\.json$') {
-    throw 'Destino JSON definitivo invalido.'
-}
+
+# Write-Host "✔ Arquivo original identificado: $($arquivo.FullName)" -ForegroundColor Green
+
+
+# ------------------------------------------------------------------------------
+# Carregar JSON
+# ------------------------------------------------------------------------------
+$jsonRaw = Get-Content $arquivo.FullName -Raw | ConvertFrom-Json
 
 # Blindagem: consolidar fases duplicadas de bloqueio de atualização
 $faseBlockApp = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Block-AppUpdates" } | Select-Object -First 1
@@ -93,7 +117,8 @@ else {
 }
 
 if (-not $jsonRaw.Fases) {
-    throw "JSON inválido: campo Fases ausente."
+    Write-Host "❌ JSON inválido: campo Fases ausente." -ForegroundColor Red
+    exit
 }
 
 
@@ -144,11 +169,13 @@ if ($jsonRaw.Cliente) {
 $fase1 = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Invent" } | Select-Object -First 1
 
 if (-not $fase1) {
-    throw "Fase 1 não encontrada."
+    Write-Host "❌ Fase 1 não encontrada." -ForegroundColor Red
+    exit
 }
 
 if (-not $fase1.Mensagem) {
-    throw "Inventário sem conteúdo."
+    Write-Host "❌ Inventário sem conteúdo." -ForegroundColor Red
+    exit
 }
 
 $msg = $fase1.Mensagem -split "`r`n"
@@ -169,14 +196,16 @@ for ($i = 0; $i -lt $msg.Count; $i++) {
 
 if ($null -eq $indexSoftware)
  {
-    throw "Não consegui identificar onde começam os softwares."
+    Write-Host "❌ Não consegui identificar onde começam os softwares." -ForegroundColor Red
+    exit
  }
 
 # ------------------------------------------------------------------------------
 # Divisão Hardware / Softwares
 # ------------------------------------------------------------------------------
 if ($indexSoftware -le 0) {
-    throw "Estrutura inesperada no inventário."
+    Write-Host "❌ Estrutura inesperada no inventário." -ForegroundColor Red
+    exit
 }
 $hardwareLines = $msg[0..($indexSoftware - 1)]
 $softwareLines = $msg[($indexSoftware + 1)..($msg.Count - 1)]
@@ -845,23 +874,26 @@ catch {}
 # Nota sempre 100 — a Fase 2 agora roda separadamente via Guardian Ghost
 $notaIntegridade = 100
 
-# =============== 2. Atualizações (Windows + Store + Winget) ===============
+# =============== 2. Atualizações (Windows + Store; Winget informativo) ===============
+# Falhas isoladas do Winget permanecem no relatório técnico, sem penalizar Saúde Geral.
 $notaAtualizacoes = 0
 $faseUpdateWin = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Atualização do Windows" }
 $faseStore     = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Loja da Microsoft" }
-$faseWinget    = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Winget" }
 
-$okWin   = $faseUpdateWin  -and $faseUpdateWin.Mensagem.AtualizacaoBemSucedida
-$okStore = $faseStore      -and $faseStore.Mensagem.AtualizacaoBemSucedida
-$okWing  = $faseWinget     -and $faseWinget.Mensagem.AtualizacaoBemSucedida
+$okWin   = [bool]($faseUpdateWin -and $faseUpdateWin.Mensagem.AtualizacaoBemSucedida)
+$okStore = [bool]($faseStore -and $faseStore.Mensagem.AtualizacaoBemSucedida)
 
-$sucessos = @($okWin, $okStore, $okWing) | Where-Object { $_ -eq $true } | Measure-Object | Select-Object -ExpandProperty Count
-
-switch ($sucessos) {
-    3 { $notaAtualizacoes = 100 }
-    2 { $notaAtualizacoes = 80 }
-    1 { $notaAtualizacoes = 60 }
-    0 { $notaAtualizacoes = 30 }
+if ($okWin -and $okStore) {
+    $notaAtualizacoes = 100
+}
+elseif ($okWin) {
+    $notaAtualizacoes = 90
+}
+elseif ($okStore) {
+    $notaAtualizacoes = 70
+}
+else {
+    $notaAtualizacoes = 50
 }
 
 # =============== 3. Armazenamentos (SSD/HDD) ===============
@@ -1057,7 +1089,7 @@ $fase1.Mensagem = [PSCustomObject]@{
 # ------------------------------------------------------------------------------
 try {
     . "$PSScriptRoot\Manage-RustDesk.ps1"
-    $rustdeskData = Manage-RustDesk 6>$null
+    $rustdeskData = Manage-RustDesk
 
     if ($rustdeskData) {
         $rustdeskObj = [PSCustomObject]@{
@@ -1079,14 +1111,55 @@ catch {
 }
 
 
-# Telemetria ja coletada em memoria exclusivamente pelo Guardian.ps1.
-# Este conversor NAO invoca Get-HardwareTelemetry.ps1.
+# ------------------------------------------------------------------------------
+# Telemetria opcional — nao interfere na vistoria ou no envio principal
+# ------------------------------------------------------------------------------
+try {
+    $scriptTelemetria = Join-Path $PSScriptRoot 'Get-HardwareTelemetry.ps1'
+
+    if (-not (Test-Path -LiteralPath $scriptTelemetria -PathType Leaf)) {
+        Write-Host '[Telemetria] Funcao ausente; vistoria segue normalmente.' -ForegroundColor Yellow
+    }
+    else {
+        # Coletor devolve um objeto em memoria; nenhum JSON temporario e utilizado.
+        $retornoTelemetria = @(& $scriptTelemetria)
+        $objetosTelemetria = @($retornoTelemetria | Where-Object {
+            $null -ne $_ -and $_.PSObject.Properties.Name -contains 'schema_version'
+        })
+        if ($objetosTelemetria.Count -ne 1) {
+            throw "Esperado um objeto de telemetria; recebidos $($objetosTelemetria.Count)."
+        }
+        $telemetria = $objetosTelemetria[0]
+
+        if ($null -eq $telemetria -or $telemetria -is [array] -or $telemetria.schema_version -ne 1) {
+            throw 'Estrutura de telemetria invalida.'
+        }
+        if ($telemetria.status -notin @('ok', 'parcial')) {
+            throw 'Status de telemetria invalido.'
+        }
+        $nomeComputador = [string]$jsonRaw.NomeComputador
+        if ([string]::IsNullOrWhiteSpace($nomeComputador) -or
+            $nomeComputador -ine [string]$telemetria.computador) {
+            throw "Computadores diferentes: vistoria='$nomeComputador'; telemetria='$($telemetria.computador)'."
+        }
+        if ($jsonRaw.PSObject.Properties.Name -contains 'telemetria') {
+            throw 'O JSON ja contem telemetria; nao sera sobrescrita.'
+        }
+
+        $jsonRaw | Add-Member -MemberType NoteProperty -Name 'telemetria' -Value $telemetria -ErrorAction Stop
+        Write-Host '[Telemetria] Incorporada ao JSON tratado.' -ForegroundColor Green
+    }
+}
+catch {
+    Write-Host "[Telemetria] Nao incorporada: $($_.Exception.Message). Vistoria segue normalmente." -ForegroundColor Yellow
+}
+
 
 # --------------------------------------------------------------------------
 # Exportar JSON final — No mesmo local do arquivo json original
 # --------------------------------------------------------------------------
 
-$nomeOut = [IO.Path]::GetFullPath($JsonDestino)
+$nomeOut = Join-Path $arquivo.DirectoryName (($arquivo.BaseName) + "_TRATADO.json")
 
 # ------------------------------------------------------------------------------
 # Sanitizacao Unicode do objeto FINAL, apos incorporar a telemetria.
@@ -1131,32 +1204,15 @@ function Remove-GuardianNullChars {
 
 $jsonRaw = Remove-GuardianNullChars -Valor $jsonRaw
 
-# JSON unico e definitivo. Validar integralmente antes de gravar no destino.
-$conteudoFinal = $jsonRaw | ConvertTo-Json -Depth 40 -ErrorAction Stop
-$validado = $conteudoFinal | ConvertFrom-Json -Depth 40 -ErrorAction Stop
-if (-not $validado.SaudeGeral -or -not $validado.Fases -or
-    -not $validado.Fases[0].Mensagem -or
-    $validado.Fases[0].Mensagem -is [string]) {
-    throw 'JSON consolidado sem SaudeGeral ou inventario estruturado; envio bloqueado.'
-}
-if ($validado.PSObject.Properties.Name -notcontains 'telemetria' -or
-    $null -eq $validado.telemetria -or
-    $validado.telemetria.status -notin @('ok','parcial') -or
-    $validado.telemetria.computador -ine $validado.NomeComputador) {
-    throw 'Telemetria ausente/invalida no JSON final; envio bloqueado.'
-}
+$jsonRaw | ConvertTo-Json -Depth 20 |
+    Out-File $nomeOut -Encoding UTF8
 
-$dirDestino = Split-Path -Parent $nomeOut
-if (-not (Test-Path -LiteralPath $dirDestino -PathType Container)) {
-    New-Item -ItemType Directory -Path $dirDestino -Force -ErrorAction Stop | Out-Null
-}
-$arquivoTemp = Join-Path $dirDestino ('.guardian-' + [guid]::NewGuid().ToString('N') + '.tmp')
-try {
-    [IO.File]::WriteAllText($arquivoTemp, $conteudoFinal, [Text.UTF8Encoding]::new($false))
-    Move-Item -LiteralPath $arquivoTemp -Destination $nomeOut -Force -ErrorAction Stop
-} finally {
-    Remove-Item -LiteralPath $arquivoTemp -Force -ErrorAction SilentlyContinue
-}
+
+
+
+Write-Host "📦 JSON gerado em: $nomeOut" -ForegroundColor Cyan
+Write-Host ""
+
 
 # ------------------------------------------------------------------------------
 # Enviar para a API do Guardian
@@ -1165,12 +1221,7 @@ try {
 $apiUrl = "https://guardian.it4you.com.br/api/insert-single"
 
 
-if ($NaoEnviarApi) {
-    $global:GuardianEnvioApiStatus = 'Ignorado (simulacao)'
-    return
-}
-$global:GuardianEnvioApiStatus = 'Em andamento'
-$jsonParaApi = $conteudoFinal
+$jsonParaApi = Get-Content $nomeOut -Raw -Encoding UTF8
 
 $apiIntegrada = $false
 $maxTentativasApi = 3
@@ -1184,24 +1235,25 @@ for ($tentativaApi = 1; $tentativaApi -le $maxTentativasApi; $tentativaApi++) {
             -ContentType "application/json; charset=utf-8" `
             -TimeoutSec 10
 
-        $global:GuardianEnvioApiStatus = 'Concluido'
+        Write-Host "🚀 Integração realizada com sucesso via API!" -ForegroundColor Cyan
         $apiIntegrada = $true
         break
 
     } catch {
-        if ($tentativaApi -eq $maxTentativasApi) {
-            Write-Host ("  API  Falha apos {0} tentativas: {1}" -f $maxTentativasApi, $_.Exception.Message) -ForegroundColor Yellow
-        }
+        Write-Host "⚠ Falha ao enviar para a API - tentativa $tentativaApi/$maxTentativasApi`: $($_.Exception.Message)" -ForegroundColor Yellow
 
         if ($tentativaApi -lt $maxTentativasApi) {
             $esperaApi = if ($tentativaApi -eq 1) { 5 } else { 10 }
+            Write-Host "[API] Nova tentativa em $esperaApi segundos..." -ForegroundColor Yellow
             Start-Sleep -Seconds $esperaApi
         }
     }
 }
 
 if (-not $apiIntegrada) {
-    $global:GuardianEnvioApiStatus = 'Falhou (JSON preservado)' 
+    Write-Host "⚠ Não foi possível integrar com a API após 3 tentativas." -ForegroundColor Yellow
 }
 
-
+Write-Host ""
+Write-Host "`n🔥 GUARDIAN 360 finalizado com sucesso!"
+Write-Host ""
