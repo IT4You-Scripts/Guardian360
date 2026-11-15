@@ -375,38 +375,6 @@ function Test-AdminOrExit {
   }
 }
 
-# Diretorio temporario neutro: evita acentos no caminho do perfil do Windows.
-# Cada instalacao utiliza uma subpasta exclusiva; nenhuma outra pasta do Guardian e apagada.
-function New-GuardianTempDirectory {
-  param([Parameter(Mandatory)][string]$Prefix)
-  $tempRoot = 'C:\Guardian\Temp'
-  New-Item -ItemType Directory -Path $tempRoot -Force -ErrorAction Stop | Out-Null
-  $workDir = Join-Path $tempRoot ('Guardian_' + $Prefix + '_' + [guid]::NewGuid().ToString('N'))
-  New-Item -ItemType Directory -Path $workDir -ErrorAction Stop | Out-Null
-  return $workDir
-}
-
-function Remove-GuardianTempDirectory {
-  param([string]$Path)
-  if ([string]::IsNullOrWhiteSpace($Path)) { return }
-  $tempRoot = 'C:\Guardian\Temp'
-  try {
-    $rootFull = [IO.Path]::GetFullPath($tempRoot).TrimEnd('\')
-    $folderFull = [IO.Path]::GetFullPath($Path).TrimEnd('\')
-    if (-not $folderFull.StartsWith($rootFull + '\', [StringComparison]::OrdinalIgnoreCase)) { return }
-    if (Test-Path -LiteralPath $folderFull) {
-      Remove-Item -LiteralPath $folderFull -Recurse -Force -ErrorAction Stop
-    }
-    # Remove somente C:\Guardian\Temp, e somente quando ela estiver vazia.
-    if (Test-Path -LiteralPath $tempRoot) {
-      $remaining = Get-ChildItem -LiteralPath $tempRoot -Force -ErrorAction Stop | Select-Object -First 1
-      if (-not $remaining) { Remove-Item -LiteralPath $tempRoot -Force -ErrorAction Stop }
-    }
-  } catch {
-    # Uma falha na limpeza nao invalida a manutencao.
-  }
-}
-
 function Initialize-Pwsh7 {
   if ($PSVersionTable.PSVersion.Major -ge 7) { return }
   Write-GuardianStatus 'PowerShell 7+ não detectado. Tentando instalação silenciosa...' 'INFO'
@@ -419,16 +387,13 @@ function Initialize-Pwsh7 {
   } catch { Write-GuardianStatus ("Falha com winget: {0}" -f $_.Exception.Message) 'WARN' }
 
   if (-not $installed) {
-    $diretorioPwsh = $null
     try {
-      $diretorioPwsh = New-GuardianTempDirectory -Prefix 'PowerShell7'
-      $msi = Join-Path $diretorioPwsh 'PowerShell7.msi'
+      $msi = Join-Path $env:TEMP 'PowerShell7.msi'
       $url = 'https://github.com/PowerShell/PowerShell/releases/latest/download/PowerShell-7.4.1-win-x64.msi'
       Invoke-WebRequest -Uri $url -OutFile $msi -UseBasicParsing
       Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet /norestart" -Wait
       $installed = $true
     } catch { Write-GuardianStatus ("Falha no download/instalação do MSI: {0}" -f $_.Exception.Message) 'WARN' }
-    finally { Remove-GuardianTempDirectory -Path $diretorioPwsh }
   }
 
   if ($installed) {
@@ -952,6 +917,73 @@ $hasHDD = ($hddList.Count -gt 0)
               }
               if ($info.ID) { break }
           }
+
+          # Fallback oficial para instalacoes sem ClientID no Registro.
+          # Instala TeamViewerPS sob demanda apenas quando o TeamViewer esta presente
+          # e nenhuma chave do Registro forneceu um ID. Sem prompt ou Write-Log.
+          if (-not $info.ID) {
+              try {
+                  $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
+                  if (-not $teamViewerCmd) {
+                      try {
+                          Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
+                      } catch { }
+                      $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
+                  }
+                  if (-not $teamViewerCmd -and (Get-Command -Name 'Install-Module' -ErrorAction SilentlyContinue)) {
+                      # AllUsers e compartilhado entre administradores, usuarios e SYSTEM.
+                      # Sem elevacao, usa CurrentUser em vez de falhar por permissao.
+                      $scope = 'CurrentUser'
+                      try {
+                          $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+                          if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+                              $scope = 'AllUsers'
+                          }
+                      } catch { }
+
+                      # Instalacao isolada e limitada a 60 s; nunca aguarda interacao.
+                      $installJob = $null
+                      try {
+                          $installJob = Start-Job -ScriptBlock {
+                              param([string]$InstallScope)
+                              $ProgressPreference = 'SilentlyContinue'
+                              $WarningPreference = 'SilentlyContinue'
+                              $InformationPreference = 'SilentlyContinue'
+                              $ConfirmPreference = 'None'
+                              $ErrorActionPreference = 'Stop'
+                              Install-Module -Name 'TeamViewerPS' -Scope $InstallScope -Repository 'PSGallery' -Force -AllowClobber -Confirm:$false -ErrorAction Stop *> $null
+                          } -ArgumentList $scope -ErrorAction Stop
+                          $finished = Wait-Job -Job $installJob -Timeout 60 -ErrorAction SilentlyContinue
+                          if ($finished) {
+                              Receive-Job -Job $installJob -ErrorAction Stop *> $null
+                          } else {
+                              Stop-Job -Job $installJob -ErrorAction SilentlyContinue
+                          }
+                      } catch {
+                          # Galeria indisponivel: nao comprometer a vistoria.
+                      } finally {
+                          if ($installJob) {
+                              Remove-Job -Job $installJob -Force -ErrorAction SilentlyContinue
+                          }
+                      }
+
+                      try {
+                          Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
+                      } catch { }
+                      $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
+                  }
+                  if ($teamViewerCmd) {
+                      $moduleId = Get-TeamViewerId -ErrorAction Stop 6>$null
+                      $id = ([string]$moduleId).Trim()
+                      if ($id -match '^[0-9]+$' -and $id -ne '0') {
+                          $info.ID = $id
+                          $info.Status = 'OK'
+                      }
+                  }
+              } catch {
+                  # Sem identificador: prosseguir com IDIndisponivel, sem interromper o Guardian.
+              }
+          }
       } catch {
           $info.Status = 'ErroLeitura'
       }
@@ -1118,10 +1150,10 @@ function Install-GuardianOptionalProgram {
         $argumentos = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-'
     }
 
-    $diretorio = $null
+    $diretorio = Join-Path ([IO.Path]::GetTempPath()) ('Guardian_OptionalApps_' + [guid]::NewGuid().ToString('N'))
+    $instalador = Join-Path $diretorio ($Programa.Replace('-','') + '.exe')
     try {
-        $diretorio = New-GuardianTempDirectory -Prefix 'OptionalApps'
-        $instalador = Join-Path $diretorio ($Programa.Replace('-','') + '.exe')
+        New-Item -ItemType Directory -Path $diretorio -Force -ErrorAction Stop | Out-Null
         Write-GuardianStatus ("{0}: ausente; baixando instalador oficial." -f $Programa) 'INFO'
         Invoke-WebRequest -Uri $url -OutFile $instalador -MaximumRedirection 5 -TimeoutSec 90 -ErrorAction Stop
         $arquivo = Get-Item -LiteralPath $instalador -ErrorAction Stop
@@ -1163,7 +1195,7 @@ function Install-GuardianOptionalProgram {
     } catch {
         Write-GuardianStatus ("{0}: falha na preparacao: {1}. Guardian prossegue." -f $Programa, $_.Exception.Message) 'WARN'
     } finally {
-        Remove-GuardianTempDirectory -Path $diretorio
+        try { Remove-Item -LiteralPath $diretorio -Recurse -Force -ErrorAction SilentlyContinue } catch { }
     }
 }
 
@@ -1208,10 +1240,10 @@ foreach ($phase in $script:GuardianSelectedPhases) {
             try {
                 $cpuInfo = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
                 $csInfo = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
-                $gpuInfo = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -First 1
+                $gpuInfo = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '^\s*USB Mobile Monitor Virtual Display\s*$' } | Select-Object -First 1
                 $partition = Get-Partition -DriveLetter ($env:SystemDrive.TrimEnd(':')) -ErrorAction SilentlyContinue
                 $osDisk = if ($partition) { $partition | Get-Disk -ErrorAction SilentlyContinue }
-                $driveText = if ($osDisk) { '{0} · {1:N0} GB' -f $osDisk.FriendlyName, ($osDisk.Size / 1GB) } else { 'Não identificado' }
+                $driveText = if ($osDisk) { '{0} · {1:N0} GB' -f ([string]$osDisk.FriendlyName -replace '^\s*ATA\s+', ''), ($osDisk.Size / 1GB) } else { 'Não identificado' }
                 $ramText = if ($csInfo.TotalPhysicalMemory) { '{0:N0} GB' -f [Math]::Round(($csInfo.TotalPhysicalMemory / 1GB), 0, [MidpointRounding]::AwayFromZero) } else { 'Não disponível' }
                 $osInfo = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
                 $displayVersion = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue).DisplayVersion
@@ -1480,6 +1512,8 @@ catch {
     }
     # Dados complementares são enviados exclusivamente à WPF a partir do JSON consolidado.
     $uiHealth.duration = Format-Elapsed $scriptStart.Elapsed
+    # Apenas a LiveUI recebe os IDs ignorados; nao altera o JSON final nem a API.
+    $uiHealth.skippedPhases = @($PulaFases)
     if ($resumoJsonOk -and $null -ne $finalReport -and $finalReport.PSObject.Properties.Name -contains 'telemetria' -and $null -ne $finalReport.telemetria -and $null -ne $finalReport.telemetria.eventos_windows) {
         $ev = $finalReport.telemetria.eventos_windows
         function Convert-GuardianEventTotal {
