@@ -156,7 +156,7 @@ function Get-GuardianBitmapImage {
           <ColumnDefinition x:Name="RobotGapColumn" Width="26"/>
           <ColumnDefinition x:Name="RobotColumn" Width="250"/>
         </Grid.ColumnDefinitions>
-        <Border x:Name="MainCard" Grid.Column="0" BorderBrush="#26363B" BorderThickness="1" CornerRadius="12" Background="#101719" Padding="24">
+        <Border x:Name="MainCard" Grid.Column="0" BorderBrush="#26363B" BorderThickness="1" CornerRadius="12" Background="#E6101719" Padding="24">
           <Border.RenderTransform><TranslateTransform Y="8"/></Border.RenderTransform>
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False" Padding="0,0,12,0">
             <ScrollViewer.Resources>
