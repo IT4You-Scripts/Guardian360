@@ -776,7 +776,17 @@ function Send-GuardianLiveEvent {
 Test-AdminOrExit
 Initialize-Pwsh7
 Enable-QuickEditProtection
-Enable-ConsoleAppearance -ForceMaximize
+# Garantia adicional: nao reexibir o console em execucao normal.
+# A classe Win32.ConsoleWindow ja foi definida no bloco de aparencia acima.
+if (-not $script:GuardianDebugMode) {
+    try {
+        $guardianConsole = [Win32.ConsoleWindow]::GetConsoleWindow()
+        if ($guardianConsole -ne [IntPtr]::Zero) {
+            [void][Win32.ConsoleWindow]::ShowWindow($guardianConsole, 0)
+        }
+    } catch { }
+}
+Enable-ConsoleAppearance -ForceMaximize:$script:GuardianDebugMode
 Clear-Host
 Show-Header -Text 'Guardian 360 v2.0'
 Initialize-GuardianLiveUI

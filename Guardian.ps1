@@ -1520,6 +1520,95 @@ catch {
                     classification = [string]$finalReport.SaudeGeral.Classificacao
                 }
             }
+            # Notas parciais ja consolidadas no JSON final: somente para exibicao na LiveUI.
+            # Nenhum recalculo, persistencia ou alteracao na API.
+            if ($null -ne $finalReport.SaudeGeral.Detalhes) {
+                $uiHealth.breakdown = $finalReport.SaudeGeral.Detalhes
+            }
+            # Justificativas APENAS para a LiveUI, sem recalcular notas ou alterar o JSON/API.
+            # Derivadas dos mesmos campos utilizados pelo Optimize-JsonReport.ps1.
+            try {
+                $scoreReasons = @{}
+                $scoreDetails = $finalReport.SaudeGeral.Detalhes
+                $scorePhases = @($finalReport.Fases)
+                $inventory = @($scorePhases | Where-Object { $_.Phase -match 'Coleta do Inventário' } | Select-Object -First 1)
+                $inventoryData = if ($inventory.Count -gt 0) { $inventory[0].Mensagem } else { $null }
+
+                # Atualizacoes: explicacao ao cliente sem expor falhas pontuais do Winget.
+                # Preserva o resultado real de Windows Update e informa a gestao automatica da Loja.
+                $winUpdate = @($scorePhases | Where-Object { $_.Phase -match 'Atualização do Windows' } | Select-Object -First 1)
+                if ($winUpdate.Count -eq 0) {
+                    $windowsUpdateReason = 'Windows Update: sem execução registrada.'
+                } elseif ($winUpdate[0].Mensagem -isnot [string] -and
+                          $winUpdate[0].Mensagem.AtualizacaoBemSucedida -eq $true) {
+                    $windowsUpdateReason = 'Windows Update: atualização concluída com sucesso.'
+                } else {
+                    $windowsUpdateReason = 'Windows Update: conclusão da atualização não confirmada.'
+                }
+                $scoreReasons.Atualizacoes = $windowsUpdateReason + ' Aplicativos da Microsoft Store: atualizações gerenciadas automaticamente pelo Windows.'
+
+                # Particoes: identificar a unidade responsável pelo desconto.
+                $parts = @($inventoryData.Particoes | Where-Object { $null -ne $_.UsadoPct } |
+                    Sort-Object -Property @{ Expression = { [double]$_.UsadoPct }; Descending = $true })
+                if ($parts.Count -gt 0) {
+                    $worst = $parts[0]
+                    $scoreReasons.Particoes = ('Unidade {0}: {1:N1}% do espaço utilizado.' -f [string]$worst.Letra, [double]$worst.UsadoPct)
+                } else { $scoreReasons.Particoes = 'Dados de ocupação das partições não disponíveis.' }
+
+                # Atualmente essas duas notas são fixas no cálculo. Não atribuir análises inexistentes.
+                $scoreReasons.IntegridadeSistema = 'Integridade acompanhada por procedimentos automáticos do Guardian Ghost.'
+                # A descricao confirma somente etapas de limpeza registradas como concluidas.
+                $cleanPhases = @($scorePhases | Where-Object { $_.Phase -match 'Limpeza das pastas temporárias|Limpeza dos arquivos temporários dos componentes do Windows' })
+                $cleanOK = @($cleanPhases | Where-Object { $_.Status -eq 'OK' -and (
+                    ($_.Mensagem -is [string] -and $_.Mensagem -match 'concluíd|limp|removid') -or
+                    ($_.Mensagem -isnot [string] -and ($_.Mensagem.LimpezaBemSucedida -eq $true))
+                ) })
+                if ($cleanOK.Count -gt 0) {
+                    $scoreReasons.Limpezas = 'Arquivos temporários e resíduos do sistema removidos durante a manutenção preventiva.'
+                } elseif ($cleanPhases.Count -gt 0) {
+                    $scoreReasons.Limpezas = 'Resultado das rotinas de limpeza não confirmado nesta vistoria.'
+                } else {
+                    $scoreReasons.Limpezas = 'Rotinas de limpeza sem execução registrada nesta vistoria.'
+                }
+
+                # Backup Macrium: somente motivos verificáveis a partir do inventário.
+                $backupData = $inventoryData.BackupMacrium
+                if ($null -eq $backupData) {
+                    $scoreReasons.Backup = 'Informações do backup não disponíveis no inventário.'
+                } elseif ($backupData.ExisteParticaoD -ne $true) {
+                    $scoreReasons.Backup = 'Partição D: exigida pela regra de backup não identificada.'
+                } elseif ($backupData.ExistePastaRescue -ne $true) {
+                    $scoreReasons.Backup = 'Pasta Rescue não identificada na partição D:.'
+                } elseif ($backupData.ExistemImagens -ne $true) {
+                    $scoreReasons.Backup = 'Nenhuma imagem de backup Macrium foi identificada.'
+                } elseif ($backupData.DataImagem1) {
+                    $backupDays = ([datetime]::Now - [datetime]$backupData.DataImagem1).Days
+                    $scoreReasons.Backup = ('Imagem de backup mais recente: {0} dia(s).' -f [Math]::Max(0,$backupDays))
+                } else { $scoreReasons.Backup = 'Data da imagem de backup não disponível.' }
+
+                # Rede: mesmo critério de preferência utilizado na pontuação.
+                $nets = @($inventoryData.Redes | Where-Object { $null -ne $_ })
+                $net = $nets | Where-Object { $_.Adaptador -eq 'Ethernet' } | Select-Object -First 1
+                if (-not $net) { $net = $nets | Where-Object { $_.Adaptador -eq 'Wi-Fi' } | Select-Object -First 1 }
+                if (-not $net) { $net = $nets | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1 }
+                if ($net) {
+                    $scoreReasons.Rede = ('Adaptador {0}: {1}; velocidade {2}.' -f [string]$net.Adaptador,
+                        [string]$net.Status, $(if ($net.Velocidade) { [string]$net.Velocidade } else { 'não informada' }))
+                } else { $scoreReasons.Rede = 'Nenhum adaptador elegível identificado na avaliação.' }
+
+                # Segurança: não confundir ausência de confirmação com malware detectado.
+                $defenderPhase = @($scorePhases | Where-Object { $_.Phase -match 'Windows Defender' } | Select-Object -First 1)
+                if ($defenderPhase.Count -eq 0) {
+                    $scoreReasons.Seguranca = 'Varredura do Windows Defender sem execução registrada.'
+                } elseif ($defenderPhase[0].Mensagem -isnot [string] -and
+                    $defenderPhase[0].Mensagem.ScanBemSucedido -eq $true) {
+                    $scoreReasons.Seguranca = 'Varredura do Windows Defender concluída com sucesso.'
+                } else {
+                    $scoreReasons.Seguranca = 'Conclusão da varredura do Windows Defender não confirmada.'
+                }
+
+                $uiHealth.scoreReasons = $scoreReasons
+            } catch { } # Justificativas opcionais nunca bloqueiam a conclusao do Guardian.
         } catch { } # A ausencia da nota nao muda o resultado da manutencao.
     }
     # Dados complementares são enviados exclusivamente à WPF a partir do JSON consolidado.

@@ -523,11 +523,16 @@ $timer.Add_Tick({
                         }
                         'phase' {
                             $phaseText.Text = [string]$message.label
+                            $activityText.Text = 'Preparando atividades desta etapa...'
                             $progress.Value = [int]$message.percent
                             if ($robotExecImage) { $robotImage.Source = $robotExecImage; Update-RobotLayout }
                         }
-                        'step'  {
-                            $activityText.Text = ([string]$message.label -replace '-', ' ')
+                        'activity' {
+                            $activityText.Text = [string]$message.label
+                        }
+                        'step' {
+                            # A atividade ja foi anunciada antes da execucao.
+                            # Aqui apenas atualizamos o progresso da tarefa concluida.
                             $progress.Value = [int]$message.percent
                         }
                         'complete' {

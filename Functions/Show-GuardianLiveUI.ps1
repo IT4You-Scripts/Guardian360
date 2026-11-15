@@ -236,10 +236,10 @@ function Get-GuardianBitmapImage {
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                  <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,12"><TextBlock Text="FALHAS DE HARDWARE (WHEA)" FontSize="9" Foreground="#78939C"/><TextBlock x:Name="WheaValue" Text="Não disponível" Foreground="#E8F0F2" FontSize="12"/></StackPanel>
-                  <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,12"><TextBlock Text="TELAS AZUIS (BSOD)" FontSize="9" Foreground="#78939C"/><TextBlock x:Name="BsodValue" Text="Não disponível" Foreground="#E8F0F2" FontSize="12"/></StackPanel>
-                  <StackPanel Grid.Row="1" Grid.Column="0"><TextBlock Text="DESLIGAMENTOS INESPERADOS" FontSize="9" Foreground="#78939C" TextWrapping="Wrap"/><TextBlock x:Name="ShutdownValue" Text="Não disponível" Foreground="#E8F0F2" FontSize="12"/></StackPanel>
-                  <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="ERROS DE DISCO" FontSize="9" Foreground="#78939C"/><TextBlock x:Name="DiskEventsValue" Text="Não disponível" Foreground="#E8F0F2" FontSize="12"/></StackPanel>
+                  <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,20"><TextBlock Text="FALHAS DE HARDWARE (WHEA)" FontSize="9" Foreground="#78939C"/><TextBlock x:Name="WheaValue" Text="Não disponível" Foreground="#E8F0F2" FontSize="12"/><TextBlock x:Name="WheaDescription" FontSize="10" Foreground="#B8C9CF" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel>
+                  <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,20"><TextBlock Text="TELAS AZUIS (BSOD)" FontSize="9" Foreground="#78939C"/><TextBlock x:Name="BsodValue" Text="Não disponível" Foreground="#E8F0F2" FontSize="12"/><TextBlock x:Name="BsodDescription" FontSize="10" Foreground="#B8C9CF" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel>
+                  <StackPanel Grid.Row="1" Grid.Column="0"><TextBlock Text="DESLIGAMENTOS INESPERADOS" FontSize="9" Foreground="#78939C" TextWrapping="Wrap"/><TextBlock x:Name="ShutdownValue" Text="Não disponível" Foreground="#E8F0F2" FontSize="12"/><TextBlock x:Name="ShutdownDescription" FontSize="10" Foreground="#B8C9CF" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel>
+                  <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="ERROS DE DISCO" FontSize="9" Foreground="#78939C"/><TextBlock x:Name="DiskEventsValue" Text="Não disponível" Foreground="#E8F0F2" FontSize="12"/><TextBlock x:Name="DiskEventsDescription" FontSize="10" Foreground="#B8C9CF" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel>
                 </Grid>
               </StackPanel>
               <StackPanel x:Name="DurationPanel" Visibility="Collapsed" Margin="0,20,0,0">
@@ -257,7 +257,15 @@ function Get-GuardianBitmapImage {
                 </StackPanel>
                 </Grid>
               </StackPanel>
-              <Grid x:Name="HealthPanel" Visibility="Collapsed" Margin="0,16,0,0">
+              <StackPanel x:Name="ScoreBreakdownPanel" Visibility="Collapsed" Margin="0,18,0,0">
+                <Border Height="1" Background="#28383D" Margin="0,0,0,12"/>
+                <TextBlock Text="COMPOSIÇÃO DA SAÚDE GERAL" FontSize="10" Foreground="#64D5EB" FontWeight="SemiBold" Margin="0,0,0,13"/>
+                <StackPanel x:Name="ScoreBreakdownRows"/>
+              </StackPanel>
+              <TextBlock x:Name="EndText" Text="" FontSize="12" Foreground="#FF00FF00" Margin="0,12,0,0" TextWrapping="Wrap"/>
+              <StackPanel x:Name="HealthPanel" Visibility="Collapsed" Margin="0,16,0,0">
+                <Border Height="1" Background="#28383D" Margin="0,0,0,12"/>
+              <Grid Margin="0,0,0,0">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center"><TextBlock Text="SAÚDE GERAL DO SISTEMA" FontSize="10" Foreground="#78939C"/><TextBlock x:Name="HealthClass" Text="" FontSize="13" Foreground="#E8F0F2"/></StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,8,0">
@@ -265,7 +273,7 @@ function Get-GuardianBitmapImage {
                   <TextBlock x:Name="HealthScore" Text="" Foreground="#61E3A7" FontSize="30" FontWeight="SemiBold" VerticalAlignment="Bottom"/>
                 </StackPanel>
               </Grid>
-              <TextBlock x:Name="EndText" Text="" FontSize="12" Foreground="#FF00FF00" Margin="0,12,0,0" TextWrapping="Wrap"/>
+              </StackPanel>
 
             </StackPanel>
           </ScrollViewer>
@@ -392,12 +400,18 @@ $gpuValue = $window.FindName('GpuValue')
 $storageValue = $window.FindName('StorageValue')
 $healthScore = $window.FindName('HealthScore')
 $healthClass = $window.FindName('HealthClass')
+$scoreBreakdownPanel = $window.FindName('ScoreBreakdownPanel')
+$scoreBreakdownRows = $window.FindName('ScoreBreakdownRows')
 $osValue = $window.FindName('OsValue')
 $eventsPanel = $window.FindName('EventsPanel')
 $wheaValue = $window.FindName('WheaValue')
 $bsodValue = $window.FindName('BsodValue')
 $shutdownValue = $window.FindName('ShutdownValue')
 $diskEventsValue = $window.FindName('DiskEventsValue')
+$wheaDescription = $window.FindName('WheaDescription')
+$bsodDescription = $window.FindName('BsodDescription')
+$shutdownDescription = $window.FindName('ShutdownDescription')
+$diskEventsDescription = $window.FindName('DiskEventsDescription')
 $durationPanel = $window.FindName('DurationPanel')
 $durationValue = $window.FindName('DurationValue')
 $skippedPhasesValue = $window.FindName('SkippedPhasesValue')
@@ -461,6 +475,18 @@ $script:UiStarted = Get-Date
 $window.Add_Closing({ param($sender,$args) if (-not $script:Finished) { $args.Cancel = $true } })
 $finishButton.Add_Click({ if ($script:Finished) { $window.Close() } })
 
+# Cor da Nota Geral: variacao visual independente da classificacao e da formula.
+function Set-GuardianHealthScoreColor {
+    param([double]$Score)
+    $color = if ($Score -lt 50) { '#EB7777' }
+             elseif ($Score -le 70) { '#F0A35B' }
+             elseif ($Score -le 90) { '#E8CD69' }
+             else { '#62DDA5' }
+    $brush = [System.Windows.Media.BrushConverter]::new().ConvertFromString($color)
+    $healthScore.Foreground = $brush
+    $healthClass.Foreground = $brush
+}
+
 if ($Preview) {
     $script:Finished = $true
     $headline.Text = 'Seu computador está pronto!'
@@ -471,6 +497,7 @@ if ($Preview) {
     $endText.Text = ''
     $healthPanel.Visibility = [System.Windows.Visibility]::Visible
     $healthScore.Text = '86'
+    Set-GuardianHealthScoreColor -Score 86
     $healthClass.Text = 'Boa (exemplo de prévia)'
     $progress.Value = 100
     $percentText.Text = '100%'
@@ -480,7 +507,118 @@ if ($Preview) {
     [void]$window.ShowDialog()
     return
 }
+# Apenas apresentacao dos eventos ja coletados: nao altera a telemetria nem a nota.
+function Set-GuardianEventDisplay {
+    param($CountValue, $CountText, $DescriptionText)
+    $total = 0
+    if ($null -eq $CountValue -or -not [int]::TryParse(([string]$CountValue).Trim(), [ref]$total) -or $total -lt 0) {
+        $CountText.Text = 'Não disponível'
+        $CountText.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E8F0F2')
+        $DescriptionText.Text = 'Dados não disponíveis.'
+        return
+    }
+    $CountText.Text = [string]$total
+    if ($total -eq 0) {
+        $color = '#6FE2AE'
+        $reason = 'Nenhuma ocorrência registrada.'
+    } elseif ($total -le 10) {
+        $color = '#E5CE79'
+        $reason = 'Ocorrências registradas para acompanhamento.'
+    } elseif ($total -le 50) {
+        $color = '#EBA56D'
+        $reason = 'Volume elevado de registros. Sujeito à avaliação técnica.'
+    }
+    else {
+        $color = '#EB7777'
+        $reason = 'Volume muito elevado de registros. Sujeito à avaliação técnica.'
+    }
+    $CountText.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString($color)
+    $DescriptionText.Text = $reason
+}
+
 # Uma janela independente, com listener restrito exclusivamente a localhost.
+# Mostra apenas os indicadores que ja vieram do JSON final, sem calcular pontuacoes.
+function Show-GuardianScoreBreakdown {
+    param($Details, $Reasons)
+    if ($null -eq $Details) { return }
+    $items = @(
+        @{ Key = 'Atualizacoes'; Label = 'Atualizações' },
+        @{ Key = 'Particoes'; Label = 'Espaço Livre' },
+        @{ Key = 'IntegridadeSistema'; Label = 'Integridade do Sistema' },
+        @{ Key = 'Limpezas'; Label = 'Limpezas' },
+        @{ Key = 'Backup'; Label = 'MACRIUM REFLECT' },
+        @{ Key = 'Rede'; Label = 'Rede' },
+        @{ Key = 'Seguranca'; Label = 'Windows Defender' }
+    )
+    $scoreBreakdownRows.Children.Clear()
+    foreach ($item in $items) {
+        $property = $Details.PSObject.Properties[$item.Key]
+        if ($null -eq $property -or $null -eq $property.Value) { continue }
+        $value = 0.0
+        if (-not [double]::TryParse([string]$property.Value, [ref]$value)) { continue }
+        $value = [Math]::Max(0, [Math]::Min(100, $value))
+        $color = if ($value -ge 90) { '#62DDA5' } elseif ($value -ge 75) { '#E8CD69' } elseif ($value -ge 50) { '#F0A35B' } else { '#EB7777' }
+        $brush = [System.Windows.Media.BrushConverter]::new().ConvertFromString($color)
+
+        $row = [System.Windows.Controls.StackPanel]::new()
+        $row.Margin = [System.Windows.Thickness]::new(0,0,0,12)
+        $line = [System.Windows.Controls.Grid]::new()
+        [void]$line.ColumnDefinitions.Add([System.Windows.Controls.ColumnDefinition]::new())
+        $numCol = [System.Windows.Controls.ColumnDefinition]::new()
+        $numCol.Width = [System.Windows.GridLength]::Auto
+        [void]$line.ColumnDefinitions.Add($numCol)
+
+        $label = [System.Windows.Controls.TextBlock]::new()
+        $label.Text = [string]$item.Label
+        $label.FontSize = 11
+        $label.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E8F0F2')
+        [void]$line.Children.Add($label)
+
+        $number = [System.Windows.Controls.TextBlock]::new()
+        $number.Text = ('{0}/100' -f ([Math]::Round($value,0)))
+        $number.FontSize = 11
+        $number.FontWeight = [System.Windows.FontWeights]::SemiBold
+        $number.Foreground = $brush
+        $number.Margin = [System.Windows.Thickness]::new(8,0,0,0)
+        [System.Windows.Controls.Grid]::SetColumn($number,1)
+        [void]$line.Children.Add($number)
+        [void]$row.Children.Add($line)
+
+        $bar = [System.Windows.Controls.ProgressBar]::new()
+        $bar.Minimum = 0
+        $bar.Maximum = 100
+        $bar.Value = $value
+        $bar.Height = 6
+        $bar.Foreground = $brush
+        $bar.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#2A3940')
+        $bar.BorderThickness = [System.Windows.Thickness]::new(0)
+        $bar.Margin = [System.Windows.Thickness]::new(0,5,0,0)
+        [void]$row.Children.Add($bar)
+
+        # Explicacao recebida dos dados reais da vistoria, sem inferir pela nota.
+        $explanation = $null
+        if ($null -ne $Reasons) {
+            $reasonProp = $Reasons.PSObject.Properties[$item.Key]
+            if ($null -ne $reasonProp -and -not [string]::IsNullOrWhiteSpace([string]$reasonProp.Value)) {
+                $explanation = [string]$reasonProp.Value
+            }
+        }
+        if ($explanation) {
+            $detailText = [System.Windows.Controls.TextBlock]::new()
+            $detailText.Text = $explanation
+            $detailText.FontSize = 10
+            $detailText.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#AABFC7')
+            $detailText.TextWrapping = [System.Windows.TextWrapping]::Wrap
+            $detailText.Margin = [System.Windows.Thickness]::new(0,5,0,0)
+            [void]$row.Children.Add($detailText)
+        }
+        [void]$scoreBreakdownRows.Children.Add($row)
+    }
+    if ($scoreBreakdownRows.Children.Count -gt 0) {
+        $scoreBreakdownPanel.Visibility = [System.Windows.Visibility]::Visible
+    }
+}
+
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback,$Port)
 $listener.Start()
 $timer = [System.Windows.Threading.DispatcherTimer]::new()
@@ -557,17 +695,21 @@ $timer.Add_Tick({
                                 }
                                 $durationPanel.Visibility = [System.Windows.Visibility]::Visible
                                 if ($null -ne $message.data.events) {
-                                    $wheaValue.Text = [string]$message.data.events.whea
-                                    $bsodValue.Text = [string]$message.data.events.bsod
-                                    $shutdownValue.Text = [string]$message.data.events.shutdown
-                                    $diskEventsValue.Text = [string]$message.data.events.disk
+                                     Set-GuardianEventDisplay $message.data.events.whea $wheaValue $wheaDescription
+                                     Set-GuardianEventDisplay $message.data.events.bsod $bsodValue $bsodDescription
+                                     Set-GuardianEventDisplay $message.data.events.shutdown $shutdownValue $shutdownDescription
+                                     Set-GuardianEventDisplay $message.data.events.disk $diskEventsValue $diskEventsDescription
                                     $eventsPanel.Visibility = [System.Windows.Visibility]::Visible
                                 }
                             }
                             if ($null -ne $message.data -and $null -ne $message.data.score) {
                                 $healthScore.Text = ('{0}' -f [int]$message.data.score)
+                                Set-GuardianHealthScoreColor -Score ([double]$message.data.score)
                                 $healthClass.Text = [string]$message.data.classification
                                 $healthPanel.Visibility = [System.Windows.Visibility]::Visible
+                                if ($null -ne $message.data.breakdown) {
+                                    Show-GuardianScoreBreakdown -Details $message.data.breakdown -Reasons $message.data.scoreReasons
+                                }
                             }
                             switch ([string]$message.status) {
                                 'ok' {

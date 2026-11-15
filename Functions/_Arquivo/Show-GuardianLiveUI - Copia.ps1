@@ -104,11 +104,11 @@ function Get-GuardianBitmapImage {
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        WindowStyle="None" AllowsTransparency="False" ResizeMode="CanMinimize"
+        WindowStyle="None" AllowsTransparency="True" ResizeMode="CanMinimize"
         Width="1050" Height="600" MinWidth="560" MinHeight="390"
-        Background="#000000" Foreground="#F4F6F8" WindowStartupLocation="Manual"
+        Background="Transparent" Foreground="#F4F6F8" WindowStartupLocation="Manual"
         FontFamily="Segoe UI" Title="Guardian 360 v2.0" ShowInTaskbar="True">
-  <Border BorderBrush="#29383E" BorderThickness="1" CornerRadius="10" Background="#000000">
+  <Border x:Name="RootSurface" BorderBrush="#29383E" BorderThickness="1" CornerRadius="12" Background="#000000">
     <Grid>
       <Grid.RowDefinitions>
         <RowDefinition Height="47"/>
@@ -117,7 +117,7 @@ function Get-GuardianBitmapImage {
         <RowDefinition Height="76"/>
       </Grid.RowDefinitions>
 
-      <Border Grid.Row="0" Background="#11181B" BorderBrush="#263237" BorderThickness="0,0,0,1">
+      <Border Grid.Row="0" Background="Transparent" BorderBrush="#263237" BorderThickness="0,0,0,1" CornerRadius="11,11,0,0">
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="44"/></Grid.ColumnDefinitions>
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="22,0,0,0">
@@ -128,7 +128,7 @@ function Get-GuardianBitmapImage {
           <Button x:Name="MinButton" Grid.Column="1" Height="30" BorderThickness="0" Background="Transparent" Cursor="Hand" ToolTip="Minimizar">
             <Button.Template>
               <ControlTemplate TargetType="{x:Type Button}">
-                <Border x:Name="MinSurface" Background="Transparent" SnapsToDevicePixels="True">
+                <Border x:Name="MinSurface" Background="Transparent" CornerRadius="0,10,0,0" SnapsToDevicePixels="True">
                   <Grid>
                     <Path Data="M 0,0 L 9,0" Stroke="#D6E4EA" StrokeThickness="1" Width="9" Height="1" Stretch="None" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                   </Grid>
@@ -147,14 +147,8 @@ function Get-GuardianBitmapImage {
         </Grid>
       </Border>
 
-      <!-- Banner oficial fixo, no topo da área principal, abaixo da barra de título.
-           Mantido nas telas de execução e conclusão. -->
-      <Border Grid.Row="1" Margin="34,8,34,8" Background="#000000" ClipToBounds="True">
-        <Image x:Name="HeaderBackground" HorizontalAlignment="Center"
-               VerticalAlignment="Center" Stretch="Uniform"
-               StretchDirection="DownOnly" SnapsToDevicePixels="True"
-               RenderOptions.BitmapScalingMode="HighQuality"/>
-      </Border>
+      <!-- Área superior preservada; bg.png agora pertence ao fundo da janela inteira. -->
+      <Border Grid.Row="1" Margin="34,8,34,8" Background="Transparent"/>
 
       <Grid Grid.Row="2" Margin="34,0,34,10">
         <Grid.ColumnDefinitions>
@@ -162,7 +156,7 @@ function Get-GuardianBitmapImage {
           <ColumnDefinition x:Name="RobotGapColumn" Width="26"/>
           <ColumnDefinition x:Name="RobotColumn" Width="250"/>
         </Grid.ColumnDefinitions>
-        <Border x:Name="MainCard" Grid.Column="0" BorderBrush="#26363B" BorderThickness="1" CornerRadius="12" Background="#101719" Padding="24">
+        <Border x:Name="MainCard" Grid.Column="0" BorderBrush="#26363B" BorderThickness="1" CornerRadius="12" Background="#CC101719" Padding="24">
           <Border.RenderTransform><TranslateTransform Y="8"/></Border.RenderTransform>
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False" Padding="0,0,12,0">
             <ScrollViewer.Resources>
@@ -217,6 +211,7 @@ function Get-GuardianBitmapImage {
               <TextBlock x:Name="ActivityText" Text="Inicializando o Guardian..." Foreground="#F2F5F6" FontSize="13" Margin="0,7,0,0" TextWrapping="Wrap"/>
               <StackPanel Margin="0,18,0,0">
                 <Border Height="1" Background="#28383D" Margin="0,0,0,12"/>
+                <TextBlock Text="INVENTÁRIO" FontSize="10" Foreground="#64D5EB" FontWeight="SemiBold" Margin="0,0,0,12"/>
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -247,9 +242,20 @@ function Get-GuardianBitmapImage {
                   <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="ERROS DE DISCO" FontSize="9" Foreground="#78939C"/><TextBlock x:Name="DiskEventsValue" Text="Não disponível" Foreground="#E8F0F2" FontSize="12"/></StackPanel>
                 </Grid>
               </StackPanel>
-              <StackPanel x:Name="DurationPanel" Visibility="Collapsed" Margin="0,18,0,0">
-                <TextBlock Text="TEMPO DE EXECUÇÃO" FontSize="9" Foreground="#78939C"/>
-                <TextBlock x:Name="DurationValue" Text="" FontSize="12" Foreground="#E8F0F2"/>
+              <StackPanel x:Name="DurationPanel" Visibility="Collapsed" Margin="0,20,0,0">
+                <Border Height="1" Background="#28383D" Margin="0,0,0,12"/>
+                <TextBlock Text="RESUMO DA VISTORIA" FontSize="10" Foreground="#64D5EB" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="TEMPO DE EXECUÇÃO" FontSize="9" Foreground="#78939C"/>
+                  <TextBlock x:Name="DurationValue" Text="" FontSize="12" Foreground="#E8F0F2"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="ETAPA IGNORADA" FontSize="9" Foreground="#78939C"/>
+                  <TextBlock x:Name="SkippedPhasesValue" Text="Nenhuma" FontSize="11" Foreground="#E8F0F2" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                </StackPanel>
+                </Grid>
               </StackPanel>
               <Grid x:Name="HealthPanel" Visibility="Collapsed" Margin="0,16,0,0">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -394,6 +400,17 @@ $shutdownValue = $window.FindName('ShutdownValue')
 $diskEventsValue = $window.FindName('DiskEventsValue')
 $durationPanel = $window.FindName('DurationPanel')
 $durationValue = $window.FindName('DurationValue')
+$skippedPhasesValue = $window.FindName('SkippedPhasesValue')
+# Rotulos dos IDs validos do PulaFases (Fase 2 pertence ao Guardian Ghost).
+$script:GuardianSkippedPhaseTitles = @{
+    3 = 'Otimizações Estruturais'
+    4 = 'Limpezas do Windows'
+    5 = 'Atualizações do Windows'
+    6 = 'Atualizações de aplicativos via Winget'
+    7 = 'Pós-atualização / Componentes'
+    8 = 'Otimização de Armazenamento'
+    9 = 'Segurança'
+}
 $robotGapColumn = $window.FindName('RobotGapColumn')
 $robotColumn = $window.FindName('RobotColumn')
 
@@ -401,8 +418,17 @@ $finishButton = $window.FindName('FinishButton')
 $minButton = $window.FindName('MinButton')
 $robotPanel = $window.FindName('RobotPanel')
 $robotImage = $window.FindName('RobotImage')
-$headerBackground = $window.FindName('HeaderBackground')
-if ($backgroundImage) { $headerBackground.Source = $backgroundImage }
+# bg.png como fundo da janela inteira (1050 x 600 unidades WPF).
+# O Border principal preserva os cantos arredondados.
+# Sem imagem, o fundo preto original e mantido.
+if ($backgroundImage) {
+    $rootSurface = $window.FindName('RootSurface')
+    $fullBackground = [System.Windows.Media.ImageBrush]::new($backgroundImage)
+    $fullBackground.Stretch = [System.Windows.Media.Stretch]::Fill
+    $fullBackground.AlignmentX = [System.Windows.Media.AlignmentX]::Center
+    $fullBackground.AlignmentY = [System.Windows.Media.AlignmentY]::Center
+    $rootSurface.Background = $fullBackground
+}
 $window.FindName('ClientText').Text = "$Cliente"
 $window.FindName('PCText').Text = "$Computador"
 
@@ -516,6 +542,15 @@ $timer.Add_Tick({
                                     $durationValue.Text = [string]$message.data.duration
                                     $durationPanel.Visibility = [System.Windows.Visibility]::Visible
                                 }
+                                # Exibe somente os IDs efetivamente informados em PulaFases.
+                                # Os dados chegam no evento de conclusao, sem ler JSON nem arquivos temporarios.
+                                $ignored = @($message.data.skippedPhases | ForEach-Object { [int]$_ } | Where-Object { $script:GuardianSkippedPhaseTitles.ContainsKey($_) } | Sort-Object -Unique)
+                                if ($ignored.Count -gt 0) {
+                                    $skippedPhasesValue.Text = (($ignored | ForEach-Object { '{0} {1}' -f $_, $script:GuardianSkippedPhaseTitles[$_] }) -join [Environment]::NewLine)
+                                } else {
+                                    $skippedPhasesValue.Text = 'Nenhuma'
+                                }
+                                $durationPanel.Visibility = [System.Windows.Visibility]::Visible
                                 if ($null -ne $message.data.events) {
                                     $wheaValue.Text = [string]$message.data.events.whea
                                     $bsodValue.Text = [string]$message.data.events.bsod
