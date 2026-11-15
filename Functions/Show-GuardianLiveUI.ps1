@@ -108,7 +108,7 @@ function Get-GuardianBitmapImage {
         Width="1050" Height="600" MinWidth="560" MinHeight="390"
         Background="Transparent" Foreground="#F4F6F8" WindowStartupLocation="Manual"
         FontFamily="Segoe UI" Title="Guardian 360 v2.0" ShowInTaskbar="True">
-  <Border BorderBrush="#29383E" BorderThickness="1" CornerRadius="12" Background="#000000">
+  <Border x:Name="RootSurface" BorderBrush="#29383E" BorderThickness="1" CornerRadius="12" Background="#000000">
     <Grid>
       <Grid.RowDefinitions>
         <RowDefinition Height="47"/>
@@ -117,7 +117,7 @@ function Get-GuardianBitmapImage {
         <RowDefinition Height="76"/>
       </Grid.RowDefinitions>
 
-      <Border Grid.Row="0" Background="#11181B" BorderBrush="#263237" BorderThickness="0,0,0,1" CornerRadius="11,11,0,0">
+      <Border Grid.Row="0" Background="Transparent" BorderBrush="#263237" BorderThickness="0,0,0,1" CornerRadius="11,11,0,0">
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="44"/></Grid.ColumnDefinitions>
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="22,0,0,0">
@@ -147,14 +147,8 @@ function Get-GuardianBitmapImage {
         </Grid>
       </Border>
 
-      <!-- Banner oficial fixo, no topo da área principal, abaixo da barra de título.
-           Mantido nas telas de execução e conclusão. -->
-      <Border Grid.Row="1" Margin="34,8,34,8" Background="#000000" ClipToBounds="True">
-        <Image x:Name="HeaderBackground" HorizontalAlignment="Center"
-               VerticalAlignment="Center" Stretch="Uniform"
-               StretchDirection="DownOnly" SnapsToDevicePixels="True"
-               RenderOptions.BitmapScalingMode="HighQuality"/>
-      </Border>
+      <!-- Área superior preservada; bg.png agora pertence ao fundo da janela inteira. -->
+      <Border Grid.Row="1" Margin="34,8,34,8" Background="Transparent"/>
 
       <Grid Grid.Row="2" Margin="34,0,34,10">
         <Grid.ColumnDefinitions>
@@ -401,8 +395,17 @@ $finishButton = $window.FindName('FinishButton')
 $minButton = $window.FindName('MinButton')
 $robotPanel = $window.FindName('RobotPanel')
 $robotImage = $window.FindName('RobotImage')
-$headerBackground = $window.FindName('HeaderBackground')
-if ($backgroundImage) { $headerBackground.Source = $backgroundImage }
+# bg.png como fundo da janela inteira (1050 x 600 unidades WPF).
+# O Border principal preserva os cantos arredondados.
+# Sem imagem, o fundo preto original e mantido.
+if ($backgroundImage) {
+    $rootSurface = $window.FindName('RootSurface')
+    $fullBackground = [System.Windows.Media.ImageBrush]::new($backgroundImage)
+    $fullBackground.Stretch = [System.Windows.Media.Stretch]::Fill
+    $fullBackground.AlignmentX = [System.Windows.Media.AlignmentX]::Center
+    $fullBackground.AlignmentY = [System.Windows.Media.AlignmentY]::Center
+    $rootSurface.Background = $fullBackground
+}
 $window.FindName('ClientText').Text = "$Cliente"
 $window.FindName('PCText').Text = "$Computador"
 
