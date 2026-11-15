@@ -1240,7 +1240,7 @@ foreach ($phase in $script:GuardianSelectedPhases) {
             try {
                 $cpuInfo = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
                 $csInfo = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
-                $gpuInfo = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -First 1
+                $gpuInfo = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '^\s*USB Mobile Monitor Virtual Display\s*$' } | Select-Object -First 1
                 $partition = Get-Partition -DriveLetter ($env:SystemDrive.TrimEnd(':')) -ErrorAction SilentlyContinue
                 $osDisk = if ($partition) { $partition | Get-Disk -ErrorAction SilentlyContinue }
                 $driveText = if ($osDisk) { '{0} · {1:N0} GB' -f ([string]$osDisk.FriendlyName -replace '^\s*ATA\s+', ''), ($osDisk.Size / 1GB) } else { 'Não identificado' }
