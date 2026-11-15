@@ -241,10 +241,17 @@ function Get-GuardianBitmapImage {
                   <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="ERROS DE DISCO" FontSize="9" Foreground="#78939C"/><TextBlock x:Name="DiskEventsValue" Text="Não disponível" Foreground="#E8F0F2" FontSize="12"/></StackPanel>
                 </Grid>
               </StackPanel>
-              <StackPanel x:Name="DurationPanel" Visibility="Collapsed" Margin="0,18,0,0">
-                <TextBlock Text="TEMPO DE EXECUÇÃO" FontSize="9" Foreground="#78939C"/>
-                <TextBlock x:Name="DurationValue" Text="" FontSize="12" Foreground="#E8F0F2"/>
-              </StackPanel>
+              <Grid x:Name="DurationPanel" Visibility="Collapsed" Margin="0,18,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="TEMPO DE EXECUÇÃO" FontSize="9" Foreground="#78939C"/>
+                  <TextBlock x:Name="DurationValue" Text="" FontSize="12" Foreground="#E8F0F2"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="ETAPAS IGNORADAS" FontSize="9" Foreground="#78939C"/>
+                  <TextBlock x:Name="SkippedPhasesValue" Text="Nenhuma" FontSize="11" Foreground="#E8F0F2" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                </StackPanel>
+              </Grid>
               <Grid x:Name="HealthPanel" Visibility="Collapsed" Margin="0,16,0,0">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center"><TextBlock Text="SAÚDE GERAL DO SISTEMA" FontSize="10" Foreground="#78939C"/><TextBlock x:Name="HealthClass" Text="" FontSize="13" Foreground="#E8F0F2"/></StackPanel>
@@ -388,6 +395,17 @@ $shutdownValue = $window.FindName('ShutdownValue')
 $diskEventsValue = $window.FindName('DiskEventsValue')
 $durationPanel = $window.FindName('DurationPanel')
 $durationValue = $window.FindName('DurationValue')
+$skippedPhasesValue = $window.FindName('SkippedPhasesValue')
+# Rotulos dos IDs validos do PulaFases (Fase 2 pertence ao Guardian Ghost).
+$script:GuardianSkippedPhaseTitles = @{
+    3 = 'Otimizações Estruturais'
+    4 = 'Limpezas do Windows'
+    5 = 'Atualizações do Windows'
+    6 = 'Atualizações de aplicativos via Winget'
+    7 = 'Pós-atualização / Componentes'
+    8 = 'Otimização de Armazenamento'
+    9 = 'Segurança'
+}
 $robotGapColumn = $window.FindName('RobotGapColumn')
 $robotColumn = $window.FindName('RobotColumn')
 
@@ -519,6 +537,15 @@ $timer.Add_Tick({
                                     $durationValue.Text = [string]$message.data.duration
                                     $durationPanel.Visibility = [System.Windows.Visibility]::Visible
                                 }
+                                # Exibe somente os IDs efetivamente informados em PulaFases.
+                                # Os dados chegam no evento de conclusao, sem ler JSON nem arquivos temporarios.
+                                $ignored = @($message.data.skippedPhases | ForEach-Object { [int]$_ } | Where-Object { $script:GuardianSkippedPhaseTitles.ContainsKey($_) } | Sort-Object -Unique)
+                                if ($ignored.Count -gt 0) {
+                                    $skippedPhasesValue.Text = (($ignored | ForEach-Object { '{0} {1}' -f $_, $script:GuardianSkippedPhaseTitles[$_] }) -join [Environment]::NewLine)
+                                } else {
+                                    $skippedPhasesValue.Text = 'Nenhuma'
+                                }
+                                $durationPanel.Visibility = [System.Windows.Visibility]::Visible
                                 if ($null -ne $message.data.events) {
                                     $wheaValue.Text = [string]$message.data.events.whea
                                     $bsodValue.Text = [string]$message.data.events.bsod

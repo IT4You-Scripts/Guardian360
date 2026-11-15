@@ -1512,6 +1512,8 @@ catch {
     }
     # Dados complementares são enviados exclusivamente à WPF a partir do JSON consolidado.
     $uiHealth.duration = Format-Elapsed $scriptStart.Elapsed
+    # Apenas a LiveUI recebe os IDs ignorados; nao altera o JSON final nem a API.
+    $uiHealth.skippedPhases = @($PulaFases)
     if ($resumoJsonOk -and $null -ne $finalReport -and $finalReport.PSObject.Properties.Name -contains 'telemetria' -and $null -ne $finalReport.telemetria -and $null -ne $finalReport.telemetria.eventos_windows) {
         $ev = $finalReport.telemetria.eventos_windows
         function Convert-GuardianEventTotal {
