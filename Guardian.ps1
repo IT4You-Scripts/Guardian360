@@ -375,6 +375,38 @@ function Test-AdminOrExit {
   }
 }
 
+# Diretorio temporario neutro: evita acentos no caminho do perfil do Windows.
+# Cada instalacao utiliza uma subpasta exclusiva; nenhuma outra pasta do Guardian e apagada.
+function New-GuardianTempDirectory {
+  param([Parameter(Mandatory)][string]$Prefix)
+  $tempRoot = 'C:\Guardian\Temp'
+  New-Item -ItemType Directory -Path $tempRoot -Force -ErrorAction Stop | Out-Null
+  $workDir = Join-Path $tempRoot ('Guardian_' + $Prefix + '_' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $workDir -ErrorAction Stop | Out-Null
+  return $workDir
+}
+
+function Remove-GuardianTempDirectory {
+  param([string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path)) { return }
+  $tempRoot = 'C:\Guardian\Temp'
+  try {
+    $rootFull = [IO.Path]::GetFullPath($tempRoot).TrimEnd('\')
+    $folderFull = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    if (-not $folderFull.StartsWith($rootFull + '\', [StringComparison]::OrdinalIgnoreCase)) { return }
+    if (Test-Path -LiteralPath $folderFull) {
+      Remove-Item -LiteralPath $folderFull -Recurse -Force -ErrorAction Stop
+    }
+    # Remove somente C:\Guardian\Temp, e somente quando ela estiver vazia.
+    if (Test-Path -LiteralPath $tempRoot) {
+      $remaining = Get-ChildItem -LiteralPath $tempRoot -Force -ErrorAction Stop | Select-Object -First 1
+      if (-not $remaining) { Remove-Item -LiteralPath $tempRoot -Force -ErrorAction Stop }
+    }
+  } catch {
+    # Uma falha na limpeza nao invalida a manutencao.
+  }
+}
+
 function Initialize-Pwsh7 {
   if ($PSVersionTable.PSVersion.Major -ge 7) { return }
   Write-GuardianStatus 'PowerShell 7+ não detectado. Tentando instalação silenciosa...' 'INFO'
@@ -387,13 +419,16 @@ function Initialize-Pwsh7 {
   } catch { Write-GuardianStatus ("Falha com winget: {0}" -f $_.Exception.Message) 'WARN' }
 
   if (-not $installed) {
+    $diretorioPwsh = $null
     try {
-      $msi = Join-Path $env:TEMP 'PowerShell7.msi'
+      $diretorioPwsh = New-GuardianTempDirectory -Prefix 'PowerShell7'
+      $msi = Join-Path $diretorioPwsh 'PowerShell7.msi'
       $url = 'https://github.com/PowerShell/PowerShell/releases/latest/download/PowerShell-7.4.1-win-x64.msi'
       Invoke-WebRequest -Uri $url -OutFile $msi -UseBasicParsing
       Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet /norestart" -Wait
       $installed = $true
     } catch { Write-GuardianStatus ("Falha no download/instalação do MSI: {0}" -f $_.Exception.Message) 'WARN' }
+    finally { Remove-GuardianTempDirectory -Path $diretorioPwsh }
   }
 
   if ($installed) {
@@ -1083,10 +1118,10 @@ function Install-GuardianOptionalProgram {
         $argumentos = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-'
     }
 
-    $diretorio = Join-Path ([IO.Path]::GetTempPath()) ('Guardian_OptionalApps_' + [guid]::NewGuid().ToString('N'))
-    $instalador = Join-Path $diretorio ($Programa.Replace('-','') + '.exe')
+    $diretorio = $null
     try {
-        New-Item -ItemType Directory -Path $diretorio -Force -ErrorAction Stop | Out-Null
+        $diretorio = New-GuardianTempDirectory -Prefix 'OptionalApps'
+        $instalador = Join-Path $diretorio ($Programa.Replace('-','') + '.exe')
         Write-GuardianStatus ("{0}: ausente; baixando instalador oficial." -f $Programa) 'INFO'
         Invoke-WebRequest -Uri $url -OutFile $instalador -MaximumRedirection 5 -TimeoutSec 90 -ErrorAction Stop
         $arquivo = Get-Item -LiteralPath $instalador -ErrorAction Stop
@@ -1128,7 +1163,7 @@ function Install-GuardianOptionalProgram {
     } catch {
         Write-GuardianStatus ("{0}: falha na preparacao: {1}. Guardian prossegue." -f $Programa, $_.Exception.Message) 'WARN'
     } finally {
-        try { Remove-Item -LiteralPath $diretorio -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+        Remove-GuardianTempDirectory -Path $diretorio
     }
 }
 
