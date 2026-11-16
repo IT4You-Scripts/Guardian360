@@ -776,17 +776,7 @@ function Send-GuardianLiveEvent {
 Test-AdminOrExit
 Initialize-Pwsh7
 Enable-QuickEditProtection
-# Garantia adicional: nao reexibir o console em execucao normal.
-# A classe Win32.ConsoleWindow ja foi definida no bloco de aparencia acima.
-if (-not $script:GuardianDebugMode) {
-    try {
-        $guardianConsole = [Win32.ConsoleWindow]::GetConsoleWindow()
-        if ($guardianConsole -ne [IntPtr]::Zero) {
-            [void][Win32.ConsoleWindow]::ShowWindow($guardianConsole, 0)
-        }
-    } catch { }
-}
-Enable-ConsoleAppearance -ForceMaximize:$script:GuardianDebugMode
+Enable-ConsoleAppearance -ForceMaximize
 Clear-Host
 Show-Header -Text 'Guardian 360 v2.0'
 Initialize-GuardianLiveUI
@@ -927,73 +917,6 @@ $hasHDD = ($hddList.Count -gt 0)
               }
               if ($info.ID) { break }
           }
-
-          # Fallback oficial para instalacoes sem ClientID no Registro.
-          # Instala TeamViewerPS sob demanda apenas quando o TeamViewer esta presente
-          # e nenhuma chave do Registro forneceu um ID. Sem prompt ou Write-Log.
-          if (-not $info.ID) {
-              try {
-                  $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
-                  if (-not $teamViewerCmd) {
-                      try {
-                          Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
-                      } catch { }
-                      $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
-                  }
-                  if (-not $teamViewerCmd -and (Get-Command -Name 'Install-Module' -ErrorAction SilentlyContinue)) {
-                      # AllUsers e compartilhado entre administradores, usuarios e SYSTEM.
-                      # Sem elevacao, usa CurrentUser em vez de falhar por permissao.
-                      $scope = 'CurrentUser'
-                      try {
-                          $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
-                          if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-                              $scope = 'AllUsers'
-                          }
-                      } catch { }
-
-                      # Instalacao isolada e limitada a 60 s; nunca aguarda interacao.
-                      $installJob = $null
-                      try {
-                          $installJob = Start-Job -ScriptBlock {
-                              param([string]$InstallScope)
-                              $ProgressPreference = 'SilentlyContinue'
-                              $WarningPreference = 'SilentlyContinue'
-                              $InformationPreference = 'SilentlyContinue'
-                              $ConfirmPreference = 'None'
-                              $ErrorActionPreference = 'Stop'
-                              Install-Module -Name 'TeamViewerPS' -Scope $InstallScope -Repository 'PSGallery' -Force -AllowClobber -Confirm:$false -ErrorAction Stop *> $null
-                          } -ArgumentList $scope -ErrorAction Stop
-                          $finished = Wait-Job -Job $installJob -Timeout 60 -ErrorAction SilentlyContinue
-                          if ($finished) {
-                              Receive-Job -Job $installJob -ErrorAction Stop *> $null
-                          } else {
-                              Stop-Job -Job $installJob -ErrorAction SilentlyContinue
-                          }
-                      } catch {
-                          # Galeria indisponivel: nao comprometer a vistoria.
-                      } finally {
-                          if ($installJob) {
-                              Remove-Job -Job $installJob -Force -ErrorAction SilentlyContinue
-                          }
-                      }
-
-                      try {
-                          Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
-                      } catch { }
-                      $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
-                  }
-                  if ($teamViewerCmd) {
-                      $moduleId = Get-TeamViewerId -ErrorAction Stop 6>$null
-                      $id = ([string]$moduleId).Trim()
-                      if ($id -match '^[0-9]+$' -and $id -ne '0') {
-                          $info.ID = $id
-                          $info.Status = 'OK'
-                      }
-                  }
-              } catch {
-                  # Sem identificador: prosseguir com IDIndisponivel, sem interromper o Guardian.
-              }
-          }
       } catch {
           $info.Status = 'ErroLeitura'
       }
@@ -1017,7 +940,8 @@ $hasHDD = ($hddList.Count -gt 0)
         #@{ Name='Clear-RecentFilesHistory';  Action={ Clear-RecentFilesHistory } }
       )},
     @{ Id=5; Title='Atualizações do Windows'; Steps=@(
-        @{ Name='Update-WindowsOS'; Action={ if($hasInet){ Update-WindowsOS } else { Write-GuardianStatus 'Sem internet: pulando Update-WindowsOS' 'WARN' } } }
+        @{ Name='Update-WindowsOS'; Action={ if($hasInet){ Update-WindowsOS } else { Write-GuardianStatus 'Sem internet: pulando Update-WindowsOS' 'WARN' } } },
+        @{ Name='Update-MicrosoftStore'; Action={ if($hasInet){ Update-MicrosoftStore } else { Write-GuardianStatus 'Sem internet: pulando Update-MicrosoftStore' 'WARN' } } }
       )},
     @{ Id=6; Title='Atualizações dos programas instalados'; Steps=@(
         # @{ Name='Block-AppUpdates';  Action={ Block-AppUpdates } },
@@ -1239,9 +1163,6 @@ foreach ($phase in $script:GuardianSelectedPhases) {
 
         DoEvents
 
-        # Atualiza a atividade antes de executar a funcao, preservando o progresso ao final.
-        Send-GuardianLiveEvent -Type 'activity' -Label (Get-StepLabel $step.Name)
-
         # Executa o passo
         Invoke-GuardianStep -Title $step.Name -Action $step.Action
         Send-GuardianLiveEvent -Type 'step' -Label $step.Name -Percent ([int][Math]::Min(95,[Math]::Floor(($CurrentStep / [Math]::Max(1,$TotalSteps)) * 95)))
@@ -1252,10 +1173,10 @@ foreach ($phase in $script:GuardianSelectedPhases) {
             try {
                 $cpuInfo = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
                 $csInfo = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
-                $gpuInfo = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '^\s*USB Mobile Monitor Virtual Display\s*$' } | Select-Object -First 1
+                $gpuInfo = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -First 1
                 $partition = Get-Partition -DriveLetter ($env:SystemDrive.TrimEnd(':')) -ErrorAction SilentlyContinue
                 $osDisk = if ($partition) { $partition | Get-Disk -ErrorAction SilentlyContinue }
-                $driveText = if ($osDisk) { '{0} · {1:N0} GB' -f ([string]$osDisk.FriendlyName -replace '^\s*ATA\s+', ''), ($osDisk.Size / 1GB) } else { 'Não identificado' }
+                $driveText = if ($osDisk) { '{0} · {1:N0} GB' -f $osDisk.FriendlyName, ($osDisk.Size / 1GB) } else { 'Não identificado' }
                 $ramText = if ($csInfo.TotalPhysicalMemory) { '{0:N0} GB' -f [Math]::Round(($csInfo.TotalPhysicalMemory / 1GB), 0, [MidpointRounding]::AwayFromZero) } else { 'Não disponível' }
                 $osInfo = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
                 $displayVersion = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue).DisplayVersion
@@ -1520,108 +1441,24 @@ catch {
                     classification = [string]$finalReport.SaudeGeral.Classificacao
                 }
             }
-            # Notas parciais ja consolidadas no JSON final: somente para exibicao na LiveUI.
-            # Nenhum recalculo, persistencia ou alteracao na API.
-            if ($null -ne $finalReport.SaudeGeral.Detalhes) {
-                $uiHealth.breakdown = $finalReport.SaudeGeral.Detalhes
-            }
-            # Justificativas APENAS para a LiveUI, sem recalcular notas ou alterar o JSON/API.
-            # Derivadas dos mesmos campos utilizados pelo Optimize-JsonReport.ps1.
-            try {
-                $scoreReasons = @{}
-                $scoreDetails = $finalReport.SaudeGeral.Detalhes
-                $scorePhases = @($finalReport.Fases)
-                $inventory = @($scorePhases | Where-Object { $_.Phase -match 'Coleta do Inventário' } | Select-Object -First 1)
-                $inventoryData = if ($inventory.Count -gt 0) { $inventory[0].Mensagem } else { $null }
-
-                # Atualizacoes: explicacao ao cliente sem expor falhas pontuais do Winget.
-                # Preserva o resultado real de Windows Update e informa a gestao automatica da Loja.
-                $winUpdate = @($scorePhases | Where-Object { $_.Phase -match 'Atualização do Windows' } | Select-Object -First 1)
-                if ($winUpdate.Count -eq 0) {
-                    $windowsUpdateReason = 'Windows Update: sem execução registrada.'
-                } elseif ($winUpdate[0].Mensagem -isnot [string] -and
-                          $winUpdate[0].Mensagem.AtualizacaoBemSucedida -eq $true) {
-                    $windowsUpdateReason = 'Windows Update: atualização concluída com sucesso.'
-                } else {
-                    $windowsUpdateReason = 'Windows Update: conclusão da atualização não confirmada.'
-                }
-                $scoreReasons.Atualizacoes = $windowsUpdateReason + ' Aplicativos da Microsoft Store: atualizações gerenciadas automaticamente pelo Windows.'
-
-                # Particoes: identificar a unidade responsável pelo desconto.
-                $parts = @($inventoryData.Particoes | Where-Object { $null -ne $_.UsadoPct } |
-                    Sort-Object -Property @{ Expression = { [double]$_.UsadoPct }; Descending = $true })
-                if ($parts.Count -gt 0) {
-                    $worst = $parts[0]
-                    $scoreReasons.Particoes = ('Unidade {0}: {1:N1}% do espaço utilizado.' -f [string]$worst.Letra, [double]$worst.UsadoPct)
-                } else { $scoreReasons.Particoes = 'Dados de ocupação das partições não disponíveis.' }
-
-                # Atualmente essas duas notas são fixas no cálculo. Não atribuir análises inexistentes.
-                $scoreReasons.IntegridadeSistema = 'Integridade acompanhada por procedimentos automáticos do Guardian Ghost.'
-                # A descricao confirma somente etapas de limpeza registradas como concluidas.
-                $cleanPhases = @($scorePhases | Where-Object { $_.Phase -match 'Limpeza das pastas temporárias|Limpeza dos arquivos temporários dos componentes do Windows' })
-                $cleanOK = @($cleanPhases | Where-Object { $_.Status -eq 'OK' -and (
-                    ($_.Mensagem -is [string] -and $_.Mensagem -match 'concluíd|limp|removid') -or
-                    ($_.Mensagem -isnot [string] -and ($_.Mensagem.LimpezaBemSucedida -eq $true))
-                ) })
-                if ($cleanOK.Count -gt 0) {
-                    $scoreReasons.Limpezas = 'Arquivos temporários e resíduos do sistema removidos durante a manutenção preventiva.'
-                } elseif ($cleanPhases.Count -gt 0) {
-                    $scoreReasons.Limpezas = 'Resultado das rotinas de limpeza não confirmado nesta vistoria.'
-                } else {
-                    $scoreReasons.Limpezas = 'Rotinas de limpeza sem execução registrada nesta vistoria.'
-                }
-
-                # Backup Macrium: somente motivos verificáveis a partir do inventário.
-                $backupData = $inventoryData.BackupMacrium
-                if ($null -eq $backupData) {
-                    $scoreReasons.Backup = 'Informações do backup não disponíveis no inventário.'
-                } elseif ($backupData.ExisteParticaoD -ne $true) {
-                    $scoreReasons.Backup = 'Partição D: exigida pela regra de backup não identificada.'
-                } elseif ($backupData.ExistePastaRescue -ne $true) {
-                    $scoreReasons.Backup = 'Pasta Rescue não identificada na partição D:.'
-                } elseif ($backupData.ExistemImagens -ne $true) {
-                    $scoreReasons.Backup = 'Nenhuma imagem de backup Macrium foi identificada.'
-                } elseif ($backupData.DataImagem1) {
-                    $backupDays = ([datetime]::Now - [datetime]$backupData.DataImagem1).Days
-                    $scoreReasons.Backup = ('Imagem de backup mais recente: {0} dia(s).' -f [Math]::Max(0,$backupDays))
-                } else { $scoreReasons.Backup = 'Data da imagem de backup não disponível.' }
-
-                # Rede: a justificativa visual deve descrever o adaptador realmente conectado.
-                # Nao modifica o criterio nem a pontuacao calculada pelo Optimize-JsonReport.
-                $nets = @($inventoryData.Redes | Where-Object { $null -ne $_ })
-                $activeNets = @($nets | Where-Object { ([string]$_.Status).Trim() -match '^(Up|Connected|Conectado)$' })
-                $net = $activeNets | Where-Object { ([string]$_.Adaptador) -match '^(Wi-Fi|WiFi|WLAN|Wireless|Rede sem fio)' } | Select-Object -First 1
-                if (-not $net) { $net = $activeNets | Where-Object { ([string]$_.Adaptador) -match '^Ethernet' } | Select-Object -First 1 }
-                if (-not $net) { $net = $activeNets | Select-Object -First 1 }
-                if ($net) {
-                    $networkName = [string]$net.Adaptador
-                    $networkType = if ($networkName -match '^(Wi-Fi|WiFi|WLAN|Wireless|Rede sem fio)') { 'Rede sem fio' } else { $networkName }
-                    $networkSpeed = if ($net.Velocidade -and ([string]$net.Velocidade).Trim() -notmatch '^(0(\s*\w+)?|0\s*[kmg]?bps)$') { [string]$net.Velocidade } else { 'não informada' }
-                    $scoreReasons.Rede = ('{0} conectada; velocidade {1}.' -f $networkType, $networkSpeed)
-                } elseif ($nets.Count -gt 0) {
-                    $scoreReasons.Rede = 'Nenhum adaptador de rede ativo identificado nesta vistoria.'
-                } else { $scoreReasons.Rede = 'Nenhum adaptador de rede identificado no inventário.' }
-
-                # Segurança: não confundir ausência de confirmação com malware detectado.
-                $defenderPhase = @($scorePhases | Where-Object { $_.Phase -match 'Windows Defender' } | Select-Object -First 1)
-                if ($defenderPhase.Count -eq 0) {
-                    $scoreReasons.Seguranca = 'Varredura do Windows Defender sem execução registrada.'
-                } elseif ($defenderPhase[0].Mensagem -isnot [string] -and
-                    $defenderPhase[0].Mensagem.ScanBemSucedido -eq $true) {
-                    $scoreReasons.Seguranca = 'Varredura do Windows Defender concluída com sucesso.'
-                } else {
-                    $scoreReasons.Seguranca = 'Conclusão da varredura do Windows Defender não confirmada.'
-                }
-
-                $uiHealth.scoreReasons = $scoreReasons
-            } catch { } # Justificativas opcionais nunca bloqueiam a conclusao do Guardian.
         } catch { } # A ausencia da nota nao muda o resultado da manutencao.
     }
     # Dados complementares são enviados exclusivamente à WPF a partir do JSON consolidado.
-    $uiHealth.duration = Format-Elapsed $scriptStart.Elapsed
-    # Apenas a LiveUI recebe os IDs ignorados; nao altera o JSON final nem a API.
-    $uiHealth.skippedPhases = @($PulaFases)
-    if ($resumoJsonOk -and $null -ne $finalReport -and $finalReport.PSObject.Properties.Name -contains 'telemetria' -and $null -ne $finalReport.telemetria -and $null -ne $finalReport.telemetria.eventos_windows) {
+
+$uiHealth.duration = Format-Elapsed $scriptStart.Elapsed
+$apiUiStatus = 'unknown'
+$apiUiText = [string]$global:GuardianEnvioApiStatus
+if ($apiUiText -match '(?i)sucesso|integrad') {
+    $apiUiStatus = 'ok'
+}
+elseif ($apiUiText -match '(?i)nao enviado|não enviado|falha|erro|pendente|indispon') {
+    $apiUiStatus = 'pending'
+}
+$uiHealth.api = @{
+    status = $apiUiStatus
+    text   = $apiUiText
+}
+if ($resumoJsonOk -and $null -ne $finalReport -and $finalReport.PSObject.Properties.Name -contains 'telemetria' -and $null -ne $finalReport.telemetria -and $null -ne $finalReport.telemetria.eventos_windows) {
         $ev = $finalReport.telemetria.eventos_windows
         function Convert-GuardianEventTotal {
             param($Value)

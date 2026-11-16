@@ -137,12 +137,13 @@ function Update-GuardianFiles {
         @{ Url = "$BaseUrl/Guardian.ps1"; Path = "$BasePath\Guardian.ps1" },
         @{ Url = "$BaseUrl/Prepara.ps1"; Path = "$BasePath\Prepara.ps1" },
         @{ Url = "$BaseUrl/Guardian-Ghost.ps1"; Path = "$BasePath\Guardian-Ghost.ps1" },
-        # UI 29: imagens da interface WPF, incluindo ressalvas e erro critico.
+        # UI 29: imagens da interface WPF, incluindo ressalvas, erro critico e API pendente.
         @{ Url = "$BaseUrl/Assets/Images/bg.png"; Path = "$BasePath\Assets\Images\bg.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_execucao.png"; Path = "$BasePath\Assets\Images\guardian_robot_execucao.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_final.png"; Path = "$BasePath\Assets\Images\guardian_robot_final.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_ressalvas.png"; Path = "$BasePath\Assets\Images\guardian_robot_ressalvas.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_critico.png"; Path = "$BasePath\Assets\Images\guardian_robot_critico.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_api_pendente.png"; Path = "$BasePath\Assets\Images\guardian_robot_api_pendente.png" },
         # Funcoes utilizadas / carregadas pelo Guardian 360 v2.0.
         @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1"; Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
         @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1"; Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
