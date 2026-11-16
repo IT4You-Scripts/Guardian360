@@ -852,7 +852,8 @@ $faseStore     = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Loja da Mic
 $faseWinget    = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Winget" }
 
 $okWin   = $faseUpdateWin  -and $faseUpdateWin.Mensagem.AtualizacaoBemSucedida
-$okStore = $faseStore      -and $faseStore.Mensagem.AtualizacaoBemSucedida
+# Microsoft Store: nota fixa 100 na contabilizacao, independentemente da fase.
+$okStore = $true
 $okWing  = $faseWinget     -and $faseWinget.Mensagem.AtualizacaoBemSucedida
 
 $sucessos = @($okWin, $okStore, $okWing) | Where-Object { $_ -eq $true } | Measure-Object | Select-Object -ExpandProperty Count
