@@ -529,7 +529,7 @@ try {
         Write-Host "[Guardian System] Task principal nao encontrada; nenhuma configuracao foi inventada." -ForegroundColor Yellow
     }
 
-    # ----- TASK DO GUARDIAN GHOST (dias 21-25, 12:00, ociosidade 10min, aguardar 2h) -----
+    # ----- TASK DO GUARDIAN GHOST (dias 21-25, 12:00, SYSTEM, sem ociosidade) -----
     $ghostTask = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
                  Where-Object { $_.TaskName -in @("3. Guardian Ghost","3. Guardian Ghost") }
 
@@ -539,6 +539,8 @@ try {
         $ghostPrecisaAjustar = $true
     }
     else {
+        # Corrige tambem tarefas existentes que ficaram exigindo ociosidade.
+        if ($ghostTask.Settings.RunOnlyIfIdle) { $ghostPrecisaAjustar = $true }
         $trigger = $ghostTask.Triggers | Select-Object -First 1
         if ($trigger -and $trigger.CimClass.CimClassName -eq 'MSFT_TaskMonthlyTrigger') {
             $diasAtuais = @($trigger.DaysOfMonth) | Sort-Object
@@ -579,7 +581,7 @@ try {
             -Description "Guardian Ghost - System Integrity (Fase 2) silenciosa. Roda 1x/mes entre dias 21-25." `
             -Force | Out-Null
 
-        # Passo 2: Exportar e corrigir trigger + idle via XML
+        # Passo 2: Exportar e corrigir o trigger mensal via XML
         $xml = [xml](Export-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder)
         try {
             if ($guardianPrincipal) {
@@ -627,32 +629,21 @@ try {
 
         $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
 
+        # Ghost executa como SYSTEM e nao depende de ociosidade.
         $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
-        if ($roiNode) { $roiNode.InnerText = "true" }
+        if ($roiNode) { $roiNode.InnerText = "false" }
         else {
-            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "true"
+            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "false"
             $settingsNode.AppendChild($roiEl) | Out-Null
         }
 
+        # Remove apenas os parametros de ociosidade que nao se aplicam ao Ghost.
         $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
-        if (-not $idleSettings) {
-            $idleSettings = $xml.CreateElement("IdleSettings", $ns)
-            $settingsNode.AppendChild($idleSettings) | Out-Null
-        }
-        foreach ($child in @($idleSettings.ChildNodes)) { $idleSettings.RemoveChild($child) | Out-Null }
-
-        $durEl = $xml.CreateElement("Duration", $ns); $durEl.InnerText = "PT10M"
-        $idleSettings.AppendChild($durEl) | Out-Null
-        $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"
-        $idleSettings.AppendChild($waitEl) | Out-Null
-        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "false"
-        $idleSettings.AppendChild($stopEl) | Out-Null
-        $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
-        $idleSettings.AppendChild($restartEl) | Out-Null
+        if ($idleSettings) { $settingsNode.RemoveChild($idleSettings) | Out-Null }
 
         Register-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
         Unregister-ScheduledTask -TaskName "Guardian Ghost" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
-        Write-Host "[Guardian Ghost] Task criada/corrigida: dias 21-25, 12:00." -ForegroundColor Green
+        Write-Host "[Guardian Ghost] Task criada/corrigida: dias 21-25, 12:00, SYSTEM, sem ociosidade." -ForegroundColor Green
     }
 }
 catch {
