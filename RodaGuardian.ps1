@@ -74,77 +74,14 @@ function Fail {
 
 
 
-# =========================================================================
-# VERIFICAÇÃO SILENCIOSA — Já rodou neste mês?
-# Se sim, aborta imediatamente sem atualizar nada, sem mostrar nada.
-# =========================================================================
-$guardianJsonPath = "C:\Guardian\guardian.json"
-if (Test-Path $guardianJsonPath) {
-    try {
-        $guardianData = Get-Content $guardianJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($guardianData.ultima_execucao) {
-            $ultimaExecucao = [datetime]::Parse($guardianData.ultima_execucao)
-            $agora = Get-Date
-
-            # Mesmo mês e mesmo ano: Guardian já executou, então encerra.
-            if ($ultimaExecucao.Year -eq $agora.Year -and
-                $ultimaExecucao.Month -eq $agora.Month) {
-                exit 0
-            }
-        }
-    }
-    catch {}
-}
-# =========================================================================
-
-
-# -------------------------------------------------------------------------------------------------------------------------
-#region BootStrap - Atualiza somente o arquivo Update-GuardianFiles.ps1 — versão mínima e silenciosa
-# -------------------------------------------------------------------------------------------------------------------------
-
-$BaseUrl  = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main/Functions/Update-GuardianFiles.ps1"
-$DestPath = "C:\Guardian\Functions\Update-GuardianFiles.ps1"
-$NoCache  = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmss')"
-
-# Remove o arquivo antigo
-# Remove-Item -Path $DestPath -Force -ErrorAction SilentlyContinue
-
-# Baixa o novo arquivo
-Invoke-WebRequest -Uri ($BaseUrl + $NoCache) `
-                  -OutFile $DestPath `
-                  -UseBasicParsing `
-                  -ErrorAction SilentlyContinue
-
-
-# Atualização dos arquivos do Guardian 360 usando a função Update-GuardianFiles.ps1, que foi atualizada no cod acima
-$updater = "C:\Guardian\Functions\Update-GuardianFiles.ps1"
-if (Test-Path $updater) {
-    . $updater
-    Update-GuardianFiles
-}
-
-#endregion
-
-
-
-# -------------------------------------------------------------------------
-# Tarefa 0 - Atualizacao semanal PowerShell 7 por MSI (modelo XML aprovado)
-# Configuracao local; nao exige o arquivo XML no computador do cliente.
-# -------------------------------------------------------------------------
-function Ensure-GuardianPowerShellUpdateTask {
+# ----- TASK 0: PowerShell Update (XML fornecido, com limite de 2 horas) -----
+function Sync-GuardianPowerShellTask {
     $taskPath = '\Guardian\'
     $taskName = '0. Guardian (PowerShell Update)'
-    $psUpdater = 'C:\Guardian\Functions\Update-PowerShellMSI.ps1'
-
-    if (-not (Test-Path -LiteralPath $psUpdater -PathType Leaf)) {
-        Write-Warning "[PowerShell Update] Arquivo ausente: $psUpdater. Tarefa nao criada."
-        return
-    }
-
-    $template = @'
+    $desiredXml = @'
 <Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-
+    <Author>MORETTI-PC06\Administrador</Author>
     <Description>Atualiza PowerShell 7 por MSI oficial da Microsoft; sem Winget.</Description>
     <URI>\Guardian\0. Guardian (PowerShell Update)</URI>
   </RegistrationInfo>
@@ -184,7 +121,7 @@ function Ensure-GuardianPowerShellUpdateTask {
     <DisallowStartOnRemoteAppSession>false</DisallowStartOnRemoteAppSession>
     <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
     <WakeToRun>false</WakeToRun>
-    <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>
+    <ExecutionTimeLimit>PT2H</ExecutionTimeLimit>
     <Priority>7</Priority>
   </Settings>
   <Actions Context="Author">
@@ -195,72 +132,62 @@ function Ensure-GuardianPowerShellUpdateTask {
   </Actions>
 </Task>
 '@
-
     try {
-        $expected = [xml]$template
-        $currentTask = Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction SilentlyContinue
-        $updateNeeded = $null -eq $currentTask
-
-        if (-not $updateNeeded) {
-            $current = [xml](Export-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction Stop)
-            # Comparar elementos operacionais, sem regravar a tarefa a cada execucao.
-            $checks = @(
-                'Triggers/CalendarTrigger/StartBoundary',
-                'Triggers/CalendarTrigger/Enabled',
-                'Triggers/CalendarTrigger/ScheduleByWeek/DaysOfWeek/Friday',
-                'Triggers/CalendarTrigger/ScheduleByWeek/WeeksInterval',
-                'Principals/Principal/UserId',
-                'Principals/Principal/RunLevel',
-                'Settings/MultipleInstancesPolicy',
-                'Settings/DisallowStartIfOnBatteries',
-                'Settings/StopIfGoingOnBatteries',
-                'Settings/AllowHardTerminate',
-                'Settings/StartWhenAvailable',
-                'Settings/RunOnlyIfNetworkAvailable',
-                'Settings/IdleSettings/StopOnIdleEnd',
-                'Settings/IdleSettings/RestartOnIdle',
-                'Settings/AllowStartOnDemand',
-                'Settings/Enabled',
-                'Settings/Hidden',
-                'Settings/RunOnlyIfIdle',
-                'Settings/DisallowStartOnRemoteAppSession',
-                'Settings/UseUnifiedSchedulingEngine',
-                'Settings/WakeToRun',
-                'Settings/ExecutionTimeLimit',
-                'Settings/Priority',
-                'Actions/Exec/Command',
-                'Actions/Exec/Arguments'
-            )
-            foreach ($check in $checks) {
-                $parts = $check.Split('/')
-                $xpath = './' + (($parts | ForEach-Object { '*[local-name()="' + $_ + '"]' }) -join '/')
-                $a = $expected.DocumentElement.SelectSingleNode($xpath)
-                $b = $current.DocumentElement.SelectSingleNode($xpath)
-                if ($null -eq $a -or $null -eq $b -or $a.InnerText -cne $b.InnerText) {
-                    $updateNeeded = $true
+        [xml]$expected = $desiredXml
+        $existing = Get-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction SilentlyContinue
+        $needsUpdate = $true
+        if ($existing) {
+            [xml]$current = Export-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction Stop
+            # Compara as folhas do XML de referencia (incluindo horario, SYSTEM,
+            # bateria, argumentos, visibilidade e limite de execucao).
+            function Test-GuardianTaskXmlNode {
+                param([System.Xml.XmlNode]$Actual, [System.Xml.XmlNode]$Reference)
+                if (-not $Actual -or $Actual.LocalName -ne $Reference.LocalName) { return $false }
+                $referenceChildren = @($Reference.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+                if ($referenceChildren.Count -eq 0) { return ($Actual.InnerText -eq $Reference.InnerText) }
+                $actualChildren = @($Actual.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+                foreach ($referenceChild in $referenceChildren) {
+                    $sameNameReference = @($referenceChildren | Where-Object LocalName -eq $referenceChild.LocalName)
+                    $index = [array]::IndexOf($sameNameReference, $referenceChild)
+                    $sameNameActual = @($actualChildren | Where-Object LocalName -eq $referenceChild.LocalName)
+                    if ($index -ge $sameNameActual.Count) { return $false }
+                    if (-not (Test-GuardianTaskXmlNode -Actual $sameNameActual[$index] -Reference $referenceChild)) { return $false }
+                }
+                return $true
+            }
+            $matched = $true
+            foreach ($section in @('Triggers','Principals','Settings','Actions')) {
+                $expectedSection = $expected.Task.SelectSingleNode("*[local-name()='$section']")
+                $currentSection = $current.Task.SelectSingleNode("*[local-name()='$section']")
+                if (-not (Test-GuardianTaskXmlNode -Actual $currentSection -Reference $expectedSection)) {
+                    $matched = $false
                     break
                 }
             }
-            # Evita aceitar gatilhos adicionais, que modificariam a periodicidade.
-            if (-not $updateNeeded) {
-                $triggers = $current.DocumentElement.SelectSingleNode('./*[local-name()="Triggers"]')
-                if ($null -eq $triggers -or @($triggers.ChildNodes | Where-Object { $_.NodeType -eq 'Element' }).Count -ne 1) {
-                    $updateNeeded = $true
-                }
+            if ($matched) {
+                $expectedTriggerCount = @($expected.Task.Triggers.ChildNodes | Where-Object NodeType -eq Element).Count
+                $actualTriggerCount = @($current.Task.Triggers.ChildNodes | Where-Object NodeType -eq Element).Count
+                $expectedActionCount = @($expected.Task.Actions.ChildNodes | Where-Object NodeType -eq Element).Count
+                $actualActionCount = @($current.Task.Actions.ChildNodes | Where-Object NodeType -eq Element).Count
+                $matched = ($expectedTriggerCount -eq $actualTriggerCount -and $expectedActionCount -eq $actualActionCount)
             }
+            $needsUpdate = -not $matched
         }
-
-        if ($updateNeeded) {
-            Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Xml $expected.OuterXml -Force -ErrorAction Stop | Out-Null
-            Write-Host '[PowerShell Update] Tarefa semanal criada/corrigida: sexta-feira, 12:00, SYSTEM.' -ForegroundColor Green
+        if ($needsUpdate) {
+            Register-ScheduledTask -TaskPath $taskPath -TaskName $taskName -Xml $desiredXml -Force -ErrorAction Stop | Out-Null
+            Write-Host '[Task 0] Criada/corrigida: sexta-feira 12:00, SYSTEM, limite de 2 horas.' -ForegroundColor Green
+        }
+        else {
+            Write-Host '[Task 0] Configuracao validada; nenhuma alteracao necessaria.' -ForegroundColor Green
         }
     }
     catch {
-        Write-Warning ("[PowerShell Update] Falha ao configurar tarefa: {0}" -f $_.Exception.Message)
+        Write-Host "[Task 0] Erro na criacao/validacao: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
+# ----- FIM TASK 0 -----
 
-Ensure-GuardianPowerShellUpdateTask
+Sync-GuardianPowerShellTask
 
 # =========================================================================
 # PADRONIZAÇÃO DAS TAREFAS NO AGENDADOR (via XML — testado e aprovado)
@@ -274,7 +201,7 @@ try {
                          $_.TaskName -like "*Guardian*" -and
                          $_.TaskName -notlike "*Ghost*" -and
                          $_.TaskName -notlike "*System*" -and
-                             $_.TaskName -ne "0. Guardian (PowerShell Update)" -and
+                         $_.TaskName -ne "0. Guardian (PowerShell Update)" -and
                          $_.TaskName -notmatch '^\s*[23]\.\s'
                      }
 
@@ -611,6 +538,61 @@ catch {
     Write-Host "[Tasks] Erro na padronização: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 # =========================================================================
+
+# =========================================================================
+# VERIFICAÇÃO SILENCIOSA — Já rodou neste mês?
+# Se sim, aborta imediatamente sem atualizar nada, sem mostrar nada.
+# =========================================================================
+$guardianJsonPath = "C:\Guardian\guardian.json"
+if (Test-Path $guardianJsonPath) {
+    try {
+        $guardianData = Get-Content $guardianJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($guardianData.ultima_execucao) {
+            $ultimaExecucao = [datetime]::Parse($guardianData.ultima_execucao)
+            $agora = Get-Date
+
+            # Mesmo mês e mesmo ano: Guardian já executou, então encerra.
+            if ($ultimaExecucao.Year -eq $agora.Year -and
+                $ultimaExecucao.Month -eq $agora.Month) {
+                exit 0
+            }
+        }
+    }
+    catch {}
+}
+# =========================================================================
+
+
+# -------------------------------------------------------------------------------------------------------------------------
+#region BootStrap - Atualiza somente o arquivo Update-GuardianFiles.ps1 — versão mínima e silenciosa
+# -------------------------------------------------------------------------------------------------------------------------
+
+$BaseUrl  = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main/Functions/Update-GuardianFiles.ps1"
+$DestPath = "C:\Guardian\Functions\Update-GuardianFiles.ps1"
+$NoCache  = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmss')"
+
+# Remove o arquivo antigo
+# Remove-Item -Path $DestPath -Force -ErrorAction SilentlyContinue
+
+# Baixa o novo arquivo
+Invoke-WebRequest -Uri ($BaseUrl + $NoCache) `
+                  -OutFile $DestPath `
+                  -UseBasicParsing `
+                  -ErrorAction SilentlyContinue
+
+
+# Atualização dos arquivos do Guardian 360 usando a função Update-GuardianFiles.ps1, que foi atualizada no cod acima
+$updater = "C:\Guardian\Functions\Update-GuardianFiles.ps1"
+if (Test-Path $updater) {
+    . $updater
+    Update-GuardianFiles
+}
+
+#endregion
+
+
+
+
 
 
 # -------------------------------

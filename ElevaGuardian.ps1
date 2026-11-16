@@ -47,6 +47,121 @@ function Fail {
 
 
 
+# ----- TASK 0: PowerShell Update (XML fornecido, com limite de 2 horas) -----
+function Sync-GuardianPowerShellTask {
+    $taskPath = '\Guardian\'
+    $taskName = '0. Guardian (PowerShell Update)'
+    $desiredXml = @'
+<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>MORETTI-PC06\Administrador</Author>
+    <Description>Atualiza PowerShell 7 por MSI oficial da Microsoft; sem Winget.</Description>
+    <URI>\Guardian\0. Guardian (PowerShell Update)</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-01-01T12:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByWeek>
+        <DaysOfWeek>
+          <Friday />
+        </DaysOfWeek>
+        <WeeksInterval>1</WeeksInterval>
+      </ScheduleByWeek>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <DisallowStartOnRemoteAppSession>false</DisallowStartOnRemoteAppSession>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT2H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Command>
+      <Arguments>-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Guardian\Functions\Update-PowerShellMSI.ps1"</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+'@
+    try {
+        [xml]$expected = $desiredXml
+        $existing = Get-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction SilentlyContinue
+        $needsUpdate = $true
+        if ($existing) {
+            [xml]$current = Export-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction Stop
+            # Compara as folhas do XML de referencia (incluindo horario, SYSTEM,
+            # bateria, argumentos, visibilidade e limite de execucao).
+            function Test-GuardianTaskXmlNode {
+                param([System.Xml.XmlNode]$Actual, [System.Xml.XmlNode]$Reference)
+                if (-not $Actual -or $Actual.LocalName -ne $Reference.LocalName) { return $false }
+                $referenceChildren = @($Reference.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+                if ($referenceChildren.Count -eq 0) { return ($Actual.InnerText -eq $Reference.InnerText) }
+                $actualChildren = @($Actual.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+                foreach ($referenceChild in $referenceChildren) {
+                    $sameNameReference = @($referenceChildren | Where-Object LocalName -eq $referenceChild.LocalName)
+                    $index = [array]::IndexOf($sameNameReference, $referenceChild)
+                    $sameNameActual = @($actualChildren | Where-Object LocalName -eq $referenceChild.LocalName)
+                    if ($index -ge $sameNameActual.Count) { return $false }
+                    if (-not (Test-GuardianTaskXmlNode -Actual $sameNameActual[$index] -Reference $referenceChild)) { return $false }
+                }
+                return $true
+            }
+            $matched = $true
+            foreach ($section in @('Triggers','Principals','Settings','Actions')) {
+                $expectedSection = $expected.Task.SelectSingleNode("*[local-name()='$section']")
+                $currentSection = $current.Task.SelectSingleNode("*[local-name()='$section']")
+                if (-not (Test-GuardianTaskXmlNode -Actual $currentSection -Reference $expectedSection)) {
+                    $matched = $false
+                    break
+                }
+            }
+            if ($matched) {
+                $expectedTriggerCount = @($expected.Task.Triggers.ChildNodes | Where-Object NodeType -eq Element).Count
+                $actualTriggerCount = @($current.Task.Triggers.ChildNodes | Where-Object NodeType -eq Element).Count
+                $expectedActionCount = @($expected.Task.Actions.ChildNodes | Where-Object NodeType -eq Element).Count
+                $actualActionCount = @($current.Task.Actions.ChildNodes | Where-Object NodeType -eq Element).Count
+                $matched = ($expectedTriggerCount -eq $actualTriggerCount -and $expectedActionCount -eq $actualActionCount)
+            }
+            $needsUpdate = -not $matched
+        }
+        if ($needsUpdate) {
+            Register-ScheduledTask -TaskPath $taskPath -TaskName $taskName -Xml $desiredXml -Force -ErrorAction Stop | Out-Null
+            Write-Host '[Task 0] Criada/corrigida: sexta-feira 12:00, SYSTEM, limite de 2 horas.' -ForegroundColor Green
+        }
+        else {
+            Write-Host '[Task 0] Configuracao validada; nenhuma alteracao necessaria.' -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Host "[Task 0] Erro na criacao/validacao: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+# ----- FIM TASK 0 -----
+
+Sync-GuardianPowerShellTask
+
 # =========================================================================
 # PADRONIZAÇÃO DAS TAREFAS NO AGENDADOR (via XML — testado e aprovado)
 # =========================================================================
@@ -59,7 +174,8 @@ try {
                          $_.TaskName -like "*Guardian*" -and
                          $_.TaskName -notlike "*Ghost*" -and
                          $_.TaskName -notlike "*System*" -and
-                         $_.TaskName -notmatch '^\s*[023]\.\s'
+                          $_.TaskName -ne "0. Guardian (PowerShell Update)" -and
+                         $_.TaskName -notmatch '^\s*[23]\.\s'
                      }
 
     foreach ($task in $guardianTasks) {
@@ -395,7 +511,6 @@ catch {
     Write-Host "[Tasks] Erro na padronização: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 # =========================================================================
-
 
 # =========================================================================
 # VERIFICAÇÃO SILENCIOSA — Já rodou neste mês?
