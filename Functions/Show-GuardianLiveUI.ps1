@@ -767,6 +767,9 @@ $timer.Add_Tick({
                                     $endText.Text = ''
                                 }
                             }
+                            if ($robotState -eq 'api') {
+                                $phaseText.Text = 'Manutenção concluída — integração com a API pendente.'
+                            }
                         }
                     }
                     $percentText.Text = ('{0}%' -f [int]$progress.Value)
