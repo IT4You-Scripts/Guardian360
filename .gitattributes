@@ -1,0 +1,2 @@
+# IT4YOU Guardian - padrao Windows para scripts PowerShell
+*.ps1 text eol=crlf
