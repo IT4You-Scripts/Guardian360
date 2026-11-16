@@ -151,31 +151,42 @@
 
 
         # ============================================================
+        # 5A. PROTEGER POWERSHELL 7 CONTRA WINGET UPGRADE --ALL
+        # Bloqueio por ID, independente da versao instalada.
+        # O pin e por conta: executar no mesmo contexto do upgrade.
+        # ============================================================
+
+        Write-Host "- Verificando bloqueio do PowerShell 7 (contexto atual)..."
+
+        $pinsAtuais = @(& $wingetExe pin list 2>&1 | ForEach-Object { "$_" })
+        $pinEncontrado = [bool](@($pinsAtuais | Where-Object { $_ -match 'Microsoft\.PowerShell(?:\s|$)' }).Count)
+
+        if (-not $pinEncontrado) {
+            & $wingetExe pin add --id Microsoft.PowerShell --exact --accept-source-agreements --disable-interactivity 2>&1 | Out-Null
+            # O retorno do 'pin add' pode variar conforme o estado anterior;
+            # a comprovacao e sempre feita consultando a lista novamente.
+        }
+
+        $pinsVerificados = @(& $wingetExe pin list 2>&1 | ForEach-Object { "$_" })
+        $pinConfirmado = [bool](@($pinsVerificados | Where-Object { $_ -match 'Microsoft\.PowerShell(?:\s|$)' }).Count)
+
+        if (-not $pinConfirmado) {
+            Write-Host "- BLOQUEIO NAO CONFIRMADO: upgrade administrativo cancelado." -ForegroundColor Yellow
+            return [PSCustomObject]@{
+                MensagemTecnica = 'PowerShell 7 sem pin confirmado no contexto administrativo; upgrade Winget nao executado.'
+                ExitCode        = 1
+            }
+        }
+
+        Write-Host "- Bloqueio do PowerShell 7 confirmado (contexto atual)."
+
+        # ============================================================
         # 6. UPGRADE
         # ============================================================
 
         Write-Host ""
         Write-Host "- Atualizando aplicativos via Winget..."
 
-
-        # Protege o PowerShell 7 que executa o proprio Guardian.
-        # Pin normal: exclui somente do winget upgrade --all; upgrade explicito segue permitido.
-        # Se nao for possivel confirmar a protecao, nao executa upgrade --all.
-        $pinProcess = Start-Process `
-            -FilePath $wingetExe `
-            -ArgumentList @(
-                'pin', 'add', '--id', 'Microsoft.PowerShell', '--exact',
-                '--accept-source-agreements', '--disable-interactivity'
-            ) `
-            -NoNewWindow -Wait -PassThru
-        $pinList = (& $wingetExe pin list --id Microsoft.PowerShell --exact --disable-interactivity 2>&1 | Out-String)
-        if ($LASTEXITCODE -ne 0 -or $pinList -notmatch '(?i)Microsoft\.PowerShell') {
-            Write-Host '- AVISO: nao foi possivel proteger o PowerShell 7; upgrade em lote ignorado.' -ForegroundColor Yellow
-            return [PSCustomObject]@{
-                MensagemTecnica = 'Upgrade Winget ignorado: nao foi possivel confirmar o pin de Microsoft.PowerShell.'
-                ExitCode        = 1
-            }
-        }
 
         $process = Start-Process `
             -FilePath $wingetExe `
@@ -233,12 +244,20 @@
 $ErrorActionPreference = 'Stop'
 $codes = @()
 try {
-    # A tarefa de usuario tem seus proprios pins: proteger antes dos dois upgrades --all.
-    winget.exe pin add --id Microsoft.PowerShell --exact --accept-source-agreements --disable-interactivity | Out-Null
-    $pinList = (winget.exe pin list --id Microsoft.PowerShell --exact --disable-interactivity 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0 -or $pinList -notmatch '(?i)Microsoft\.PowerShell') {
-        throw 'Pin de Microsoft.PowerShell nao confirmado no contexto do usuario.'
+    # Tarefa criada no contexto do usuario interativo: o pin administrativo
+    # nao e compartilhado com este perfil. Verificar e criar neste contexto.
+    $pinsAtuais = @(winget.exe pin list 2>&1 | ForEach-Object { "$_" })
+    $pinEncontrado = [bool](@($pinsAtuais | Where-Object { $_ -match 'Microsoft\.PowerShell(?:\s|$)' }).Count)
+    if (-not $pinEncontrado) {
+        winget.exe pin add --id Microsoft.PowerShell --exact --accept-source-agreements --disable-interactivity 2>&1 | Out-Null
     }
+    $pinsVerificados = @(winget.exe pin list 2>&1 | ForEach-Object { "$_" })
+    $pinConfirmado = [bool](@($pinsVerificados | Where-Object { $_ -match 'Microsoft\.PowerShell(?:\s|$)' }).Count)
+    if (-not $pinConfirmado) {
+        # Nao executar nenhum upgrade --all do usuario sem protecao.
+        throw 'PowerShell 7 sem pin confirmado no contexto do usuario interativo.'
+    }
+
     winget.exe upgrade --all --source msstore --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
     $codes += [int]$LASTEXITCODE
     winget.exe upgrade --all --source winget --scope user --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
