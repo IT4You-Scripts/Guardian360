@@ -165,6 +165,7 @@ function Update-GuardianFiles {
         @{ Url = "$BaseUrl/Functions/Send-LogToServer.ps1"; Path = "$BasePath\Functions\Send-LogToServer.ps1" },
         @{ Url = "$BaseUrl/Functions/Update-MicrosoftStore.ps1"; Path = "$BasePath\Functions\Update-MicrosoftStore.ps1" },
         @{ Url = "$BaseUrl/Functions/Update-WindowsOS.ps1"; Path = "$BasePath\Functions\Update-WindowsOS.ps1" },
+        @{ Url = "$BaseUrl/Functions/Update-PowerShellMSI.ps1"; Path = "$BasePath\Functions\Update-PowerShellMSI.ps1" },
         @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1"; Path = "$BasePath\Functions\Update-WingetApps.ps1" },
         @{ Url = "$BaseUrl/Functions/Write-JsonResult.ps1"; Path = "$BasePath\Functions\Write-JsonResult.ps1" },
         @{ Url = "$BaseUrl/Functions/Show-GuardianLiveUI.ps1"; Path = "$BasePath\Functions\Show-GuardianLiveUI.ps1" }
@@ -299,6 +300,141 @@ foreach ($item in $AtomicTargets) {
     }
     # =========================================================================
 
+# -------------------------------------------------------------------------
+# Tarefa 0 - Atualizacao semanal PowerShell 7 por MSI (modelo XML aprovado)
+# Configuracao local; nao exige o arquivo XML no computador do cliente.
+# -------------------------------------------------------------------------
+function Ensure-GuardianPowerShellUpdateTask {
+    $taskPath = '\Guardian\'
+    $taskName = '0. Guardian (PowerShell Update)'
+    $psUpdater = 'C:\Guardian\Functions\Update-PowerShellMSI.ps1'
+
+    if (-not (Test-Path -LiteralPath $psUpdater -PathType Leaf)) {
+        Write-Warning "[PowerShell Update] Arquivo ausente: $psUpdater. Tarefa nao criada."
+        return
+    }
+
+    $template = @'
+<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+
+    <Description>Atualiza PowerShell 7 por MSI oficial da Microsoft; sem Winget.</Description>
+    <URI>\Guardian\0. Guardian (PowerShell Update)</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-01-01T12:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByWeek>
+        <DaysOfWeek>
+          <Friday />
+        </DaysOfWeek>
+        <WeeksInterval>1</WeeksInterval>
+      </ScheduleByWeek>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <DisallowStartOnRemoteAppSession>false</DisallowStartOnRemoteAppSession>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Command>
+      <Arguments>-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Guardian\Functions\Update-PowerShellMSI.ps1"</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+'@
+
+    try {
+        $expected = [xml]$template
+        $currentTask = Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction SilentlyContinue
+        $updateNeeded = $null -eq $currentTask
+
+        if (-not $updateNeeded) {
+            $current = [xml](Export-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction Stop)
+            # Comparar elementos operacionais, sem regravar a tarefa a cada execucao.
+            $checks = @(
+                'Triggers/CalendarTrigger/StartBoundary',
+                'Triggers/CalendarTrigger/Enabled',
+                'Triggers/CalendarTrigger/ScheduleByWeek/DaysOfWeek/Friday',
+                'Triggers/CalendarTrigger/ScheduleByWeek/WeeksInterval',
+                'Principals/Principal/UserId',
+                'Principals/Principal/RunLevel',
+                'Settings/MultipleInstancesPolicy',
+                'Settings/DisallowStartIfOnBatteries',
+                'Settings/StopIfGoingOnBatteries',
+                'Settings/AllowHardTerminate',
+                'Settings/StartWhenAvailable',
+                'Settings/RunOnlyIfNetworkAvailable',
+                'Settings/IdleSettings/StopOnIdleEnd',
+                'Settings/IdleSettings/RestartOnIdle',
+                'Settings/AllowStartOnDemand',
+                'Settings/Enabled',
+                'Settings/Hidden',
+                'Settings/RunOnlyIfIdle',
+                'Settings/DisallowStartOnRemoteAppSession',
+                'Settings/UseUnifiedSchedulingEngine',
+                'Settings/WakeToRun',
+                'Settings/ExecutionTimeLimit',
+                'Settings/Priority',
+                'Actions/Exec/Command',
+                'Actions/Exec/Arguments'
+            )
+            foreach ($check in $checks) {
+                $parts = $check.Split('/')
+                $xpath = './' + (($parts | ForEach-Object { '*[local-name()="' + $_ + '"]' }) -join '/')
+                $a = $expected.DocumentElement.SelectSingleNode($xpath)
+                $b = $current.DocumentElement.SelectSingleNode($xpath)
+                if ($null -eq $a -or $null -eq $b -or $a.InnerText -cne $b.InnerText) {
+                    $updateNeeded = $true
+                    break
+                }
+            }
+            # Evita aceitar gatilhos adicionais, que modificariam a periodicidade.
+            if (-not $updateNeeded) {
+                $triggers = $current.DocumentElement.SelectSingleNode('./*[local-name()="Triggers"]')
+                if ($null -eq $triggers -or @($triggers.ChildNodes | Where-Object { $_.NodeType -eq 'Element' }).Count -ne 1) {
+                    $updateNeeded = $true
+                }
+            }
+        }
+
+        if ($updateNeeded) {
+            Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Xml $expected.OuterXml -Force -ErrorAction Stop | Out-Null
+            Write-Host '[PowerShell Update] Tarefa semanal criada/corrigida: sexta-feira, 12:00, SYSTEM.' -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Warning ("[PowerShell Update] Falha ao configurar tarefa: {0}" -f $_.Exception.Message)
+    }
+}
+
+Ensure-GuardianPowerShellUpdateTask
+
     # =========================================================================
     # PADRONIZAÇÃO DAS TAREFAS NO AGENDADOR
     # Mesma lógica validada no RodaGuardian/Guardian v4.
@@ -312,6 +448,7 @@ foreach ($item in $AtomicTargets) {
                              $_.TaskName -like "*Guardian*" -and
                              $_.TaskName -notlike "*Ghost*" -and
                              $_.TaskName -notlike "*System*" -and
+                             $_.TaskName -ne "0. Guardian (PowerShell Update)" -and
                              $_.TaskName -notmatch '^\s*[23]\.\s'
                          }
 

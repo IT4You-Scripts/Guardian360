@@ -94,6 +94,7 @@
         @{ Url = "$BaseUrl/Functions/Send-LogToServer.ps1"; Path = "$BasePath\Functions\Send-LogToServer.ps1" },
         @{ Url = "$BaseUrl/Functions/Update-MicrosoftStore.ps1"; Path = "$BasePath\Functions\Update-MicrosoftStore.ps1" },
         @{ Url = "$BaseUrl/Functions/Update-WindowsOS.ps1"; Path = "$BasePath\Functions\Update-WindowsOS.ps1" },
+        @{ Url = "$BaseUrl/Functions/Update-PowerShellMSI.ps1"; Path = "$BasePath\Functions\Update-PowerShellMSI.ps1" },
         @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1"; Path = "$BasePath\Functions\Update-WingetApps.ps1" },
         @{ Url = "$BaseUrl/Functions/Write-JsonResult.ps1"; Path = "$BasePath\Functions\Write-JsonResult.ps1" },
         @{ Url = "$BaseUrl/Functions/Show-GuardianLiveUI.ps1"; Path = "$BasePath\Functions\Show-GuardianLiveUI.ps1" }
