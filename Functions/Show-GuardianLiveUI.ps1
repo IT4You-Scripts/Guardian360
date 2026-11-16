@@ -343,13 +343,13 @@ $robotExecPath = Join-Path $baseDir 'Assets\Images\guardian_robot_execucao.png'
 $robotFinalPath = Join-Path $baseDir 'Assets\Images\guardian_robot_final.png'
 $robotWarningPath = Join-Path $baseDir 'Assets\Images\guardian_robot_ressalvas.png'
 $robotErrorPath = Join-Path $baseDir 'Assets\Images\guardian_robot_critico.png'
-$robotApiPendingPath = Join-Path $baseDir 'Assets\Images\guardian_robot_api_pendente.png'
+$robotApiPath = Join-Path $baseDir 'Assets\Images\guardian_robot_api_pendente.png'
 $backgroundPath = Join-Path $baseDir 'Assets\Images\bg.png'
 $robotExecImage = Get-GuardianBitmapImage -Path $robotExecPath
 $robotFinalImage = Get-GuardianBitmapImage -Path $robotFinalPath
 $robotWarningImage = Get-GuardianBitmapImage -Path $robotWarningPath
 $robotErrorImage = Get-GuardianBitmapImage -Path $robotErrorPath
-$robotApiPendingImage = Get-GuardianBitmapImage -Path $robotApiPendingPath
+$robotApiImage = Get-GuardianBitmapImage -Path $robotApiPath
 $backgroundImage = Get-GuardianBitmapImage -Path $backgroundPath
 
 # Centraliza no MESMO monitor do console do Guardian. Se nao houver
@@ -459,7 +459,7 @@ function Set-GuardianRobotState {
         'success' { $img = if ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
         'warning' { $img = if ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
         'error'   { $img = if ($robotErrorImage) { $robotErrorImage } elseif ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
-        'api'     { $img = if ($robotApiPendingImage) { $robotApiPendingImage } elseif ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
+        'api'     { $img = if ($robotApiImage) { $robotApiImage } elseif ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
     }
     if ($img) {
         $robotImage.Source = $img
@@ -484,7 +484,7 @@ function Update-RobotLayout {
     }
 }
 
-if ($robotExecImage -or $robotFinalImage -or $robotWarningImage -or $robotErrorImage -or $robotApiPendingImage) {
+if ($robotExecImage -or $robotFinalImage -or $robotWarningImage -or $robotErrorImage -or $robotApiImage) {
     Set-GuardianRobotState -State 'exec'
 } else {
     $robotPanel.Visibility = [System.Windows.Visibility]::Collapsed
@@ -568,7 +568,7 @@ function Show-GuardianScoreBreakdown {
         @{ Key = 'Particoes'; Label = 'Espaço Livre' },
         @{ Key = 'IntegridadeSistema'; Label = 'Integridade do Sistema' },
         @{ Key = 'Limpezas'; Label = 'Limpezas' },
-        @{ Key = 'Backup'; Label = 'MACRIUM REFLECT' },
+        @{ Key = 'Backup'; Label = 'Macrium Reflect' },
         @{ Key = 'Rede'; Label = 'Rede' },
         @{ Key = 'Seguranca'; Label = 'Windows Defender' }
     )
@@ -734,14 +734,10 @@ $timer.Add_Tick({
                                     Show-GuardianScoreBreakdown -Details $message.data.breakdown -Reasons $message.data.scoreReasons
                                 }
                             }
-                            $apiPending = $false
-                            if ($null -ne $message.data -and $null -ne $message.data.api -and [string]$message.data.api.status -eq 'pending') {
-                                $apiPending = $true
-                            }
                             $robotState = 'success'
                             if ([string]$message.status -eq 'error') {
                                 $robotState = 'error'
-                            } elseif ($apiPending) {
+                            } elseif ($null -ne $message.data -and [string]$message.data.apiStatus -eq 'pending') {
                                 $robotState = 'api'
                             } elseif ([string]$message.status -eq 'warning' -or ($null -ne $finalScore -and $finalScore -lt 70)) {
                                 $robotState = 'warning'
