@@ -565,7 +565,7 @@ function Show-GuardianScoreBreakdown {
         @{ Key = 'Particoes'; Label = 'Espaço Livre' },
         @{ Key = 'IntegridadeSistema'; Label = 'Integridade do Sistema' },
         @{ Key = 'Limpezas'; Label = 'Limpezas' },
-        @{ Key = 'Backup'; Label = 'MACRIUM REFLECT' },
+        @{ Key = 'Backup'; Label = 'Macrium Reflect' },
         @{ Key = 'Rede'; Label = 'Rede' },
         @{ Key = 'Seguranca'; Label = 'Windows Defender' }
     )
