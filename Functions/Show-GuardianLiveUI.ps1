@@ -341,9 +341,13 @@ function Get-GuardianBitmapImage {
 $baseDir = Split-Path -Parent $PSScriptRoot
 $robotExecPath = Join-Path $baseDir 'Assets\Images\guardian_robot_execucao.png'
 $robotFinalPath = Join-Path $baseDir 'Assets\Images\guardian_robot_final.png'
+$robotWarningPath = Join-Path $baseDir 'Assets\Images\guardian_robot_ressalvas.png'
+$robotErrorPath = Join-Path $baseDir 'Assets\Images\guardian_robot_critico.png'
 $backgroundPath = Join-Path $baseDir 'Assets\Images\bg.png'
 $robotExecImage = Get-GuardianBitmapImage -Path $robotExecPath
 $robotFinalImage = Get-GuardianBitmapImage -Path $robotFinalPath
+$robotWarningImage = Get-GuardianBitmapImage -Path $robotWarningPath
+$robotErrorImage = Get-GuardianBitmapImage -Path $robotErrorPath
 $backgroundImage = Get-GuardianBitmapImage -Path $backgroundPath
 
 # Centraliza no MESMO monitor do console do Guardian. Se nao houver
@@ -446,12 +450,21 @@ if ($backgroundImage) {
 $window.FindName('ClientText').Text = "$Cliente"
 $window.FindName('PCText').Text = "$Computador"
 
-if ($robotExecImage) {
-    $robotImage.Source = $robotExecImage
-} elseif ($robotFinalImage) {
-    $robotImage.Source = $robotFinalImage
-} else {
-    $robotPanel.Visibility = [System.Windows.Visibility]::Collapsed
+function Set-GuardianRobotState {
+    param([ValidateSet('exec','success','warning','error')][string]$State)
+    switch ($State) {
+        'exec'    { $img = if ($robotExecImage) { $robotExecImage } elseif ($robotFinalImage) { $robotFinalImage } else { $null } }
+        'success' { $img = if ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
+        'warning' { $img = if ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
+        'error'   { $img = if ($robotErrorImage) { $robotErrorImage } elseif ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
+    }
+    if ($img) {
+        $robotImage.Source = $img
+        Update-RobotLayout
+    } elseif ($robotPanel) {
+        $robotPanel.Visibility = [System.Windows.Visibility]::Collapsed
+        Update-RobotLayout
+    }
 }
 
 function Update-RobotLayout {
@@ -466,6 +479,12 @@ function Update-RobotLayout {
         $robotGapColumn.Width = [System.Windows.GridLength]::new(26)
         $robotPanel.Visibility = [System.Windows.Visibility]::Visible
     }
+}
+
+if ($robotExecImage -or $robotFinalImage -or $robotWarningImage -or $robotErrorImage) {
+    Set-GuardianRobotState -State 'exec'
+} else {
+    $robotPanel.Visibility = [System.Windows.Visibility]::Collapsed
 }
 
 $window.Add_SizeChanged({ Update-RobotLayout })
@@ -501,7 +520,7 @@ if ($Preview) {
     $healthClass.Text = 'Boa (exemplo de prévia)'
     $progress.Value = 100
     $percentText.Text = '100%'
-    if ($robotFinalImage) { $robotImage.Source = $robotFinalImage }
+    Set-GuardianRobotState -State 'success'
     $finishButton.Visibility = [System.Windows.Visibility]::Visible
     Update-RobotLayout
     [void]$window.ShowDialog()
@@ -546,7 +565,7 @@ function Show-GuardianScoreBreakdown {
         @{ Key = 'Particoes'; Label = 'Espaço Livre' },
         @{ Key = 'IntegridadeSistema'; Label = 'Integridade do Sistema' },
         @{ Key = 'Limpezas'; Label = 'Limpezas' },
-        @{ Key = 'Backup'; Label = 'Macrium Reflect' },
+        @{ Key = 'Backup'; Label = 'MACRIUM REFLECT' },
         @{ Key = 'Rede'; Label = 'Rede' },
         @{ Key = 'Seguranca'; Label = 'Windows Defender' }
     )
@@ -638,7 +657,7 @@ $timer.Add_Tick({
                 $activityLabel.Text = 'RESULTADO DA MANUTENÇÃO'
                 $finishButton.Content = 'Fechar'
                 $finishButton.Visibility = [System.Windows.Visibility]::Visible
-                if ($robotFinalImage) { $robotImage.Source = $robotFinalImage; Update-RobotLayout }
+                Set-GuardianRobotState -State 'error'
             }
         }
         while ($listener.Pending()) {
@@ -663,7 +682,7 @@ $timer.Add_Tick({
                             $phaseText.Text = [string]$message.label
                             $activityText.Text = 'Preparando atividades desta etapa...'
                             $progress.Value = [int]$message.percent
-                            if ($robotExecImage) { $robotImage.Source = $robotExecImage; Update-RobotLayout }
+                            Set-GuardianRobotState -State 'exec'
                         }
                         'activity' {
                             $activityText.Text = [string]$message.label
@@ -679,7 +698,6 @@ $timer.Add_Tick({
                             $activityLabel.Text = 'RESULTADO DA MANUTENÇÃO'
                             $finishButton.Content = 'Concluir'
                             $finishButton.Visibility = [System.Windows.Visibility]::Visible
-                            if ($robotFinalImage) { $robotImage.Source = $robotFinalImage; Update-RobotLayout }
                             if ($null -ne $message.data) {
                                 if ($message.data.duration) {
                                     $durationValue.Text = [string]$message.data.duration
@@ -702,15 +720,24 @@ $timer.Add_Tick({
                                     $eventsPanel.Visibility = [System.Windows.Visibility]::Visible
                                 }
                             }
+                            $finalScore = $null
                             if ($null -ne $message.data -and $null -ne $message.data.score) {
+                                $finalScore = [double]$message.data.score
                                 $healthScore.Text = ('{0}' -f [int]$message.data.score)
-                                Set-GuardianHealthScoreColor -Score ([double]$message.data.score)
+                                Set-GuardianHealthScoreColor -Score $finalScore
                                 $healthClass.Text = [string]$message.data.classification
                                 $healthPanel.Visibility = [System.Windows.Visibility]::Visible
                                 if ($null -ne $message.data.breakdown) {
                                     Show-GuardianScoreBreakdown -Details $message.data.breakdown -Reasons $message.data.scoreReasons
                                 }
                             }
+                            $robotState = 'success'
+                            if ([string]$message.status -eq 'error') {
+                                $robotState = 'error'
+                            } elseif ([string]$message.status -eq 'warning' -or ($null -ne $finalScore -and $finalScore -lt 70)) {
+                                $robotState = 'warning'
+                            }
+                            Set-GuardianRobotState -State $robotState
                             switch ([string]$message.status) {
                                 'ok' {
                                     $headline.Text = 'Seu computador está pronto!'
