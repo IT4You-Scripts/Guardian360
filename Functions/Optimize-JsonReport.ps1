@@ -650,44 +650,49 @@ if ($faseStore) {
 # ------------------------------------------------------------------------------
 # Fase: Atualização dos programas via Winget — interpretação estruturada
 # ------------------------------------------------------------------------------
-$faseWinget = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Winget" }
+$faseWinget = @($jsonRaw.Fases) | Where-Object { $_.Phase -match 'Winget' } | Select-Object -First 1
 
 if ($faseWinget) {
-
-    $linhas = $faseWinget.Mensagem -split "`r`n"
+    $mensagemOriginal = [string]$faseWinget.Mensagem
+    $linhas = $mensagemOriginal -split '\r?\n'
     $tecnico = @{}
     $exitCode = $null
 
     foreach ($l in $linhas) {
-
-        # Detectar ExitCode=0
-        if ($l -match "ExitCode\s*=\s*([-]?\d+)") {
-            $exitCode = [int]$matches[1]
+        if ($l -match 'ExitCode\s*=\s*(-?\d+)') {
+            $exitCode = [long]$matches[1]
         }
-
-        # Chave:Valor
-        if ($l -match "^(.*?):\s*(.*)$") {
+        if ($l -match '^(.*?):\s*(.*)$') {
             $k = $matches[1].Trim()
             $v = $matches[2].Trim()
-
-            if ($v -match "^\-?\d+$") { $v = [int]$v }
-
+            if ($v -match '^-?\d+$') { $v = [long]$v }
             $tecnico[$k] = $v
         }
     }
 
-    # interpretação
-    $sucesso = ($exitCode -eq 0)
+    # Mensagens informativas de versao desconhecida ou ausencia de updates
+    # NAO sao falhas. Erros explicitos e fase nao executada continuam penalizados.
+    $houveFalhaExplicita = $mensagemOriginal -match '(?i)(acesso negado|access denied|instalador falhou|installation failed|falha na execu[cç][aã]o|unexpected error|erro inesperado|terminou com erro|nao foi possivel|não foi possível)'
+    $faseIgnorada = (@($jsonRaw.PulaFases) -contains 6) -or ($mensagemOriginal -match '(?i)(sem internet: pulando|fase ignorada|etapa ignorada|fase pulada)')
+    $faseExecutada = ([string]$faseWinget.Status -eq 'OK') -and (-not $faseIgnorada)
 
-    $interpretacao = if ($sucesso) {
-        "As atualizações dos programas via Winget foram concluídas com sucesso."
-    } else {
-        "Ocorreram erros ao atualizar programas via Winget."
+    if ($null -ne $exitCode) {
+        $sucesso = ($exitCode -eq 0) -and (-not $houveFalhaExplicita) -and $faseExecutada
+    }
+    else {
+        # Algumas versoes do Update-WingetApps nao devolvem ExitCode=0.
+        # Se a etapa terminou OK e nao registrou erro explicito, nao inventar falha.
+        $sucesso = $faseExecutada -and (-not $houveFalhaExplicita)
     }
 
-    # substituir por objeto estruturado
+    $interpretacao = if ($sucesso) {
+        'A rotina Winget foi concluida sem falha identificada; avisos de versao desconhecida nao penalizam.'
+    } else {
+        'Ocorreram erros ao atualizar programas via Winget ou a etapa nao foi concluida.'
+    }
+
     $faseWinget.Mensagem = [PSCustomObject]@{
-        AtualizacaoBemSucedida = $sucesso
+        AtualizacaoBemSucedida = [bool]$sucesso
         CodigoSaida            = $exitCode
         IntegridadeWinget      = $interpretacao
         DetalhesTecnicos       = $tecnico
