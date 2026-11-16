@@ -152,33 +152,28 @@
 
         # ============================================================
         # 5A. PROTEGER POWERSHELL 7 CONTRA WINGET UPGRADE --ALL
-        # Bloqueio por ID, independente da versao instalada.
-        # O pin e por conta: executar no mesmo contexto do upgrade.
+        # Sem "pin list": tentar criar o pin no contexto efetivo do Winget.
+        # Resultado aceito: criado agora ou ja existente.
+        # Outros erros impedem o upgrade sem protecao.
         # ============================================================
 
-        Write-Host "- Verificando bloqueio do PowerShell 7 (contexto atual)..."
+        Write-Host "- Garantindo bloqueio do PowerShell 7 (contexto atual)..."
 
-        $pinsAtuais = @(& $wingetExe pin list 2>&1 | ForEach-Object { "$_" })
-        $pinEncontrado = [bool](@($pinsAtuais | Where-Object { $_ -match 'Microsoft\.PowerShell(?:\s|$)' }).Count)
+        $pinOutput = @(& $wingetExe pin add --id Microsoft.PowerShell --exact --accept-source-agreements --disable-interactivity 2>&1 | ForEach-Object { [string]$_ })
+        $pinExitCode = $LASTEXITCODE
+        $pinText = $pinOutput -join "`n"
+        $pinJaExiste = $pinText -match '(?i)(already\s+(?:has\s+)?(?:a\s+)?pin|already\s+pinned|pin\s+already\s+exists|pin\s+exists|marcador[^\r\n]{0,90}j[aá]\s+existe|j[aá]\s+existe[^\r\n]{0,90}marcador|pino[^\r\n]{0,90}j[aá]\s+existe)'
+        $pinCriado = ($pinExitCode -eq 0)
 
-        if (-not $pinEncontrado) {
-            & $wingetExe pin add --id Microsoft.PowerShell --exact --accept-source-agreements --disable-interactivity 2>&1 | Out-Null
-            # O retorno do 'pin add' pode variar conforme o estado anterior;
-            # a comprovacao e sempre feita consultando a lista novamente.
-        }
-
-        $pinsVerificados = @(& $wingetExe pin list 2>&1 | ForEach-Object { "$_" })
-        $pinConfirmado = [bool](@($pinsVerificados | Where-Object { $_ -match 'Microsoft\.PowerShell(?:\s|$)' }).Count)
-
-        if (-not $pinConfirmado) {
-            Write-Host "- BLOQUEIO NAO CONFIRMADO: upgrade administrativo cancelado." -ForegroundColor Yellow
+        if (-not ($pinCriado -or $pinJaExiste)) {
+            Write-Host "- FALHA no bloqueio do PowerShell 7; upgrade administrativo nao executado." -ForegroundColor Yellow
             return [PSCustomObject]@{
-                MensagemTecnica = 'PowerShell 7 sem pin confirmado no contexto administrativo; upgrade Winget nao executado.'
+                MensagemTecnica = "Nao foi possivel estabelecer ou reconhecer o pin do PowerShell 7 (contexto administrativo). Codigo=$pinExitCode. $pinText"
                 ExitCode        = 1
             }
         }
 
-        Write-Host "- Bloqueio do PowerShell 7 confirmado (contexto atual)."
+        Write-Host "- Bloqueio do PowerShell 7: $(if ($pinCriado) { 'criado' } else { 'ja existente' })."
 
         # ============================================================
         # 6. UPGRADE
@@ -244,18 +239,15 @@
 $ErrorActionPreference = 'Stop'
 $codes = @()
 try {
-    # Tarefa criada no contexto do usuario interativo: o pin administrativo
-    # nao e compartilhado com este perfil. Verificar e criar neste contexto.
-    $pinsAtuais = @(winget.exe pin list 2>&1 | ForEach-Object { "$_" })
-    $pinEncontrado = [bool](@($pinsAtuais | Where-Object { $_ -match 'Microsoft\.PowerShell(?:\s|$)' }).Count)
-    if (-not $pinEncontrado) {
-        winget.exe pin add --id Microsoft.PowerShell --exact --accept-source-agreements --disable-interactivity 2>&1 | Out-Null
-    }
-    $pinsVerificados = @(winget.exe pin list 2>&1 | ForEach-Object { "$_" })
-    $pinConfirmado = [bool](@($pinsVerificados | Where-Object { $_ -match 'Microsoft\.PowerShell(?:\s|$)' }).Count)
-    if (-not $pinConfirmado) {
-        # Nao executar nenhum upgrade --all do usuario sem protecao.
-        throw 'PowerShell 7 sem pin confirmado no contexto do usuario interativo.'
+    # Protecao independente na conta do usuario interativo.
+    # Uma unica tentativa de "pin add"; nenhuma chamada a "pin list".
+    $pinOutput = @(winget.exe pin add --id Microsoft.PowerShell --exact --accept-source-agreements --disable-interactivity 2>&1 | ForEach-Object { [string]$_ })
+    $pinExitCode = $LASTEXITCODE
+    $pinText = $pinOutput -join "`n"
+    $pinJaExiste = $pinText -match '(?i)(already\s+(?:has\s+)?(?:a\s+)?pin|already\s+pinned|pin\s+already\s+exists|pin\s+exists|marcador[^\r\n]{0,90}j[aá]\s+existe|j[aá]\s+existe[^\r\n]{0,90}marcador|pino[^\r\n]{0,90}j[aá]\s+existe)'
+    $pinCriado = ($pinExitCode -eq 0)
+    if (-not ($pinCriado -or $pinJaExiste)) {
+        throw "Bloqueio do PowerShell 7 nao confirmado para o usuario interativo. Codigo=$pinExitCode. $pinText"
     }
 
     winget.exe upgrade --all --source msstore --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
