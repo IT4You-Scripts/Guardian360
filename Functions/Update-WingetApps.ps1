@@ -158,6 +158,25 @@
         Write-Host "- Atualizando aplicativos via Winget..."
 
 
+        # Protege o PowerShell 7 que executa o proprio Guardian.
+        # Pin normal: exclui somente do winget upgrade --all; upgrade explicito segue permitido.
+        # Se nao for possivel confirmar a protecao, nao executa upgrade --all.
+        $pinProcess = Start-Process `
+            -FilePath $wingetExe `
+            -ArgumentList @(
+                'pin', 'add', '--id', 'Microsoft.PowerShell', '--exact',
+                '--accept-source-agreements', '--disable-interactivity'
+            ) `
+            -NoNewWindow -Wait -PassThru
+        $pinList = (& $wingetExe pin list --id Microsoft.PowerShell --exact --disable-interactivity 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0 -or $pinList -notmatch '(?i)Microsoft\.PowerShell') {
+            Write-Host '- AVISO: nao foi possivel proteger o PowerShell 7; upgrade em lote ignorado.' -ForegroundColor Yellow
+            return [PSCustomObject]@{
+                MensagemTecnica = 'Upgrade Winget ignorado: nao foi possivel confirmar o pin de Microsoft.PowerShell.'
+                ExitCode        = 1
+            }
+        }
+
         $process = Start-Process `
             -FilePath $wingetExe `
             -ArgumentList @(
@@ -214,6 +233,12 @@
 $ErrorActionPreference = 'Stop'
 $codes = @()
 try {
+    # A tarefa de usuario tem seus proprios pins: proteger antes dos dois upgrades --all.
+    winget.exe pin add --id Microsoft.PowerShell --exact --accept-source-agreements --disable-interactivity | Out-Null
+    $pinList = (winget.exe pin list --id Microsoft.PowerShell --exact --disable-interactivity 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $pinList -notmatch '(?i)Microsoft\.PowerShell') {
+        throw 'Pin de Microsoft.PowerShell nao confirmado no contexto do usuario.'
+    }
     winget.exe upgrade --all --source msstore --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
     $codes += [int]$LASTEXITCODE
     winget.exe upgrade --all --source winget --scope user --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
