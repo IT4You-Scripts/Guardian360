@@ -978,8 +978,8 @@ $saudeFinal = [Math]::Round($saudeFinal)
 
 # Classificação textual
 $classificacao = switch ($saudeFinal) {
-    {$_ -ge 90} { "Excelente"; break }
-    {$_ -ge 75} { "Boa"; break }
+    {$_ -ge 91} { "Excelente"; break }
+    {$_ -ge 71} { "Boa"; break }
     {$_ -ge 50} { "Regular"; break }
     default     { "Crítica" }
 }
