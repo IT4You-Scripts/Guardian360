@@ -233,7 +233,7 @@ function Get-GuardianBitmapImage {
                   <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,24"><TextBlock Text="EMPRESA" FontSize="11" Foreground="#78939C" TextWrapping="Wrap"/><TextBlock x:Name="ClientText" Text="" FontSize="14" Foreground="#E8F0F2" TextWrapping="Wrap"/></StackPanel>
                   <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,24"><TextBlock Text="COMPUTADOR" FontSize="11" Foreground="#78939C" TextWrapping="Wrap"/><TextBlock x:Name="PCText" Text="" FontSize="14" Foreground="#E8F0F2" TextWrapping="Wrap"/></StackPanel>
                   <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,0,24"><TextBlock Text="SISTEMA OPERACIONAL E VERSÃO" FontSize="11" Foreground="#78939C" TextWrapping="Wrap"/><TextBlock x:Name="OsValue" Text="Aguardando inventário" FontSize="14" Foreground="#E8F0F2" TextWrapping="Wrap"/></StackPanel>
-                  <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,0,24"><TextBlock Text="FABRICANTE/MODELO" FontSize="11" Foreground="#78939C" TextWrapping="Wrap"/><TextBlock x:Name="ComputerModelValue" Text="—" FontSize="14" Foreground="#E8F0F2" TextWrapping="Wrap"/></StackPanel>
+                  <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,0,24"><TextBlock Text="FABRICANTE / MODELO" FontSize="11" Foreground="#78939C" TextWrapping="Wrap"/><TextBlock x:Name="ComputerModelValue" Text="—" FontSize="14" Foreground="#E8F0F2" TextWrapping="Wrap"/></StackPanel>
 
                   <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,0,24"><TextBlock Text="PROCESSADOR" FontSize="11" Foreground="#78939C" TextWrapping="Wrap"/><TextBlock x:Name="CpuValue" Text="—" FontSize="14" Foreground="#E8F0F2" TextWrapping="Wrap"/></StackPanel>
                   <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,0,0,24"><TextBlock Text="MEMÓRIA RAM" FontSize="11" Foreground="#78939C" TextWrapping="Wrap"/><TextBlock x:Name="RamValue" Text="—" FontSize="14" Foreground="#E8F0F2" TextWrapping="Wrap"/></StackPanel>
@@ -669,6 +669,23 @@ $timer.Add_Tick({
                                 # Campos opcionais: nao inventar dados ausentes na mensagem de inventario.
                                 $modelField = @('Fabricante e Modelo PC','fabricanteModelo','fabricante_modelo','computerModel','computer_model','modelo_computador','model') | Where-Object { $message.data.PSObject.Properties[$_] -and $message.data.$_ } | Select-Object -First 1
                                 if ($modelField) { $computerModelValue.Text = [string]$message.data.$modelField }
+                                else {
+                                    # Fallback local: a mensagem inventory pode nao conter fabricante/modelo.
+                                    # Consulta o mesmo equipamento que esta executando esta interface.
+                                    try {
+                                        $pcSystem = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+                                        $pcManufacturer = ([string]$pcSystem.Manufacturer).Trim()
+                                        $pcModel = ([string]$pcSystem.Model).Trim()
+                                        if ($pcManufacturer -and $pcModel) {
+                                            if ($pcModel.StartsWith($pcManufacturer, [System.StringComparison]::OrdinalIgnoreCase)) {
+                                                $computerModelValue.Text = $pcModel
+                                            } else {
+                                                $computerModelValue.Text = "$pcManufacturer $pcModel"
+                                            }
+                                        } elseif ($pcModel) { $computerModelValue.Text = $pcModel }
+                                        elseif ($pcManufacturer) { $computerModelValue.Text = $pcManufacturer }
+                                    } catch { } # Mantem o travessao caso a consulta CIM nao esteja disponivel.
+                                }
                                 $cpuValue.Text = [string]$message.data.cpu
                                 $ramValue.Text = [string]$message.data.ram
                                 $gpuValue.Text = [string]$message.data.gpu
