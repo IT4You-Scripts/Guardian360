@@ -1000,19 +1000,17 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
 })
 
 
-# ---------------- UUID SMBIOS + CPU ID + SERIAL NUMBER ----------------
+# ---------------- UUID SMBIOS + CPU ID + NOME DO COMPUTADOR ----------------
 $uuidSistema = $null
 
 try {
     $uuid  = ([string](Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop).UUID).Trim()
     $cpuId = ([string](Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1).ProcessorId).Trim()
-    # Reutiliza o serial ja coletado pelo Get-SystemInventory (inclui fallback para placa-mae).
-    $serialIdentidade = ([string]$hardwareObj["Serial Number"]).Trim()
-    # Seriais genericos do fabricante sao aceitos como terceiro componente.
-    # Mantem a exigencia de tres componentes presentes e sem delimitador interno.
+    # O nome do relatorio ja foi validado contra o nome real da maquina.
+    $nomeIdentidade = ([string]$jsonRaw.NomeComputador).Trim()
     if (-not [string]::IsNullOrWhiteSpace($uuid) -and -not [string]::IsNullOrWhiteSpace($cpuId) -and
-        -not [string]::IsNullOrWhiteSpace($serialIdentidade) -and -not $serialIdentidade.Contains('|')) {
-        $uuidSistema = "$uuid|$cpuId|$serialIdentidade"
+        -not [string]::IsNullOrWhiteSpace($nomeIdentidade) -and -not $nomeIdentidade.Contains('|')) {
+        $uuidSistema = "$uuid|$cpuId|$nomeIdentidade"
     }
 } catch {
     $uuidSistema = $null
@@ -1020,7 +1018,7 @@ try {
 
 # Identificador incompleto nao pode provocar associacao indevida entre maquinas.
 if (-not $uuidSistema) {
-    throw "Identificador de hardware incompleto: UUID SMBIOS, CPU ID ou Serial Number indisponivel/invalido. Integracao cancelada."
+    throw "Identificador incompleto: UUID SMBIOS, CPU ID ou NomeComputador indisponivel/invalido. Integracao cancelada."
 }
 
 # ------------------------------------------------------------------------------
