@@ -1561,7 +1561,7 @@ if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
 }
 
 # ===============================================================================
-# Preflight NetTime + 7-Zip: somente antes do inventario (Fase 1).
+# Preflight NetTime: somente antes do inventario (Fase 1).
 # Nao atualiza programas instalados; nao modifica W32Time ou politicas de dominio.
 # Falhas sao isoladas e nunca impedem a vistoria.
 # ===============================================================================
@@ -1672,7 +1672,7 @@ function Install-GuardianOptionalProgram {
 
 if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
     (-not $PulaFases -or $PulaFases -notcontains 1) -and -not $Simulado) {
-    foreach ($programaOpcional in @('NetTime','7-Zip')) {
+    foreach ($programaOpcional in @('NetTime')) {
         try { Install-GuardianOptionalProgram -Programa $programaOpcional }
         catch { Write-GuardianStatus ("{0}: falha isolada: {1}" -f $programaOpcional, $_.Exception.Message) 'WARN' }
     }
@@ -2000,8 +2000,174 @@ function Invoke-GuardianKnownResidueCleanup([string]$Product) {
     Remove-GuardianApprovedEmptyFolders $rule.Folders
 }
 
+# Substituicao de compactadores: instalar e confirmar PeaZip pt-BR ANTES de
+# retirar 7-Zip/WinRAR. Isolada das demais remocoes e das notas da vistoria.
+function Get-GuardianPeaZipExe {
+    $paths = @((Join-Path $env:ProgramFiles 'PeaZip\peazip.exe'))
+    if (${env:ProgramFiles(x86)}) { $paths += (Join-Path ${env:ProgramFiles(x86)} 'PeaZip\peazip.exe') }
+    foreach ($path in $paths) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) { return $path }
+    }
+    return $null
+}
+# Configuracao efetiva do idioma: o instalador define pt-BR, mas perfis que
+# ja usaram PeaZip podem manter uma preferencia anterior em ingles.
+# O arquivo conf.txt possui a secao [language] seguida do nome da traducao.
+# Ajusta apenas esse valor, preservando todas as demais preferencias.
+function Set-GuardianPeaZipPtBR {
+    $exe = Get-GuardianPeaZipExe
+    if (-not $exe) { throw 'PeaZip nao instalado.' }
+    $installDir = Split-Path -Path $exe -Parent
+    $languageFiles = @(
+        (Join-Path $installDir 'res\share\lang\pt-br.txt'),
+        (Join-Path $installDir 'res\lang\pt-br.txt')
+    )
+    if (-not @($languageFiles | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }).Count) {
+        throw 'Traducao pt-br.txt nao encontrada na instalacao do PeaZip.'
+    }
+    # Nao alterar preferencias com o PeaZip aberto: ele poderia grava-las
+    # novamente em ingles ao fechar.
+    if (@(Get-Process -Name 'peazip' -ErrorAction SilentlyContinue).Count -gt 0) {
+        throw 'PeaZip em execucao; ajuste de idioma adiado ate o aplicativo ser fechado.'
+    }
+    $configPaths = New-Object 'System.Collections.Generic.List[string]'
+    # Configuracao compartilhada/default para perfis que ainda nao abriram o app.
+    $configPaths.Add((Join-Path $installDir 'res\conf\conf.txt'))
+    $configPaths.Add((Join-Path $installDir 'res\conf.txt'))
+    # Percorre os perfis reais do Windows sem depender do nome da conta,
+    # inclusive quando o Guardian foi elevado com outra conta administrativa.
+    try {
+        $profiles = @(Get-CimInstance -ClassName Win32_UserProfile -Filter 'Special = False' -ErrorAction Stop)
+    } catch {
+        throw ('Nao foi possivel enumerar os perfis para validar o idioma: ' + $_.Exception.Message)
+    }
+    foreach ($profile in $profiles) {
+        $home = [string]$profile.LocalPath
+        if ([string]::IsNullOrWhiteSpace($home) -or -not (Test-Path -LiteralPath $home -PathType Container)) { continue }
+        $configPaths.Add((Join-Path $home 'AppData\Roaming\PeaZip\conf.txt'))
+        $configPaths.Add((Join-Path $home 'AppData\Roaming\PeaZip\res\conf\conf.txt'))
+    }
+    $checked = 0
+    $modified = 0
+    $languageMarker = [regex]'(?m)^\[language\]\r?\n([^\r\n]*)'
+    foreach ($config in @($configPaths | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $config -PathType Leaf)) { continue }
+        $checked++
+        try {
+            $content = [System.IO.File]::ReadAllText($config)
+            $match = $languageMarker.Match($content)
+            if (-not $match.Success) { throw 'secao [language] nao encontrada' }
+            $oldValue = $match.Groups[1].Value
+            if ($oldValue -cne 'pt-br.txt') {
+                $position = $match.Groups[1].Index
+                $updated = $content.Substring(0,$position) + 'pt-br.txt' + $content.Substring($position + $oldValue.Length)
+                [System.IO.File]::WriteAllText($config,$updated,(New-Object System.Text.UTF8Encoding($true)))
+                $modified++
+            }
+            $verified = [System.IO.File]::ReadAllText($config)
+            $verifyMatch = $languageMarker.Match($verified)
+            if (-not $verifyMatch.Success -or $verifyMatch.Groups[1].Value -cne 'pt-br.txt') {
+                throw 'validacao apos gravacao falhou'
+            }
+        } catch {
+            throw ('Idioma pt-BR nao confirmado em {0}: {1}' -f $config,$_.Exception.Message)
+        }
+    }
+    Write-GuardianUninstallDebug ('PeaZip pt-BR: traducao presente; configuracoes verificadas {0}; ajustadas {1}.' -f $checked,$modified)
+}
+function Install-GuardianPeaZipPtBR {
+    if (Get-GuardianPeaZipExe) {
+        Write-GuardianUninstallDebug 'PeaZip ja instalado; verificando configuracao de idioma.'
+        return
+    }
+    $winget = Get-Command 'winget.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $winget) { throw 'Winget indisponivel; compactadores antigos preservados.' }
+    # Instalador oficial selecionado pelo catalogo Winget; /PT-BR ao final do override.
+    $arguments = 'install --id Giorgiotani.Peazip --exact --source winget --silent --disable-interactivity --accept-source-agreements --accept-package-agreements --no-upgrade --override "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PT-BR"'
+    $issues = New-Object 'System.Collections.Generic.List[string]'
+    for ($attempt=1; $attempt -le 3; $attempt++) {
+        if (Get-GuardianPeaZipExe) { return }
+        try {
+            Write-GuardianUninstallDebug ('PeaZip pt-BR: tentativa de instalacao {0}/3.' -f $attempt)
+            $p = Start-Process -FilePath $winget.Source -ArgumentList $arguments -PassThru -WindowStyle Hidden -ErrorAction Stop
+            try {
+                if (-not $p.WaitForExit(1200000)) {
+                    try { $p.Kill() } catch { }
+                    throw 'Tempo limite de instalacao excedido.'
+                }
+                $code = [int64]$p.ExitCode
+            } finally { $p.Dispose() }
+            if ($code -notin @(0,3010)) { throw ('Winget retornou codigo ' + $code) }
+            for ($i=0; $i -lt 10; $i++) {
+                if (Get-GuardianPeaZipExe) {
+                    Write-GuardianUninstallDebug 'PeaZip pt-BR instalado e executavel confirmado.'
+                    return
+                }
+                Start-Sleep -Seconds 2
+            }
+            throw 'Executavel PeaZip nao localizado apos a instalacao.'
+        } catch {
+            $issues.Add(('Tentativa {0}/3: {1}' -f $attempt,$_.Exception.Message))
+            if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
+        }
+    }
+    throw ('PeaZip nao instalado; 7-Zip e WinRAR preservados. ' + ($issues -join ' | '))
+}
+function Remove-GuardianLegacyArchivers {
+    # Nao desinstalar compactadores sem ter confirmado o substituto.
+    if (-not (Get-GuardianPeaZipExe)) { throw 'PeaZip ausente; 7-Zip e WinRAR preservados.' }
+    $records = @(Get-GuardianUninstallMatches '(?i)^(?:7-Zip|WinRAR)(?:\s|$)')
+    foreach ($app in $records) {
+        $name = [string]$app.PSObject.Properties['DisplayName'].Value
+        $normal = if ($app.PSObject.Properties['UninstallString']) { [string]$app.PSObject.Properties['UninstallString'].Value } else { '' }
+        $quiet = if ($app.PSObject.Properties['QuietUninstallString']) { [string]$app.PSObject.Properties['QuietUninstallString'].Value } else { '' }
+        $exe = $null; $args = $null
+        $msi = [regex]::Match(($quiet + ' ' + $normal),'\{[0-9a-fA-F-]{36}\}')
+        if ($msi.Success -and ($quiet + ' ' + $normal) -match '(?i)\bmsiexec') {
+            $exe = Join-Path $env:windir 'System32\msiexec.exe'
+            $args = '/x ' + $msi.Value + ' /qn /norestart'
+        } elseif ($name -match '(?i)^7-Zip(?:\s|$)' -and
+                  $normal -match '(?i)^\s*"?([A-Z]:\\[^"\r\n]*\\7-Zip\\Uninstall\.exe)"?') {
+            $exe = $Matches[1]; $args = '/S'
+        } elseif ($name -match '(?i)^WinRAR(?:\s|$)' -and
+                  $normal -match '(?i)^\s*"?([A-Z]:\\[^"\r\n]*\\WinRAR\\Uninstall\.exe)"?') {
+            $exe = $Matches[1]; $args = '/S'
+        } elseif ($quiet -match '(?i)^\s*"([A-Z]:\\[^"\r\n]+\.exe)"\s+(.+)$') {
+            $exe = $Matches[1]; $args = $Matches[2]
+        }
+        if (-not $exe -or -not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            Write-GuardianUninstallDebug ('PENDENTE '+$name+': desinstalador silencioso nao confirmado.')
+            continue
+        }
+        try {
+            Invoke-GuardianUninstallExecutable -Exe $exe -Arguments $args -TimeoutSec 600 -AllowedCodes @(0,3010,1605,1614)
+            $stillPresent = $true
+            for ($i=0; $i -lt 8; $i++) {
+                Start-Sleep -Seconds 2
+                $stillPresent = (@(Get-GuardianUninstallMatches ('(?i)^'+[regex]::Escape($name)+'$') |
+                    Where-Object { $_.PSPath -eq $app.PSPath }).Count -gt 0)
+                if (-not $stillPresent) { break }
+            }
+            if ($stillPresent) { throw 'Registro de instalacao ainda presente.' }
+            Write-GuardianUninstallDebug ('REMOVIDO: '+$name)
+        } catch {
+            Write-GuardianUninstallDebug ('PENDENTE '+$name+': '+$_.Exception.Message)
+        }
+    }
+}
+function Invoke-GuardianPeaZipMigration {
+    try {
+        Install-GuardianPeaZipPtBR
+        Set-GuardianPeaZipPtBR
+        Remove-GuardianLegacyArchivers
+    } catch {
+        Write-GuardianUninstallDebug ('PENDENTE PeaZip: '+$_.Exception.Message)
+    }
+}
+
 function Invoke-GuardianAppCleanup {
     Write-GuardianUninstallDebug 'Iniciando verificacao de aplicativos.'
+    Invoke-GuardianPeaZipMigration
     $remove=@(
         @('CCleaner','(?i)^CCleaner(?:\s|$)'),
         @('CPUID CPU-Z / HWMonitor','(?i)^(?:CPUID\s+)?(?:CPU-Z|HWMonitor)(?:\s|$)'),
