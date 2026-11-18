@@ -1008,9 +1008,10 @@ try {
     $cpuId = ([string](Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1).ProcessorId).Trim()
     # Reutiliza o serial ja coletado pelo Get-SystemInventory (inclui fallback para placa-mae).
     $serialIdentidade = ([string]$hardwareObj["Serial Number"]).Trim()
-    $seriaisInvalidos = @('', 'None', 'Unknown', 'Default string', 'System Serial Number', 'To be filled by O.E.M.', '00000000', 'Não Identificado', 'N/A')
+    # Seriais genericos do fabricante sao aceitos como terceiro componente.
+    # Mantem a exigencia de tres componentes presentes e sem delimitador interno.
     if (-not [string]::IsNullOrWhiteSpace($uuid) -and -not [string]::IsNullOrWhiteSpace($cpuId) -and
-        $seriaisInvalidos -notcontains $serialIdentidade -and -not $serialIdentidade.Contains('|')) {
+        -not [string]::IsNullOrWhiteSpace($serialIdentidade) -and -not $serialIdentidade.Contains('|')) {
         $uuidSistema = "$uuid|$cpuId|$serialIdentidade"
     }
 } catch {
