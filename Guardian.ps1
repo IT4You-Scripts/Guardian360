@@ -1237,6 +1237,10 @@ function Send-GuardianLiveEvent {
 # 1) Pré-requisitos para o Script poder rodar corretamente (sem prompts)
 Test-AdminOrExit
 Initialize-Pwsh7
+# Habilita caminhos longos no Windows (silencioso; sem reinicializacao).
+try {
+    New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+} catch { }
 Enable-QuickEditProtection
 # Garantia adicional: nao reexibir o console em execucao normal.
 # A classe Win32.ConsoleWindow ja foi definida no bloco de aparencia acima.
