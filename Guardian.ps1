@@ -2165,9 +2165,72 @@ function Invoke-GuardianPeaZipMigration {
     }
 }
 
+# Microsoft PC Manager: instalacao opcional e silenciosa antes da Fase 1.
+# Nao altera configuracoes do aplicativo, outras fases ou pontuacao.
+function Test-GuardianPCManagerInstalled {
+    try {
+        $packages = @(Get-AppxPackage -AllUsers -ErrorAction Stop |
+            Where-Object { $_.Name -match '(?i)^Microsoft\.(?:Microsoft)?PCManager$' })
+        if ($packages.Count -gt 0) { return $true }
+    } catch {
+        Write-GuardianUninstallDebug ('PC Manager: consulta Appx indisponivel: ' + $_.Exception.Message)
+    }
+    foreach ($root in @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )) {
+        foreach ($entry in @(Get-ItemProperty -Path $root -ErrorAction SilentlyContinue)) {
+            $name = if ($entry.PSObject.Properties['DisplayName']) { [string]$entry.DisplayName } else { '' }
+            if ($name -match '(?i)^(?:Microsoft\s+)?PC\s*Manager(?:\s|$)') { return $true }
+        }
+    }
+    return $false
+}
+
+function Install-GuardianPCManager {
+    if (Test-GuardianPCManagerInstalled) {
+        Write-GuardianUninstallDebug 'PC Manager: ja instalado; nenhuma acao necessaria.'
+        return
+    }
+    $winget = Get-Command 'winget.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $winget) {
+        Write-GuardianUninstallDebug 'PC Manager: Winget indisponivel; instalacao ignorada.'
+        return
+    }
+
+    # ID oficial do produto na Microsoft Store, nao o pacote Beta antigo.
+    $arguments = 'install --id 9PM860492SZD --exact --source msstore --silent --disable-interactivity --accept-package-agreements --accept-source-agreements --no-upgrade'
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        if (Test-GuardianPCManagerInstalled) { return }
+        try {
+            Write-GuardianUninstallDebug ('PC Manager: tentativa de instalacao {0}/3.' -f $attempt)
+            $process = Start-Process -FilePath $winget.Source -ArgumentList $arguments -PassThru -WindowStyle Hidden -ErrorAction Stop
+            if (-not $process.WaitForExit(240000)) {
+                try { $process.Kill() } catch { }
+                throw 'Winget excedeu 240 segundos.'
+            }
+            $code = $process.ExitCode
+            for ($check = 0; $check -lt 6; $check++) {
+                if (Test-GuardianPCManagerInstalled) {
+                    Write-GuardianUninstallDebug 'PC Manager: instalacao confirmada.'
+                    return
+                }
+                Start-Sleep -Seconds 2
+            }
+            throw ('Instalacao nao confirmada; codigo Winget: {0}.' -f $code)
+        } catch {
+            Write-GuardianUninstallDebug ('PC Manager: tentativa {0}/3 falhou: {1}' -f $attempt,$_.Exception.Message)
+        }
+        if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
+    }
+    Write-GuardianUninstallDebug 'PC Manager: instalacao pendente; Guardian prossegue normalmente.'
+}
+
 function Invoke-GuardianAppCleanup {
     Write-GuardianUninstallDebug 'Iniciando verificacao de aplicativos.'
     Invoke-GuardianPeaZipMigration
+    try { Install-GuardianPCManager }
+    catch { Write-GuardianUninstallDebug ('PC Manager: falha isolada: ' + $_.Exception.Message) }
     $remove=@(
         @('CCleaner','(?i)^CCleaner(?:\s|$)'),
         @('CPUID CPU-Z / HWMonitor','(?i)^(?:CPUID\s+)?(?:CPU-Z|HWMonitor)(?:\s|$)'),
