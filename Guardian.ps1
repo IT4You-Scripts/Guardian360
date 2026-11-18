@@ -1852,27 +1852,93 @@ function Remove-GuardianApprovedShortcuts([string]$NamePattern,[string]$TargetPa
         } catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (atalhos): '+$root+' - '+$_.Exception.Message) }
     }
 }
-function Remove-GuardianCcleanerRecycleBinMenu {
-    # CLSID da Lixeira: somente comandos de menu que apontam para CCleaner.
+function Remove-GuardianCcleanerRecycleBinMenuKeys([string]$HiveRoot) {
+    # Em cada perfil, nao remover integracoes enquanto houver CCleaner registrado
+    # nesse proprio perfil. Nao depende do usuario atual nem de SID fixo.
+    $uninstallPath=$HiveRoot+'\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    $installed=@(Get-ItemProperty -Path $uninstallPath -ErrorAction SilentlyContinue | Where-Object {
+        $_.PSObject.Properties['DisplayName'] -and
+        [string]$_.PSObject.Properties['DisplayName'].Value -match '(?i)^CCleaner(?:\s|$)'
+    })
+    if($installed.Count -gt 0) {
+        Write-GuardianUninstallDebug ('RESIDUO PRESERVADO (CCleaner registrado no perfil): '+$HiveRoot)
+        return
+    }
     $id='{645FF040-5081-101B-9F08-00AA002F954E}'
-    $roots=@(
-      ('Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\'+$id+'\shell'),
-      ('Registry::HKEY_CURRENT_USER\Software\Classes\CLSID\'+$id+'\shell')
-    )
-    foreach($root in $roots) {
-        if (-not (Test-Path -LiteralPath $root)) { continue }
-        foreach($key in @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
-            $keyName=[string]$key.PSChildName
-            # Nunca remover comandos do sistema que nao sejam identificados como CCleaner.
-            if ($keyName -notmatch '(?i)ccleaner') { continue }
-            $cmdKey=$key.PSPath+'\command'
-            try {
-                if (-not (Test-Path -LiteralPath $cmdKey)) { continue }
-                $cmd=(Get-Item -LiteralPath $cmdKey -ErrorAction Stop).GetValue('')
-                if ([string]$cmd -notmatch '(?i)(?:ccleaner|piriform)') { continue }
-                Remove-Item -LiteralPath $key.PSPath -Recurse -Force -ErrorAction Stop
-                Write-GuardianUninstallDebug ('RESIDUO REMOVIDO (menu Lixeira): '+$key.PSPath)
-            } catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (menu Lixeira): '+$key.PSPath+' - '+$_.Exception.Message) }
+    $shellRoot=$HiveRoot+'\Software\Classes\CLSID\'+$id+'\Shell'
+    foreach($name in @('CCleaner.CleanRecycleBin','CCleaner.RunAnalysis')) {
+        $key=$shellRoot+'\'+$name
+        if(-not (Test-Path -LiteralPath $key)) { continue }
+        try {
+            $commandKey=$key+'\command'
+            if(-not (Test-Path -LiteralPath $commandKey)) { continue }
+            $command=[string](Get-Item -LiteralPath $commandKey -ErrorAction Stop).GetValue('')
+            # Exatamente os dois comandos de Lixeira identificados no diagnostico.
+            # Nao tocar em 'empty' (Windows), nem em comandos de terceiros.
+            if($command -notmatch '(?i)\\CCleaner(?:64)?\.exe(?="|\s|$)') {
+                Write-GuardianUninstallDebug ('RESIDUO PRESERVADO (comando divergente): '+$key)
+                continue
+            }
+            Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction Stop
+            Write-GuardianUninstallDebug ('RESIDUO REMOVIDO (menu Lixeira): '+$key)
+        } catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (menu Lixeira): '+$key+' - '+$_.Exception.Message) }
+    }
+}
+function Remove-GuardianCcleanerRecycleBinMenu {
+    # HKLM e todos os perfis locais registrados; sem nomes ou SIDs fixos.
+    # Perfis descarregados sao montados temporariamente, apenas se acessiveis.
+    $id='{645FF040-5081-101B-9F08-00AA002F954E}'
+    $machineShell='Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\'+$id+'\Shell'
+    foreach($name in @('CCleaner.CleanRecycleBin','CCleaner.RunAnalysis')) {
+        $key=$machineShell+'\'+$name
+        if(-not (Test-Path -LiteralPath $key)) { continue }
+        try {
+            $commandKey=$key+'\command'
+            if(-not (Test-Path -LiteralPath $commandKey)) { continue }
+            $command=[string](Get-Item -LiteralPath $commandKey -ErrorAction Stop).GetValue('')
+            if($command -notmatch '(?i)\\CCleaner(?:64)?\.exe(?="|\s|$)') { continue }
+            Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction Stop
+            Write-GuardianUninstallDebug ('RESIDUO REMOVIDO (menu Lixeira global): '+$key)
+        } catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (menu Lixeira global): '+$key+' - '+$_.Exception.Message) }
+    }
+    $profiles='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+    $n=0
+    foreach($profile in @(Get-ChildItem -LiteralPath $profiles -ErrorAction SilentlyContinue)) {
+        $sid=[string]$profile.PSChildName
+        if($sid -notmatch '^S-1-5-21-\d+-\d+-\d+-\d+$') { continue }
+        $hiveRoot='Registry::HKEY_USERS\'+$sid
+        if(Test-Path -LiteralPath $hiveRoot) {
+            try { Remove-GuardianCcleanerRecycleBinMenuKeys $hiveRoot }
+            catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (perfil '+$sid+'): '+$_.Exception.Message) }
+            continue
+        }
+        $mounted=$false
+        $tempName=$null
+        try {
+            $profileInfo=Get-ItemProperty -LiteralPath $profile.PSPath -ErrorAction Stop
+            $profileDirectory=[Environment]::ExpandEnvironmentVariables([string]$profileInfo.ProfileImagePath)
+            if([string]::IsNullOrWhiteSpace($profileDirectory)) { continue }
+            $hiveFile=Join-Path $profileDirectory 'NTUSER.DAT'
+            if(-not (Test-Path -LiteralPath $hiveFile -PathType Leaf)) { continue }
+            $n++
+            $tempName='GuardianCC_'+$PID+'_'+$n
+            $null=& "$env:WINDIR\System32\reg.exe" load ('HKU\'+$tempName) $hiveFile 2>&1
+            if($LASTEXITCODE -ne 0) {
+                Write-GuardianUninstallDebug ('RESIDUO PENDENTE (perfil indisponivel): '+$sid)
+                continue
+            }
+            $mounted=$true
+            Remove-GuardianCcleanerRecycleBinMenuKeys ('Registry::HKEY_USERS\'+$tempName)
+        } catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (perfil '+$sid+'): '+$_.Exception.Message) }
+        finally {
+            if($mounted -and $tempName) {
+                [GC]::Collect()
+                [GC]::WaitForPendingFinalizers()
+                $null=& "$env:WINDIR\System32\reg.exe" unload ('HKU\'+$tempName) 2>&1
+                if($LASTEXITCODE -ne 0) {
+                    Write-GuardianUninstallDebug ('RESIDUO PENDENTE (hive carregado, descarregamento falhou): '+$tempName)
+                }
+            }
         }
     }
 }
