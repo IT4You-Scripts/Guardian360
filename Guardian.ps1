@@ -1237,10 +1237,6 @@ function Send-GuardianLiveEvent {
 # 1) Pré-requisitos para o Script poder rodar corretamente (sem prompts)
 Test-AdminOrExit
 Initialize-Pwsh7
-# Habilita caminhos longos no Windows (silencioso; sem reinicializacao).
-try {
-    New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
-} catch { }
 Enable-QuickEditProtection
 # Garantia adicional: nao reexibir o console em execucao normal.
 # A classe Win32.ConsoleWindow ja foi definida no bloco de aparencia acima.
@@ -1680,6 +1676,164 @@ if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
         try { Install-GuardianOptionalProgram -Programa $programaOpcional }
         catch { Write-GuardianStatus ("{0}: falha isolada: {1}" -f $programaOpcional, $_.Exception.Message) 'WARN' }
     }
+}
+
+# ===============================================================================
+# Limpeza conservadora de ferramentas de diagnostico (mesma estrategia do Checkup).
+# Antes do inventario da Fase 1; somente em execucao real e quando a Fase 1 participa.
+# Falhas individuais nao bloqueiam o restante da manutencao nem alteram sua nota.
+# ===============================================================================
+function Invoke-GuardianUninstallExecutable {
+  param([string]$Exe,[string]$Arguments,[int]$TimeoutSec=1200,[int[]]$AllowedCodes=@(0,3010))
+  if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { throw ('Desinstalador ausente: ' + $Exe) }
+  $proc = Start-Process -FilePath $Exe -ArgumentList $Arguments -PassThru -WindowStyle Hidden -ErrorAction Stop
+  try {
+    if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
+      try { $proc.Kill() } catch { }
+      throw ('Tempo limite excedido na desinstalacao: ' + $Exe)
+    }
+    $code = $proc.ExitCode
+    if ($code -notin $AllowedCodes) { throw ('Desinstalador retornou codigo ' + $code + ': ' + $Exe) }
+  } finally { $proc.Dispose() }
+}
+
+function Get-GuardianUninstallRecords {
+  $locations=@(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+    'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+  )
+  $all=@(Get-ItemProperty -Path $locations -ErrorAction SilentlyContinue | Where-Object {$_.DisplayName})
+  # HKCU elevado nao representa necessariamente o usuario conectado.
+  # Enumerar uninstall de usuarios com perfil carregado (sem carregar hives off-line).
+  try {
+    foreach ($sid in @(Get-ChildItem Registry::HKEY_USERS -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^S-1-5-21-\d+-\d+-\d+-\d+$' })) {
+      $path='Registry::HKEY_USERS\'+$sid.PSChildName+'\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
+      $all+=@(Get-ItemProperty -Path $path -ErrorAction SilentlyContinue | Where-Object {$_.DisplayName})
+    }
+  } catch { Write-GuardianStatus ('Desinstalacao: aviso ao enumerar HKU: ' + $_.Exception.Message) 'WARN' }
+  @($all | Sort-Object PSPath -Unique)
+}
+function Get-GuardianUninstallMatches([string]$Regex) {
+  @(Get-GuardianUninstallRecords | Where-Object { [string]$_.DisplayName -match $Regex })
+}
+function Get-GuardianQuietUninstall([object]$App) {
+  $quiet=[string]$App.QuietUninstallString
+  $normal=[string]$App.UninstallString
+  if ($quiet.Trim()) { return $quiet.Trim() }
+  if ($normal -match '(?i)\bmsiexec(?:\.exe)?\b.*(?:\{|/I|/X)') { return $normal }
+  return $null
+}
+function Split-GuardianUninstallCommand([string]$Command) {
+  $m=[regex]::Match($Command,'^\s*(?:"([^"]+)"|(.+?\.exe))\s*(.*)$','IgnoreCase')
+  if(-not $m.Success) { throw ('PENDENTE: Comando de desinstalacao invalido: '+$Command) }
+  $exe=if($m.Groups[1].Success){$m.Groups[1].Value}else{$m.Groups[2].Value}
+  $exe=[Environment]::ExpandEnvironmentVariables($exe.Trim())
+  if($exe -notmatch '^(?:[a-zA-Z]:\\|\\\\)') { throw ('PENDENTE: Executavel de desinstalacao nao absoluto: '+$exe) }
+  [pscustomobject]@{Exe=$exe;Arguments=$m.Groups[3].Value.Trim()}
+}
+function Get-GuardianApprovedUninstallCommand([object]$App) {
+  $name=[string]$App.DisplayName
+  $normal=[string]$App.UninstallString
+  $quiet=Get-GuardianQuietUninstall $App
+  $msi=[regex]::Match(($quiet+' '+$normal),'\{[0-9a-fA-F-]{36}\}')
+  if($msi.Success -and ($quiet+' '+$normal) -match '(?i)\bmsiexec') {
+    return [pscustomobject]@{Exe="$env:windir\System32\msiexec.exe";Arguments=('/x '+$msi.Value+' /qn /norestart');ExitCodes=@(0,3010,1605,1614)}
+  }
+  # Preferir desinstalador registrado. Somente aplicar switches a executaveis reconhecidos.
+  $parsed=$null
+  if($normal.Trim()) { try {$parsed=Split-GuardianUninstallCommand $normal} catch {} }
+  # Malwarebytes 5: mbuns.exe testado em PowerShell 7 elevado (5.7.3.376).
+  # Parametros confirmados: codigo 0 e ausencia no registro apos remocao.
+  # Aceitar o executavel registrado apenas quando o caminho for o produto Malwarebytes.
+  if($name -match '(?i)^Malwarebytes(?:\s|$)' -and $parsed -and
+     $parsed.Exe -match '(?i)\\Malwarebytes\\Anti-Malware\\mbuns\.exe$') {
+    return [pscustomobject]@{Exe=$parsed.Exe;Arguments='-nosurvey -uninstall -silent';ExitCodes=@(0,3010)}
+  }
+  # O registro pode nao conter o caminho do desinstalador em algumas versoes.
+  # Fallback restrito ao caminho oficial do produto, se o Malwarebytes estiver detectado.
+  if($name -match '(?i)^Malwarebytes(?:\s|$)') {
+    $mbuns=Join-Path $env:ProgramFiles 'Malwarebytes\Anti-Malware\mbuns.exe'
+    if(Test-Path -LiteralPath $mbuns -PathType Leaf) {
+      return [pscustomobject]@{Exe=$mbuns;Arguments='-nosurvey -uninstall -silent';ExitCodes=@(0,3010)}
+    }
+  }
+  if($name -match '(?i)^Driver Booster(?:\s|$)' -and $parsed -and $parsed.Exe -match '(?i)\\unins\d*\.exe$' -and $parsed.Exe -match '(?i)\\IObit\\Driver Booster\\') {
+    return [pscustomobject]@{Exe=$parsed.Exe;Arguments='/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';ExitCodes=@(0,3010,1)}
+  }
+  if($name -match '(?i)^CCleaner(?:\s|$)' -and $parsed -and $parsed.Exe -match '(?i)\\Piriform\\Icarus\\piriform-ccl\\icarus\.exe$' -and $parsed.Arguments -match '(?i)/uninstall:piriform-ccl') {
+    return [pscustomobject]@{Exe=$parsed.Exe;Arguments='/manual_update /uninstall:piriform-ccl /Silent';ExitCodes=@(0,3010)}
+  }
+  if($name -match '(?i)^CCleaner(?:\s|$)' -and $parsed -and $parsed.Exe -match '(?i)\\(?:uninst|uninstall)\.exe$' -and $parsed.Exe -match '(?i)\\CCleaner\\') {
+    return [pscustomobject]@{Exe=$parsed.Exe;Arguments='/S';ExitCodes=@(0,3010)}
+  }
+  if(-not $quiet) { throw ('PENDENTE: Desinstalador silencioso nao identificado com seguranca: '+$name+'; comando registrado: '+$normal) }
+  $command=Split-GuardianUninstallCommand $quiet
+  return [pscustomobject]@{Exe=$command.Exe;Arguments=$command.Arguments;ExitCodes=@(0,3010)}
+}
+function Invoke-GuardianQuietUninstall([object]$App) {
+  $command=Get-GuardianApprovedUninstallCommand $App
+  Invoke-GuardianUninstallExecutable $command.Exe $command.Arguments 1200 $command.ExitCodes
+  # Alguns desinstaladores (especialmente IObit) devolvem 1 mesmo quando removem.
+  # A confirmacao definitiva e a ausencia do mesmo registro apos a execucao.
+}
+function Remove-GuardianApprovedApps([string]$Regex) {
+  $targets=@(Get-GuardianUninstallMatches $Regex)
+  if ($targets.Count -eq 0) { return }
+  $issues=New-Object System.Collections.Generic.List[string]
+  foreach ($app in $targets) {
+    $name=[string]$app.DisplayName
+    try {
+      Invoke-GuardianQuietUninstall $app
+      $present=@()
+      foreach($attempt in 1..8) {
+        Start-Sleep -Seconds 3
+        $present=@(Get-GuardianUninstallRecords | Where-Object { $_.PSPath -eq $app.PSPath })
+        if($present.Count -eq 0){break}
+      }
+      if ($present.Count -gt 0) { throw ('Desinstalador finalizou sem remocao confirmada: '+$name) }
+      Write-GuardianStatus ('Desinstalado: ' + $name) 'INFO'
+    } catch { $issues.Add($name+': '+$_.Exception.Message) }
+  }
+  if ($issues.Count -gt 0) { throw ('PENDENTE: '+($issues -join ' | ')) }
+}
+function Remove-GuardianMalwarebytesAll {
+  # Rotina de manutencao Guardian: remover Malwarebytes, salvo computadores protegidos
+  # independentemente da licenca (Free, Trial ou Premium).
+  # Para produtos sem desinstalador silencioso conhecido, informar pendencia;
+  # nao adivinhar switches nem remover arquivos de protecao manualmente.
+  Remove-GuardianApprovedApps '(?i)^Malwarebytes(?:\s|$)'
+}
+
+function Invoke-GuardianAppCleanup {
+  # Ajuste de aplicacoes tecnicas pontuais, sem interferir em outros programas.
+  $remove = @(
+    @('CCleaner',                    '(?i)^CCleaner(?:\s|$)'),
+    @('CPUID CPU-Z / HWMonitor',    '(?i)^(?:CPUID\s+)?(?:CPU-Z|HWMonitor)(?:\s|$)'),
+    @('CrystalDiskInfo',           '(?i)^CrystalDiskInfo(?:\s|$)'),
+    @('CrystalDiskMark',           '(?i)^CrystalDiskMark(?:\s|$)'),
+    @('Driver Booster',            '(?i)^Driver Booster(?:\s|$)'),
+    @('MiniTool Partition Wizard', '(?i)^MiniTool Partition Wizard(?:\s|$)'),
+    @('Revo Uninstaller',          '(?i)^Revo Uninstaller(?:\s|$)')
+  )
+  foreach ($item in $remove) {
+    try { Remove-GuardianApprovedApps ([string]$item[1]) }
+    catch { Write-GuardianStatus ('Desinstalacao de {0}: {1}. Guardian prossegue.' -f $item[0], $_.Exception.Message) 'WARN' }
+  }
+
+  # Excecoes operacionais do Malwarebytes: identificadas somente pelo nome exato do computador.
+  if ($env:COMPUTERNAME -in @('JDAC-NB14', 'INOVATEC-NB21')) {
+    Write-GuardianStatus ('Malwarebytes preservado neste computador: ' + $env:COMPUTERNAME) 'INFO'
+  } else {
+    try { Remove-GuardianMalwarebytesAll }
+    catch { Write-GuardianStatus ('Desinstalacao de Malwarebytes: {0}. Guardian prossegue.' -f $_.Exception.Message) 'WARN' }
+  }
+}
+
+if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
+    (-not $PulaFases -or $PulaFases -notcontains 1) -and -not $Simulado) {
+    try { Invoke-GuardianAppCleanup }
+    catch { Write-GuardianStatus ('Limpeza de aplicativos: {0}. Guardian prossegue.' -f $_.Exception.Message) 'WARN' }
 }
 
 # === Loop principal com atualização da UI ===

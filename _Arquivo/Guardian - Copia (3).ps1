@@ -190,6 +190,468 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 }
 # --- FIM DO BLOCO ---
 
+# =========================================================================
+# GERENCIAMENTO CENTRAL DAS QUATRO TAREFAS AGENDADAS
+# Executado exclusivamente pelo Guardian.ps1, apos elevacao administrativa.
+# Nao depende de RodaGuardian, ElevaGuardian, Atualiza ou Prepara.
+# =========================================================================
+# ----- TASK 0: PowerShell Update (XML fornecido, com limite de 2 horas) -----
+function Sync-GuardianPowerShellTask {
+    $taskPath = '\Guardian\'
+    $taskName = '0. Guardian (PowerShell Update)'
+    $desiredXml = @'
+<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>MORETTI-PC06\Administrador</Author>
+    <Description>Atualiza PowerShell 7 por MSI oficial da Microsoft; sem Winget.</Description>
+    <URI>\Guardian\0. Guardian (PowerShell Update)</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-01-01T12:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByWeek>
+        <DaysOfWeek>
+          <Friday />
+        </DaysOfWeek>
+        <WeeksInterval>1</WeeksInterval>
+      </ScheduleByWeek>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <DisallowStartOnRemoteAppSession>false</DisallowStartOnRemoteAppSession>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT2H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Command>
+      <Arguments>-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Guardian\Functions\Update-PowerShellMSI.ps1"</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+'@
+    try {
+        [xml]$expected = $desiredXml
+        $existing = Get-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction SilentlyContinue
+        $needsUpdate = $true
+        if ($existing) {
+            [xml]$current = Export-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction Stop
+            # Compara as folhas do XML de referencia (incluindo horario, SYSTEM,
+            # bateria, argumentos, visibilidade e limite de execucao).
+            function Test-GuardianTaskXmlNode {
+                param([System.Xml.XmlNode]$Actual, [System.Xml.XmlNode]$Reference)
+                if (-not $Actual -or $Actual.LocalName -ne $Reference.LocalName) { return $false }
+                $referenceChildren = @($Reference.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+                if ($referenceChildren.Count -eq 0) { return ($Actual.InnerText -eq $Reference.InnerText) }
+                $actualChildren = @($Actual.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+                foreach ($referenceChild in $referenceChildren) {
+                    $sameNameReference = @($referenceChildren | Where-Object LocalName -eq $referenceChild.LocalName)
+                    $index = [array]::IndexOf($sameNameReference, $referenceChild)
+                    $sameNameActual = @($actualChildren | Where-Object LocalName -eq $referenceChild.LocalName)
+                    if ($index -ge $sameNameActual.Count) { return $false }
+                    if (-not (Test-GuardianTaskXmlNode -Actual $sameNameActual[$index] -Reference $referenceChild)) { return $false }
+                }
+                return $true
+            }
+            $matched = $true
+            foreach ($section in @('Triggers','Principals','Settings','Actions')) {
+                $expectedSection = $expected.Task.SelectSingleNode("*[local-name()='$section']")
+                $currentSection = $current.Task.SelectSingleNode("*[local-name()='$section']")
+                if (-not (Test-GuardianTaskXmlNode -Actual $currentSection -Reference $expectedSection)) {
+                    $matched = $false
+                    break
+                }
+            }
+            if ($matched) {
+                $expectedTriggerCount = @($expected.Task.Triggers.ChildNodes | Where-Object NodeType -eq Element).Count
+                $actualTriggerCount = @($current.Task.Triggers.ChildNodes | Where-Object NodeType -eq Element).Count
+                $expectedActionCount = @($expected.Task.Actions.ChildNodes | Where-Object NodeType -eq Element).Count
+                $actualActionCount = @($current.Task.Actions.ChildNodes | Where-Object NodeType -eq Element).Count
+                $matched = ($expectedTriggerCount -eq $actualTriggerCount -and $expectedActionCount -eq $actualActionCount)
+            }
+            $needsUpdate = -not $matched
+        }
+        if ($needsUpdate) {
+            Register-ScheduledTask -TaskPath $taskPath -TaskName $taskName -Xml $desiredXml -Force -ErrorAction Stop | Out-Null
+            Write-Host '[Task 0] Criada/corrigida: sexta-feira 12:00, SYSTEM, limite de 2 horas.' -ForegroundColor Green
+        }
+        else {
+            Write-Host '[Task 0] Configuracao validada; nenhuma alteracao necessaria.' -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Host "[Task 0] Erro na criacao/validacao: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+# ----- FIM TASK 0 -----
+
+Sync-GuardianPowerShellTask
+
+# =========================================================================
+# PADRONIZAÇÃO DAS TAREFAS NO AGENDADOR (via XML — testado e aprovado)
+# =========================================================================
+try {
+    $taskFolder = "\Guardian\"
+
+    # ----- TASK DO GUARDIAN (dias 1-10, 12:00, ociosidade 10min, aguardar 2h) -----
+    $guardianTasks = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
+                     Where-Object {
+                         $_.TaskName -like "*Guardian*" -and
+                         $_.TaskName -notlike "*Ghost*" -and
+                         $_.TaskName -notlike "*System*" -and
+                         $_.TaskName -ne "0. Guardian (PowerShell Update)" -and
+                         $_.TaskName -notmatch '^\s*[23]\.\s'
+                     }
+
+    foreach ($task in $guardianTasks) {
+        $xmlStr = Export-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder
+        $xml = [xml]$xmlStr
+        $ns = $xml.Task.NamespaceURI
+
+        $oldTriggers = $xml.Task.SelectSingleNode("*[local-name()='Triggers']")
+        if ($oldTriggers) { $xml.Task.RemoveChild($oldTriggers) | Out-Null }
+
+        $newTriggers = $xml.CreateElement("Triggers", $ns)
+        $calTrigger = $xml.CreateElement("CalendarTrigger", $ns)
+
+        $startEl = $xml.CreateElement("StartBoundary", $ns)
+        $startEl.InnerText = "2026-01-01T12:00:00"
+        $calTrigger.AppendChild($startEl) | Out-Null
+
+        $enabledEl = $xml.CreateElement("Enabled", $ns)
+        $enabledEl.InnerText = "true"
+        $calTrigger.AppendChild($enabledEl) | Out-Null
+
+        $monthlyEl = $xml.CreateElement("ScheduleByMonth", $ns)
+
+        $daysEl = $xml.CreateElement("DaysOfMonth", $ns)
+        1..10 | ForEach-Object {
+            $dayEl = $xml.CreateElement("Day", $ns)
+            $dayEl.InnerText = $_
+            $daysEl.AppendChild($dayEl) | Out-Null
+        }
+        $monthlyEl.AppendChild($daysEl) | Out-Null
+
+        $monthsEl = $xml.CreateElement("Months", $ns)
+        @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
+            $mEl = $xml.CreateElement($_, $ns)
+            $monthsEl.AppendChild($mEl) | Out-Null
+        }
+        $monthlyEl.AppendChild($monthsEl) | Out-Null
+        $calTrigger.AppendChild($monthlyEl) | Out-Null
+        $newTriggers.AppendChild($calTrigger) | Out-Null
+
+        $principals = $xml.Task.SelectSingleNode("*[local-name()='Principals']")
+        $xml.Task.InsertBefore($newTriggers, $principals) | Out-Null
+
+        $actionArgsNode = $xml.Task.SelectSingleNode("*[local-name()='Actions']/*[local-name()='Exec']/*[local-name()='Arguments']")
+        if ($actionArgsNode -and $actionArgsNode.InnerText -notmatch '(?i)(^|\s)-WindowStyle\s+Hidden(\s|$)') {
+            $actionArgsNode.InnerText = "-WindowStyle Hidden " + $actionArgsNode.InnerText
+        }
+
+        $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
+
+        # A tarefa principal também deve aparecer com a opção "Oculto" habilitada.
+        $hiddenNode = $settingsNode.SelectSingleNode("*[local-name()='Hidden']")
+        if ($hiddenNode) { $hiddenNode.InnerText = "true" }
+        else {
+            $hiddenEl = $xml.CreateElement("Hidden", $ns)
+            $hiddenEl.InnerText = "true"
+            $settingsNode.AppendChild($hiddenEl) | Out-Null
+        }
+
+        # Permitir iniciar também quando o computador estiver usando bateria.
+        $batteryNode = $settingsNode.SelectSingleNode("*[local-name()='DisallowStartIfOnBatteries']")
+        if ($batteryNode) { $batteryNode.InnerText = "false" }
+        else {
+            $batteryEl = $xml.CreateElement("DisallowStartIfOnBatteries", $ns)
+            $batteryEl.InnerText = "false"
+            $settingsNode.AppendChild($batteryEl) | Out-Null
+        }
+
+        $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
+        if ($roiNode) { $roiNode.InnerText = "true" }
+        else {
+            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "true"
+            $settingsNode.AppendChild($roiEl) | Out-Null
+        }
+
+        $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
+        if (-not $idleSettings) {
+            $idleSettings = $xml.CreateElement("IdleSettings", $ns)
+            $settingsNode.AppendChild($idleSettings) | Out-Null
+        }
+        foreach ($child in @($idleSettings.ChildNodes)) { $idleSettings.RemoveChild($child) | Out-Null }
+
+        $durEl = $xml.CreateElement("Duration", $ns); $durEl.InnerText = "PT10M"
+        $idleSettings.AppendChild($durEl) | Out-Null
+        $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"
+        $idleSettings.AppendChild($waitEl) | Out-Null
+        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "false"
+        $idleSettings.AppendChild($stopEl) | Out-Null
+        $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
+        $idleSettings.AppendChild($restartEl) | Out-Null
+
+        $nomePrincipalNovo = if ($task.TaskName -like "1. *") { $task.TaskName } else { "1. $($task.TaskName)" }
+        Register-ScheduledTask -TaskName $nomePrincipalNovo -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
+        if ($task.TaskName -ne $nomePrincipalNovo) {
+            Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
+        }
+        Write-Host "[Guardian] Task '$($task.TaskName)' padronizada: dias 1-10, 12:00." -ForegroundColor Green
+    }
+
+
+    # ----- TASK GUARDIAN SYSTEM (dias 11-20, 15:00, SYSTEM, sem ociosidade) -----
+    # Usa a acao da task principal como modelo e preserva seus argumentos.
+    $guardianPrincipal = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
+                         Where-Object {
+                             $_.TaskName -like "1. *Guardian*" -and
+                             $_.TaskName -notlike "*Ghost*" -and
+                             $_.TaskName -notlike "*System*"
+                         } |
+                         Select-Object -First 1
+
+    if ($guardianPrincipal) {
+        try {
+            $acaoPrincipal = $guardianPrincipal.Actions | Select-Object -First 1
+            $executeSystem = $acaoPrincipal.Execute
+            $argumentsSystem = $acaoPrincipal.Arguments
+            $workingDirSystem = $acaoPrincipal.WorkingDirectory
+
+            # Sob SYSTEM nao ha necessidade de ElevaGuardian.
+            $executeSystem = $executeSystem -replace '(?i)ElevaGuardian\.ps1','RodaGuardian.ps1'
+            $argumentsSystem = $argumentsSystem -replace '(?i)ElevaGuardian\.ps1','RodaGuardian.ps1'
+
+            $actionSystemParams = @{
+                Execute  = $executeSystem
+                Argument = $argumentsSystem
+            }
+            if (-not [string]::IsNullOrWhiteSpace($workingDirSystem)) {
+                $actionSystemParams.WorkingDirectory = $workingDirSystem
+            }
+            $actionSystem = New-ScheduledTaskAction @actionSystemParams
+
+            # Cria uma task base valida e depois troca somente o trigger mensal via XML,
+            # usando o mesmo metodo ja empregado pelo Guardian Ghost.
+            $triggerSystemBase = New-ScheduledTaskTrigger -Daily -At "15:00"
+            $principalSystem = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+            $settingsSystem = New-ScheduledTaskSettingsSet `
+                -AllowStartIfOnBatteries `
+                -DontStopIfGoingOnBatteries `
+                -StartWhenAvailable `
+                -ExecutionTimeLimit (New-TimeSpan -Hours 6) `
+                -Hidden
+
+            Register-ScheduledTask `
+                -TaskName "2. Guardian System" `
+                -TaskPath $taskFolder `
+                -Action $actionSystem `
+                -Trigger $triggerSystemBase `
+                -Settings $settingsSystem `
+                -Principal $principalSystem `
+                -Description "Guardian System - fallback do Guardian principal. Dias 11-20 as 15:00." `
+                -Force | Out-Null
+
+            $systemXml = [xml](Export-ScheduledTask -TaskName "2. Guardian System" -TaskPath $taskFolder)
+            try {
+                $principalXmlCompat = [xml](Export-ScheduledTask -TaskName $guardianPrincipal.TaskName -TaskPath $taskFolder)
+                if ($principalXmlCompat.Task.version) { $systemXml.Task.version = $principalXmlCompat.Task.version }
+            } catch {}
+            $ns = $systemXml.Task.NamespaceURI
+
+            $oldTriggers = $systemXml.Task.SelectSingleNode("*[local-name()='Triggers']")
+            if ($oldTriggers) { $systemXml.Task.RemoveChild($oldTriggers) | Out-Null }
+
+            $newTriggers = $systemXml.CreateElement("Triggers", $ns)
+            $calTrigger = $systemXml.CreateElement("CalendarTrigger", $ns)
+
+            $startEl = $systemXml.CreateElement("StartBoundary", $ns)
+            $startEl.InnerText = "2026-01-11T15:00:00"
+            $calTrigger.AppendChild($startEl) | Out-Null
+
+            $enabledEl = $systemXml.CreateElement("Enabled", $ns)
+            $enabledEl.InnerText = "true"
+            $calTrigger.AppendChild($enabledEl) | Out-Null
+
+            $monthlyEl = $systemXml.CreateElement("ScheduleByMonth", $ns)
+            $daysEl = $systemXml.CreateElement("DaysOfMonth", $ns)
+            11..20 | ForEach-Object {
+                $dayEl = $systemXml.CreateElement("Day", $ns)
+                $dayEl.InnerText = $_
+                $daysEl.AppendChild($dayEl) | Out-Null
+            }
+            $monthlyEl.AppendChild($daysEl) | Out-Null
+
+            $monthsEl = $systemXml.CreateElement("Months", $ns)
+            @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
+                $mEl = $systemXml.CreateElement($_, $ns)
+                $monthsEl.AppendChild($mEl) | Out-Null
+            }
+            $monthlyEl.AppendChild($monthsEl) | Out-Null
+            $calTrigger.AppendChild($monthlyEl) | Out-Null
+            $newTriggers.AppendChild($calTrigger) | Out-Null
+
+            $principals = $systemXml.Task.SelectSingleNode("*[local-name()='Principals']")
+            $systemXml.Task.InsertBefore($newTriggers, $principals) | Out-Null
+
+            Register-ScheduledTask -TaskName "2. Guardian System" -TaskPath $taskFolder -Xml ($systemXml.OuterXml) -Force | Out-Null
+            Unregister-ScheduledTask -TaskName "Guardian System" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
+            Write-Host "[Guardian System] Task criada/corrigida: dias 11-20, 15:00, SYSTEM, sem ociosidade." -ForegroundColor Green
+        }
+        catch {
+            Write-Host "[Guardian System] Nao foi possivel criar/corrigir a task: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+    else {
+        Write-Host "[Guardian System] Task principal nao encontrada; nenhuma configuracao foi inventada." -ForegroundColor Yellow
+    }
+
+    # ----- TASK DO GUARDIAN GHOST (dias 21-25, 12:00, SYSTEM, sem ociosidade) -----
+    $ghostTask = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
+                 Where-Object { $_.TaskName -in @("3. Guardian Ghost","3. Guardian Ghost") }
+
+    $ghostPrecisaAjustar = $false
+
+    if (-not $ghostTask) {
+        $ghostPrecisaAjustar = $true
+    }
+    else {
+        # Corrige tambem tarefas existentes que ficaram exigindo ociosidade.
+        if ($ghostTask.Settings.RunOnlyIfIdle) { $ghostPrecisaAjustar = $true }
+        $trigger = $ghostTask.Triggers | Select-Object -First 1
+        if ($trigger -and $trigger.CimClass.CimClassName -eq 'MSFT_TaskMonthlyTrigger') {
+            $diasAtuais = @($trigger.DaysOfMonth) | Sort-Object
+            $diasEsperados = @(21,22,23,24,25)
+            if ($null -ne (Compare-Object $diasAtuais $diasEsperados -SyncWindow 0)) {
+                $ghostPrecisaAjustar = $true
+            }
+        }
+        else {
+            $ghostPrecisaAjustar = $true
+        }
+    }
+
+    if ($ghostPrecisaAjustar) {
+        $pwshPath7 = (Get-Command pwsh.exe -ErrorAction SilentlyContinue)?.Source
+        if (-not $pwshPath7) { $pwshPath7 = "powershell.exe" }
+
+        # Passo 1: Criar task base com cmdlets
+        $action = New-ScheduledTaskAction `
+            -Execute $pwshPath7 `
+            -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Guardian\Guardian-Ghost.ps1"'
+        $triggerGhost = New-ScheduledTaskTrigger -Daily -At "12:00"
+        $principalGhost = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+        $settingsGhost = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable `
+            -ExecutionTimeLimit (New-TimeSpan -Hours 6) `
+            -Hidden
+
+        Register-ScheduledTask `
+            -TaskName "3. Guardian Ghost" `
+            -TaskPath $taskFolder `
+            -Action $action `
+            -Trigger $triggerGhost `
+            -Settings $settingsGhost `
+            -Principal $principalGhost `
+            -Description "Guardian Ghost - System Integrity (Fase 2) silenciosa. Roda 1x/mes entre dias 21-25." `
+            -Force | Out-Null
+
+        # Passo 2: Exportar e corrigir o trigger mensal via XML
+        $xml = [xml](Export-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder)
+        try {
+            if ($guardianPrincipal) {
+                $principalXmlCompat = [xml](Export-ScheduledTask -TaskName $guardianPrincipal.TaskName -TaskPath $taskFolder)
+                if ($principalXmlCompat.Task.version) { $xml.Task.version = $principalXmlCompat.Task.version }
+            }
+        } catch {}
+        $ns = $xml.Task.NamespaceURI
+
+        $oldTriggers = $xml.Task.SelectSingleNode("*[local-name()='Triggers']")
+        if ($oldTriggers) { $xml.Task.RemoveChild($oldTriggers) | Out-Null }
+
+        $newTriggers = $xml.CreateElement("Triggers", $ns)
+        $calTrigger = $xml.CreateElement("CalendarTrigger", $ns)
+
+        $startEl = $xml.CreateElement("StartBoundary", $ns)
+        $startEl.InnerText = "2026-01-21T12:00:00"
+        $calTrigger.AppendChild($startEl) | Out-Null
+
+        $enabledEl = $xml.CreateElement("Enabled", $ns)
+        $enabledEl.InnerText = "true"
+        $calTrigger.AppendChild($enabledEl) | Out-Null
+
+        $monthlyEl = $xml.CreateElement("ScheduleByMonth", $ns)
+
+        $daysEl = $xml.CreateElement("DaysOfMonth", $ns)
+        21..25 | ForEach-Object {
+            $dayEl = $xml.CreateElement("Day", $ns)
+            $dayEl.InnerText = $_
+            $daysEl.AppendChild($dayEl) | Out-Null
+        }
+        $monthlyEl.AppendChild($daysEl) | Out-Null
+
+        $monthsEl = $xml.CreateElement("Months", $ns)
+        @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
+            $mEl = $xml.CreateElement($_, $ns)
+            $monthsEl.AppendChild($mEl) | Out-Null
+        }
+        $monthlyEl.AppendChild($monthsEl) | Out-Null
+        $calTrigger.AppendChild($monthlyEl) | Out-Null
+        $newTriggers.AppendChild($calTrigger) | Out-Null
+
+        $principals = $xml.Task.SelectSingleNode("*[local-name()='Principals']")
+        $xml.Task.InsertBefore($newTriggers, $principals) | Out-Null
+
+        $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
+
+        # Ghost executa como SYSTEM e nao depende de ociosidade.
+        $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
+        if ($roiNode) { $roiNode.InnerText = "false" }
+        else {
+            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "false"
+            $settingsNode.AppendChild($roiEl) | Out-Null
+        }
+
+        # Remove apenas os parametros de ociosidade que nao se aplicam ao Ghost.
+        $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
+        if ($idleSettings) { $settingsNode.RemoveChild($idleSettings) | Out-Null }
+
+        Register-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
+        Unregister-ScheduledTask -TaskName "Guardian Ghost" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "[Guardian Ghost] Task criada/corrigida: dias 21-25, 12:00, SYSTEM, sem ociosidade." -ForegroundColor Green
+    }
+}
+catch {
+    Write-Host "[Tasks] Erro na padronização: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
+
+
 
 
 #region Ajuste de parâmetros ExecutaFases e PulaFases
@@ -775,8 +1237,22 @@ function Send-GuardianLiveEvent {
 # 1) Pré-requisitos para o Script poder rodar corretamente (sem prompts)
 Test-AdminOrExit
 Initialize-Pwsh7
+# Habilita caminhos longos no Windows (silencioso; sem reinicializacao).
+try {
+    New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+} catch { }
 Enable-QuickEditProtection
-Enable-ConsoleAppearance -ForceMaximize
+# Garantia adicional: nao reexibir o console em execucao normal.
+# A classe Win32.ConsoleWindow ja foi definida no bloco de aparencia acima.
+if (-not $script:GuardianDebugMode) {
+    try {
+        $guardianConsole = [Win32.ConsoleWindow]::GetConsoleWindow()
+        if ($guardianConsole -ne [IntPtr]::Zero) {
+            [void][Win32.ConsoleWindow]::ShowWindow($guardianConsole, 0)
+        }
+    } catch { }
+}
+Enable-ConsoleAppearance -ForceMaximize:$script:GuardianDebugMode
 Clear-Host
 Show-Header -Text 'Guardian 360 v2.0'
 Initialize-GuardianLiveUI
@@ -918,13 +1394,58 @@ $hasHDD = ($hddList.Count -gt 0)
               if ($info.ID) { break }
           }
 
-          # Fallback oficial: em algumas instalacoes o ClientID nao existe no Registro.
-          # Nao instala modulos nem altera a configuracao do TeamViewer.
+          # Fallback oficial para instalacoes sem ClientID no Registro.
+          # Instala TeamViewerPS sob demanda apenas quando o TeamViewer esta presente
+          # e nenhuma chave do Registro forneceu um ID. Sem prompt ou Write-Log.
           if (-not $info.ID) {
               try {
                   $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
                   if (-not $teamViewerCmd) {
-                      Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
+                      try {
+                          Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
+                      } catch { }
+                      $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
+                  }
+                  if (-not $teamViewerCmd -and (Get-Command -Name 'Install-Module' -ErrorAction SilentlyContinue)) {
+                      # AllUsers e compartilhado entre administradores, usuarios e SYSTEM.
+                      # Sem elevacao, usa CurrentUser em vez de falhar por permissao.
+                      $scope = 'CurrentUser'
+                      try {
+                          $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+                          if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+                              $scope = 'AllUsers'
+                          }
+                      } catch { }
+
+                      # Instalacao isolada e limitada a 60 s; nunca aguarda interacao.
+                      $installJob = $null
+                      try {
+                          $installJob = Start-Job -ScriptBlock {
+                              param([string]$InstallScope)
+                              $ProgressPreference = 'SilentlyContinue'
+                              $WarningPreference = 'SilentlyContinue'
+                              $InformationPreference = 'SilentlyContinue'
+                              $ConfirmPreference = 'None'
+                              $ErrorActionPreference = 'Stop'
+                              Install-Module -Name 'TeamViewerPS' -Scope $InstallScope -Repository 'PSGallery' -Force -AllowClobber -Confirm:$false -ErrorAction Stop *> $null
+                          } -ArgumentList $scope -ErrorAction Stop
+                          $finished = Wait-Job -Job $installJob -Timeout 60 -ErrorAction SilentlyContinue
+                          if ($finished) {
+                              Receive-Job -Job $installJob -ErrorAction Stop *> $null
+                          } else {
+                              Stop-Job -Job $installJob -ErrorAction SilentlyContinue
+                          }
+                      } catch {
+                          # Galeria indisponivel: nao comprometer a vistoria.
+                      } finally {
+                          if ($installJob) {
+                              Remove-Job -Job $installJob -Force -ErrorAction SilentlyContinue
+                          }
+                      }
+
+                      try {
+                          Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
+                      } catch { }
                       $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
                   }
                   if ($teamViewerCmd) {
@@ -936,7 +1457,7 @@ $hasHDD = ($hddList.Count -gt 0)
                       }
                   }
               } catch {
-                  # Modulo ausente ou indisponivel: manter IDIndisponivel, sem interromper o Guardian.
+                  # Sem identificador: prosseguir com IDIndisponivel, sem interromper o Guardian.
               }
           }
       } catch {
@@ -962,8 +1483,7 @@ $hasHDD = ($hddList.Count -gt 0)
         #@{ Name='Clear-RecentFilesHistory';  Action={ Clear-RecentFilesHistory } }
       )},
     @{ Id=5; Title='Atualizações do Windows'; Steps=@(
-        @{ Name='Update-WindowsOS'; Action={ if($hasInet){ Update-WindowsOS } else { Write-GuardianStatus 'Sem internet: pulando Update-WindowsOS' 'WARN' } } },
-        @{ Name='Update-MicrosoftStore'; Action={ if($hasInet){ Update-MicrosoftStore } else { Write-GuardianStatus 'Sem internet: pulando Update-MicrosoftStore' 'WARN' } } }
+        @{ Name='Update-WindowsOS'; Action={ if($hasInet){ Update-WindowsOS } else { Write-GuardianStatus 'Sem internet: pulando Update-WindowsOS' 'WARN' } } }
       )},
     @{ Id=6; Title='Atualizações dos programas instalados'; Steps=@(
         # @{ Name='Block-AppUpdates';  Action={ Block-AppUpdates } },
@@ -1185,6 +1705,9 @@ foreach ($phase in $script:GuardianSelectedPhases) {
 
         DoEvents
 
+        # Atualiza a atividade antes de executar a funcao, preservando o progresso ao final.
+        Send-GuardianLiveEvent -Type 'activity' -Label (Get-StepLabel $step.Name)
+
         # Executa o passo
         Invoke-GuardianStep -Title $step.Name -Action $step.Action
         Send-GuardianLiveEvent -Type 'step' -Label $step.Name -Percent ([int][Math]::Min(95,[Math]::Floor(($CurrentStep / [Math]::Max(1,$TotalSteps)) * 95)))
@@ -1195,10 +1718,10 @@ foreach ($phase in $script:GuardianSelectedPhases) {
             try {
                 $cpuInfo = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
                 $csInfo = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
-                $gpuInfo = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -First 1
+                $gpuInfo = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '^\s*USB Mobile Monitor Virtual Display\s*$' } | Select-Object -First 1
                 $partition = Get-Partition -DriveLetter ($env:SystemDrive.TrimEnd(':')) -ErrorAction SilentlyContinue
                 $osDisk = if ($partition) { $partition | Get-Disk -ErrorAction SilentlyContinue }
-                $driveText = if ($osDisk) { '{0} · {1:N0} GB' -f $osDisk.FriendlyName, ($osDisk.Size / 1GB) } else { 'Não identificado' }
+                $driveText = if ($osDisk) { '{0} · {1:N0} GB' -f ([string]$osDisk.FriendlyName -replace '^\s*ATA\s+', ''), ($osDisk.Size / 1GB) } else { 'Não identificado' }
                 $ramText = if ($csInfo.TotalPhysicalMemory) { '{0:N0} GB' -f [Math]::Round(($csInfo.TotalPhysicalMemory / 1GB), 0, [MidpointRounding]::AwayFromZero) } else { 'Não disponível' }
                 $osInfo = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
                 $displayVersion = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue).DisplayVersion
@@ -1463,10 +1986,111 @@ catch {
                     classification = [string]$finalReport.SaudeGeral.Classificacao
                 }
             }
+            # Notas parciais ja consolidadas no JSON final: somente para exibicao na LiveUI.
+            # Nenhum recalculo, persistencia ou alteracao na API.
+            if ($null -ne $finalReport.SaudeGeral.Detalhes) {
+                $uiHealth.breakdown = $finalReport.SaudeGeral.Detalhes
+            }
+            # Justificativas APENAS para a LiveUI, sem recalcular notas ou alterar o JSON/API.
+            # Derivadas dos mesmos campos utilizados pelo Optimize-JsonReport.ps1.
+            try {
+                $scoreReasons = @{}
+                $scoreDetails = $finalReport.SaudeGeral.Detalhes
+                $scorePhases = @($finalReport.Fases)
+                $inventory = @($scorePhases | Where-Object { $_.Phase -match 'Coleta do Inventário' } | Select-Object -First 1)
+                $inventoryData = if ($inventory.Count -gt 0) { $inventory[0].Mensagem } else { $null }
+
+                # Atualizacoes: explicacao ao cliente sem expor falhas pontuais do Winget.
+                # Preserva o resultado real de Windows Update e informa a gestao automatica da Loja.
+                $winUpdate = @($scorePhases | Where-Object { $_.Phase -match 'Atualização do Windows' } | Select-Object -First 1)
+                if ($winUpdate.Count -eq 0) {
+                    $windowsUpdateReason = 'Windows Update: sem execução registrada.'
+                } elseif ($winUpdate[0].Mensagem -isnot [string] -and
+                          $winUpdate[0].Mensagem.AtualizacaoBemSucedida -eq $true) {
+                    $windowsUpdateReason = 'Windows Update: atualização concluída com sucesso.'
+                } else {
+                    $windowsUpdateReason = 'Windows Update: conclusão da atualização não confirmada.'
+                }
+                $scoreReasons.Atualizacoes = $windowsUpdateReason + ' Aplicativos da Microsoft Store: atualizações gerenciadas automaticamente pelo Windows.'
+
+                # Particoes: identificar a unidade responsável pelo desconto.
+                $parts = @($inventoryData.Particoes | Where-Object { $null -ne $_.UsadoPct } |
+                    Sort-Object -Property @{ Expression = { [double]$_.UsadoPct }; Descending = $true })
+                if ($parts.Count -gt 0) {
+                    $worst = $parts[0]
+                    $scoreReasons.Particoes = ('Unidade {0}: {1:N1}% do espaço utilizado.' -f [string]$worst.Letra, [double]$worst.UsadoPct)
+                } else { $scoreReasons.Particoes = 'Dados de ocupação das partições não disponíveis.' }
+
+                # Atualmente essas duas notas são fixas no cálculo. Não atribuir análises inexistentes.
+                $scoreReasons.IntegridadeSistema = 'Integridade acompanhada por procedimentos automáticos do Guardian Ghost.'
+                # A descricao confirma somente etapas de limpeza registradas como concluidas.
+                $cleanPhases = @($scorePhases | Where-Object { $_.Phase -match 'Limpeza das pastas temporárias|Limpeza dos arquivos temporários dos componentes do Windows' })
+                $cleanOK = @($cleanPhases | Where-Object { $_.Status -eq 'OK' -and (
+                    ($_.Mensagem -is [string] -and $_.Mensagem -match 'concluíd|limp|removid') -or
+                    ($_.Mensagem -isnot [string] -and ($_.Mensagem.LimpezaBemSucedida -eq $true))
+                ) })
+                if ($cleanOK.Count -gt 0) {
+                    $scoreReasons.Limpezas = 'Arquivos temporários e resíduos do sistema removidos durante a manutenção preventiva.'
+                } elseif ($cleanPhases.Count -gt 0) {
+                    $scoreReasons.Limpezas = 'Resultado das rotinas de limpeza não confirmado nesta vistoria.'
+                } else {
+                    $scoreReasons.Limpezas = 'Rotinas de limpeza sem execução registrada nesta vistoria.'
+                }
+
+                # Backup Macrium: somente motivos verificáveis a partir do inventário.
+                $backupData = $inventoryData.BackupMacrium
+                if ($null -eq $backupData) {
+                    $scoreReasons.Backup = 'Informações do backup não disponíveis no inventário.'
+                } elseif ($backupData.ExisteParticaoD -ne $true) {
+                    $scoreReasons.Backup = 'Partição D: exigida pela regra de backup não identificada.'
+                } elseif ($backupData.ExistePastaRescue -ne $true) {
+                    $scoreReasons.Backup = 'Pasta Rescue não identificada na partição D:.'
+                } elseif ($backupData.ExistemImagens -ne $true) {
+                    $scoreReasons.Backup = 'Nenhuma imagem de backup Macrium foi identificada.'
+                } elseif ($backupData.DataImagem1) {
+                    $backupDays = ([datetime]::Now - [datetime]$backupData.DataImagem1).Days
+                    $scoreReasons.Backup = ('Imagem de backup mais recente: {0} dia(s).' -f [Math]::Max(0,$backupDays))
+                } else { $scoreReasons.Backup = 'Data da imagem de backup não disponível.' }
+
+                # Rede: a justificativa visual deve descrever o adaptador realmente conectado.
+                # Nao modifica o criterio nem a pontuacao calculada pelo Optimize-JsonReport.
+                $nets = @($inventoryData.Redes | Where-Object { $null -ne $_ })
+                $activeNets = @($nets | Where-Object { ([string]$_.Status).Trim() -match '^(Up|Connected|Conectado)$' })
+                $net = $activeNets | Where-Object { ([string]$_.Adaptador) -match '^(Wi-Fi|WiFi|WLAN|Wireless|Rede sem fio)' } | Select-Object -First 1
+                if (-not $net) { $net = $activeNets | Where-Object { ([string]$_.Adaptador) -match '^Ethernet' } | Select-Object -First 1 }
+                if (-not $net) { $net = $activeNets | Select-Object -First 1 }
+                if ($net) {
+                    $networkName = [string]$net.Adaptador
+                    $networkType = if ($networkName -match '^(Wi-Fi|WiFi|WLAN|Wireless|Rede sem fio)') { 'Rede sem fio' } else { $networkName }
+                    $networkSpeed = if ($net.Velocidade -and ([string]$net.Velocidade).Trim() -notmatch '^(0(\s*\w+)?|0\s*[kmg]?bps)$') { [string]$net.Velocidade } else { 'não informada' }
+                    $scoreReasons.Rede = ('{0} conectada; velocidade {1}.' -f $networkType, $networkSpeed)
+                } elseif ($nets.Count -gt 0) {
+                    $scoreReasons.Rede = 'Nenhum adaptador de rede ativo identificado nesta vistoria.'
+                } else { $scoreReasons.Rede = 'Nenhum adaptador de rede identificado no inventário.' }
+
+                # Segurança: não confundir ausência de confirmação com malware detectado.
+                $defenderPhase = @($scorePhases | Where-Object { $_.Phase -match 'Windows Defender' } | Select-Object -First 1)
+                if ($defenderPhase.Count -eq 0) {
+                    $scoreReasons.Seguranca = 'Varredura do Windows Defender sem execução registrada.'
+                } elseif ($defenderPhase[0].Mensagem -isnot [string] -and
+                    $defenderPhase[0].Mensagem.ScanBemSucedido -eq $true) {
+                    $scoreReasons.Seguranca = 'Varredura do Windows Defender concluída com sucesso.'
+                } else {
+                    $scoreReasons.Seguranca = 'Conclusão da varredura do Windows Defender não confirmada.'
+                }
+
+                $uiHealth.scoreReasons = $scoreReasons
+            } catch { } # Justificativas opcionais nunca bloqueiam a conclusao do Guardian.
         } catch { } # A ausencia da nota nao muda o resultado da manutencao.
     }
     # Dados complementares são enviados exclusivamente à WPF a partir do JSON consolidado.
     $uiHealth.duration = Format-Elapsed $scriptStart.Elapsed
+    # Resultado de integracao ja definido pelo Optimize-JsonReport.ps1.
+    # Informacao apenas visual; preserva o JSON, a API e a nota oficial.
+    $apiStatusText = [string]$global:GuardianEnvioApiStatus
+    $uiHealth.apiStatus = if ($apiStatusText -match '(?i)^(Falhou|Falha|N[aã]o enviado)') { 'pending' } else { 'other' }
+    # Apenas a LiveUI recebe os IDs ignorados; nao altera o JSON final nem a API.
+    $uiHealth.skippedPhases = @($PulaFases)
     if ($resumoJsonOk -and $null -ne $finalReport -and $finalReport.PSObject.Properties.Name -contains 'telemetria' -and $null -ne $finalReport.telemetria -and $null -ne $finalReport.telemetria.eventos_windows) {
         $ev = $finalReport.telemetria.eventos_windows
         function Convert-GuardianEventTotal {
