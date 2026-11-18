@@ -2042,10 +2042,10 @@ function Set-GuardianPeaZipPtBR {
         throw ('Nao foi possivel enumerar os perfis para validar o idioma: ' + $_.Exception.Message)
     }
     foreach ($profile in $profiles) {
-        $home = [string]$profile.LocalPath
-        if ([string]::IsNullOrWhiteSpace($home) -or -not (Test-Path -LiteralPath $home -PathType Container)) { continue }
-        $configPaths.Add((Join-Path $home 'AppData\Roaming\PeaZip\conf.txt'))
-        $configPaths.Add((Join-Path $home 'AppData\Roaming\PeaZip\res\conf\conf.txt'))
+        $profilePath = [string]$profile.LocalPath
+        if ([string]::IsNullOrWhiteSpace($profilePath) -or -not (Test-Path -LiteralPath $profilePath -PathType Container)) { continue }
+        $configPaths.Add((Join-Path $profilePath 'AppData\Roaming\PeaZip\conf.txt'))
+        $configPaths.Add((Join-Path $profilePath 'AppData\Roaming\PeaZip\res\conf\conf.txt'))
     }
     $checked = 0
     $modified = 0
