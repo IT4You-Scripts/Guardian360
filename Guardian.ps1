@@ -1813,6 +1813,127 @@ function Remove-GuardianMalwarebytesAll {
   Remove-GuardianApprovedApps '(?i)^Malwarebytes(?:\s|$)'
 }
 
+# Higienizacao pos-desinstalacao, restrita a artefatos exclusivos dos produtos aprovados.
+# Nao remove perfis, dados de usuario, drivers, servicos ou diretorios nao vazios.
+function Test-GuardianUninstallProductAbsent([string]$Regex) {
+    return (@(Get-GuardianUninstallMatches $Regex).Count -eq 0)
+}
+function Remove-GuardianSafeShortcut([string]$Path,[string]$NamePattern,[string]$TargetPattern) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    if ([IO.Path]::GetExtension($Path) -ine '.lnk') { return }
+    $shortcutName = [IO.Path]::GetFileNameWithoutExtension($Path)
+    if ($shortcutName -notmatch $NamePattern) { return }
+    try {
+        $shell=New-Object -ComObject WScript.Shell -ErrorAction Stop
+        $lnk=$shell.CreateShortcut($Path)
+        $target=[string]$lnk.TargetPath
+        if ($target -notmatch $TargetPattern) {
+            Write-GuardianUninstallDebug ('RESIDUO IGNORADO (atalho com destino divergente): '+$Path)
+            return
+        }
+        Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+        Write-GuardianUninstallDebug ('RESIDUO REMOVIDO (atalho): '+$Path)
+    } catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (atalho): '+$Path+' - '+$_.Exception.Message) }
+}
+function Remove-GuardianApprovedShortcuts([string]$NamePattern,[string]$TargetPattern) {
+    $roots=@(
+      [Environment]::GetFolderPath('CommonDesktopDirectory'),
+      [Environment]::GetFolderPath('DesktopDirectory'),
+      [Environment]::GetFolderPath('CommonPrograms'),
+      [Environment]::GetFolderPath('Programs')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+    foreach($root in $roots) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        try {
+            # Nao percorre outras pastas de perfis nem discos inteiros.
+            foreach($f in @(Get-ChildItem -LiteralPath $root -Filter '*.lnk' -File -Recurse -ErrorAction Stop)) {
+                Remove-GuardianSafeShortcut $f.FullName $NamePattern $TargetPattern
+            }
+        } catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (atalhos): '+$root+' - '+$_.Exception.Message) }
+    }
+}
+function Remove-GuardianCcleanerRecycleBinMenu {
+    # CLSID da Lixeira: somente comandos de menu que apontam para CCleaner.
+    $id='{645FF040-5081-101B-9F08-00AA002F954E}'
+    $roots=@(
+      ('Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\'+$id+'\shell'),
+      ('Registry::HKEY_CURRENT_USER\Software\Classes\CLSID\'+$id+'\shell')
+    )
+    foreach($root in $roots) {
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        foreach($key in @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
+            $keyName=[string]$key.PSChildName
+            # Nunca remover comandos do sistema que nao sejam identificados como CCleaner.
+            if ($keyName -notmatch '(?i)ccleaner') { continue }
+            $cmdKey=$key.PSPath+'\command'
+            try {
+                if (-not (Test-Path -LiteralPath $cmdKey)) { continue }
+                $cmd=(Get-Item -LiteralPath $cmdKey -ErrorAction Stop).GetValue('')
+                if ([string]$cmd -notmatch '(?i)(?:ccleaner|piriform)') { continue }
+                Remove-Item -LiteralPath $key.PSPath -Recurse -Force -ErrorAction Stop
+                Write-GuardianUninstallDebug ('RESIDUO REMOVIDO (menu Lixeira): '+$key.PSPath)
+            } catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (menu Lixeira): '+$key.PSPath+' - '+$_.Exception.Message) }
+        }
+    }
+}
+function Remove-GuardianApprovedEmptyFolders([string[]]$Folders) {
+    foreach($folder in $Folders) {
+        if ([string]::IsNullOrWhiteSpace($folder)) { continue }
+        # Pastas explicitamente definidas abaixo; apenas quando estiverem realmente vazias.
+        if (-not (Test-Path -LiteralPath $folder -PathType Container)) { continue }
+        try {
+            $children=@(Get-ChildItem -LiteralPath $folder -Force -ErrorAction Stop)
+            if($children.Count -eq 0) {
+                Remove-Item -LiteralPath $folder -Force -ErrorAction Stop
+                Write-GuardianUninstallDebug ('RESIDUO REMOVIDO (pasta vazia): '+$folder)
+            } else { Write-GuardianUninstallDebug ('RESIDUO PRESERVADO (pasta com conteudo): '+$folder) }
+        } catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (pasta): '+$folder+' - '+$_.Exception.Message) }
+    }
+}
+function Remove-GuardianApprovedOrphanTasks([string]$TaskNamePattern,[string]$TargetPattern) {
+    # Somente tarefas do produto cujo executavel tenha desaparecido do disco.
+    try {
+        foreach($task in @(Get-ScheduledTask -ErrorAction Stop)) {
+            if ([string]$task.TaskName -notmatch $TaskNamePattern) { continue }
+            $actions=@($task.Actions | Where-Object { $null -ne $_ })
+            if($actions.Count -ne 1) { continue }
+            if (-not $actions[0].PSObject.Properties['Execute']) { continue }
+            $exe=[string]$actions[0].PSObject.Properties['Execute'].Value
+            if($exe -notmatch $TargetPattern) { continue }
+            $expanded=[Environment]::ExpandEnvironmentVariables($exe.Trim('"'))
+            if($expanded -notmatch '^(?:[a-zA-Z]:\\|\\\\)') { continue }
+            if(Test-Path -LiteralPath $expanded -PathType Leaf) { continue }
+            try {
+                Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -Confirm:$false -ErrorAction Stop
+                Write-GuardianUninstallDebug ('RESIDUO REMOVIDO (tarefa orfa): '+$task.TaskPath+$task.TaskName)
+            } catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (tarefa): '+$task.TaskName+' - '+$_.Exception.Message) }
+        }
+    } catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE (tarefas): '+$_.Exception.Message) }
+}
+function Invoke-GuardianKnownResidueCleanup([string]$Product) {
+    $rules=@{
+      'CCleaner' = @{ Reg='(?i)^CCleaner(?:\s|$)'; Shortcut='(?i)^CCleaner(?:\s|$)'; Target='(?i)\\(?:CCleaner|Piriform)\\|ccleaner(?:64)?\.exe$'; Folders=@("${env:ProgramFiles}\CCleaner", "${env:ProgramFiles(x86)}\CCleaner"); Task='(?i)^CCleaner(?:\s|$)' }
+      'CPUID CPU-Z / HWMonitor' = @{ Reg='(?i)^(?:CPUID\s+)?(?:CPU-Z|HWMonitor)(?:\s|$)'; Shortcut='(?i)^(?:CPUID\s+)?(?:CPU-Z|HWMonitor)(?:\s|$)'; Target='(?i)\\(?:CPUID|CPU-Z|HWMonitor)\\|\\(?:cpuz|hwmonitor)(?:_x64)?\.exe$'; Folders=@("${env:ProgramFiles}\CPUID", "${env:ProgramFiles(x86)}\CPUID"); Task='(?i)^(?:CPUID\s+)?(?:CPU-Z|HWMonitor)(?:\s|$)' }
+      'CrystalDiskInfo' = @{ Reg='(?i)^CrystalDiskInfo(?:\s|$)'; Shortcut='(?i)^CrystalDiskInfo(?:\s|$)'; Target='(?i)\\CrystalDiskInfo\\|\\DiskInfo(?:64)?\.exe$'; Folders=@("${env:ProgramFiles}\CrystalDiskInfo"); Task='(?i)^CrystalDiskInfo(?:\s|$)' }
+      'CrystalDiskMark' = @{ Reg='(?i)^CrystalDiskMark(?:\s|$)'; Shortcut='(?i)^CrystalDiskMark(?:\s|$)'; Target='(?i)\\CrystalDiskMark\d*\\|\\DiskMark(?:64)?\.exe$'; Folders=@("${env:ProgramFiles}\CrystalDiskMark", "${env:ProgramFiles}\CrystalDiskMark9"); Task='(?i)^CrystalDiskMark(?:\s|$)' }
+      'Driver Booster' = @{ Reg='(?i)^Driver Booster(?:\s|$)'; Shortcut='(?i)^Driver Booster(?:\s|$)'; Target='(?i)\\IObit\\Driver Booster\\'; Folders=@("${env:ProgramFiles(x86)}\IObit\Driver Booster", "${env:ProgramFiles}\IObit\Driver Booster"); Task='(?i)^Driver Booster(?:\s|$)' }
+      'MiniTool Partition Wizard' = @{ Reg='(?i)^MiniTool Partition Wizard(?:\s|$)'; Shortcut='(?i)^MiniTool Partition Wizard(?:\s|$)'; Target='(?i)\\MiniTool Partition Wizard\\|\\MiniTool\\'; Folders=@("${env:ProgramFiles}\MiniTool Partition Wizard", "${env:ProgramFiles(x86)}\MiniTool Partition Wizard"); Task='(?i)^MiniTool Partition Wizard(?:\s|$)' }
+      'Revo Uninstaller' = @{ Reg='(?i)^Revo Uninstaller(?:\s|$)'; Shortcut='(?i)^Revo Uninstaller(?:\s|$)'; Target='(?i)\\VS Revo Group\\Revo Uninstaller\\|\\Revo Uninstaller\\'; Folders=@("${env:ProgramFiles}\VS Revo Group\Revo Uninstaller", "${env:ProgramFiles(x86)}\VS Revo Group\Revo Uninstaller"); Task='(?i)^Revo Uninstaller(?:\s|$)' }
+      'Malwarebytes' = @{ Reg='(?i)^Malwarebytes(?:\s|$)'; Shortcut='(?i)^Malwarebytes(?:\s|$)'; Target='(?i)\\Malwarebytes\\'; Folders=@("${env:ProgramFiles}\Malwarebytes", "${env:ProgramFiles(x86)}\Malwarebytes"); Task='(?i)^Malwarebytes(?:\s|$)' }
+    }
+    if(-not $rules.ContainsKey($Product)) { return }
+    $rule=$rules[$Product]
+    if(-not (Test-GuardianUninstallProductAbsent $rule.Reg)) {
+        Write-GuardianUninstallDebug ('RESIDUO PRESERVADO (produto ainda instalado): '+$Product)
+        return
+    }
+    Write-GuardianUninstallDebug ('Verificando residuos conhecidos: '+$Product)
+    if($Product -eq 'CCleaner') { Remove-GuardianCcleanerRecycleBinMenu }
+    Remove-GuardianApprovedShortcuts $rule.Shortcut $rule.Target
+    Remove-GuardianApprovedOrphanTasks $rule.Task $rule.Target
+    Remove-GuardianApprovedEmptyFolders $rule.Folders
+}
+
 function Invoke-GuardianAppCleanup {
     Write-GuardianUninstallDebug 'Iniciando verificacao de aplicativos.'
     $remove=@(
@@ -1829,6 +1950,8 @@ function Invoke-GuardianAppCleanup {
         $regex=[string]$item[1]
         try { Remove-GuardianApprovedApps $regex }
         catch { Write-GuardianUninstallDebug ('PENDENTE '+$nome+': '+$_.Exception.Message) }
+        try { Invoke-GuardianKnownResidueCleanup $nome }
+        catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE '+$nome+': '+$_.Exception.Message) }
     }
     # Excecoes baseadas estritamente no nome do computador (independentemente do cliente).
     if ($env:COMPUTERNAME -in @('JDAC-NB14','INOVATEC-NB21')) {
@@ -1836,6 +1959,8 @@ function Invoke-GuardianAppCleanup {
     } else {
         try { Remove-GuardianMalwarebytesAll }
         catch { Write-GuardianUninstallDebug ('PENDENTE Malwarebytes: '+$_.Exception.Message) }
+        try { Invoke-GuardianKnownResidueCleanup 'Malwarebytes' }
+        catch { Write-GuardianUninstallDebug ('RESIDUO PENDENTE Malwarebytes: '+$_.Exception.Message) }
     }
     Write-GuardianUninstallDebug 'Verificacao encerrada.'
 }
