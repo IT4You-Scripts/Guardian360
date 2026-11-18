@@ -1679,30 +1679,30 @@ if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
 }
 
 # ===============================================================================
-# Remocao silenciosa de ferramentas pontuais - rotina transplantada do Checkup(6).
-# Apenas na execucao real do Guardian (Fase 1 obrigatoria). Nunca em -Simulado.
-# No modo normal esta rotina nao emite nenhuma linha no console.
-# No modo -Debug, exibe encontrado, removido, preservado e pendencias.
+# DESINSTALACAO SILENCIOSA - transplante da rotina do IT4YOU-Checkup (6)
+# Sem saida em modo normal. Exibe resultados apenas com -Debug.
+# Nao altera a pontuacao, o JSON nem o resultado das fases.
 # ===============================================================================
 function Write-GuardianUninstallDebug([string]$Message) {
-  if ($script:GuardianDebugMode) {
-    Microsoft.PowerShell.Utility\Write-Host ('  [LIMPEZA] ' + $Message) -ForegroundColor DarkGray
-  }
+    if ($script:GuardianDebugMode) {
+        Microsoft.PowerShell.Utility\Write-Host ('  [DESINSTALACAO] ' + $Message) -ForegroundColor DarkGray
+    }
 }
-
+function Assert-GuardianUninstallTrue([bool]$Condition,[string]$Message) {
+    if (-not $Condition) { throw $Message }
+}
 function Invoke-GuardianUninstallExecutable([string]$Exe,[string]$Arguments,[int]$TimeoutSec=600,[int[]]$AllowedCodes=@(0,3010)) {
-    if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { throw ('Arquivo nao encontrado: ' + $Exe) }
+    Assert-GuardianUninstallTrue (Test-Path -LiteralPath $Exe) ('Arquivo nao encontrado: ' + $Exe)
     Write-GuardianUninstallDebug ('EXECUTAVEL {0} {1}' -f $Exe,$Arguments)
     $p = Start-Process -FilePath $Exe -ArgumentList $Arguments -PassThru -WindowStyle Hidden -ErrorAction Stop
     $exitCode = $null
     try {
         if (-not $p.WaitForExit($TimeoutSec * 1000)) { try { $p.Kill() } catch {}; throw ('Tempo limite excedido: '+$TimeoutSec+' segundos.') }
         $exitCode = $p.ExitCode
-        if ($exitCode -notin $AllowedCodes) { throw ('Codigo de saida ' + $exitCode) }
+        Assert-GuardianUninstallTrue ($exitCode -in $AllowedCodes) ('Codigo de saida ' + $exitCode)
     } finally { $p.Dispose() }
-    if ($exitCode -eq 3010) { Write-GuardianUninstallDebug "Reinicializacao solicitada pelo desinstalador." }
+    if ($exitCode -eq 3010) { Write-GuardianUninstallDebug 'Reinicializacao solicitada pelo desinstalador.' }
 }
-
 # ======================= DESINSTALACAO CONSERVADORA =========================
 function Get-GuardianUninstallRecords {
   $locations=@(
@@ -1710,23 +1710,23 @@ function Get-GuardianUninstallRecords {
     'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
     'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
   )
-  $all=@(Get-ItemProperty -Path $locations -ErrorAction SilentlyContinue | Where-Object {$_.DisplayName})
+  $all=@(Get-ItemProperty -Path $locations -ErrorAction SilentlyContinue | Where-Object { $_.PSObject.Properties['DisplayName'] -and -not [string]::IsNullOrWhiteSpace([string]$_.PSObject.Properties['DisplayName'].Value) })
   # HKCU elevado nao representa necessariamente o usuario conectado.
   # Enumerar uninstall de usuarios com perfil carregado (sem carregar hives off-line).
   try {
     foreach ($sid in @(Get-ChildItem Registry::HKEY_USERS -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^S-1-5-21-\d+-\d+-\d+-\d+$' })) {
       $path='Registry::HKEY_USERS\'+$sid.PSChildName+'\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
-      $all+=@(Get-ItemProperty -Path $path -ErrorAction SilentlyContinue | Where-Object {$_.DisplayName})
+      $all+=@(Get-ItemProperty -Path $path -ErrorAction SilentlyContinue | Where-Object { $_.PSObject.Properties['DisplayName'] -and -not [string]::IsNullOrWhiteSpace([string]$_.PSObject.Properties['DisplayName'].Value) })
     }
   } catch { Write-GuardianUninstallDebug ('Aviso ao enumerar HKU: '+$_.Exception.Message) }
   @($all | Sort-Object PSPath -Unique)
 }
 function Get-GuardianUninstallMatches([string]$Regex) {
-  @(Get-GuardianUninstallRecords | Where-Object { [string]$_.DisplayName -match $Regex })
+  @(Get-GuardianUninstallRecords | Where-Object { $_.PSObject.Properties['DisplayName'] -and [string]$_.PSObject.Properties['DisplayName'].Value -match $Regex })
 }
 function Get-GuardianQuietUninstall([object]$App) {
-  $quiet=[string]$App.QuietUninstallString
-  $normal=[string]$App.UninstallString
+  $quiet=if ($App.PSObject.Properties['QuietUninstallString']) { [string]$App.PSObject.Properties['QuietUninstallString'].Value } else { '' }
+  $normal=if ($App.PSObject.Properties['UninstallString']) { [string]$App.PSObject.Properties['UninstallString'].Value } else { '' }
   if ($quiet.Trim()) { return $quiet.Trim() }
   if ($normal -match '(?i)\bmsiexec(?:\.exe)?\b.*(?:\{|/I|/X)') { return $normal }
   return $null
@@ -1741,7 +1741,7 @@ function Split-GuardianUninstallCommand([string]$Command) {
 }
 function Get-GuardianApprovedUninstallCommand([object]$App) {
   $name=[string]$App.DisplayName
-  $normal=[string]$App.UninstallString
+  $normal=if ($App.PSObject.Properties['UninstallString']) { [string]$App.PSObject.Properties['UninstallString'].Value } else { '' }
   $quiet=Get-GuardianQuietUninstall $App
   $msi=[regex]::Match(($quiet+' '+$normal),'\{[0-9a-fA-F-]{36}\}')
   if($msi.Success -and ($quiet+' '+$normal) -match '(?i)\bmsiexec') {
@@ -1786,11 +1786,11 @@ function Invoke-GuardianQuietUninstall([object]$App) {
 }
 function Remove-GuardianApprovedApps([string]$Regex) {
   $targets=@(Get-GuardianUninstallMatches $Regex)
-  if ($targets.Count -eq 0) { Write-GuardianUninstallDebug ('NAO ENCONTRADO: ' + $Regex); return }
+  if ($targets.Count -eq 0) { Write-GuardianUninstallDebug ('NAO ENCONTRADO: '+$Regex); return }
   $issues=New-Object System.Collections.Generic.List[string]
   foreach ($app in $targets) {
     $name=[string]$app.DisplayName
-    Write-GuardianUninstallDebug ('DESINSTALANDO: ' + $name)
+    Write-GuardianUninstallDebug ('IDENTIFICADO: '+$name)
     try {
       Invoke-GuardianQuietUninstall $app
       $present=@()
@@ -1801,49 +1801,49 @@ function Remove-GuardianApprovedApps([string]$Regex) {
       }
       if ($present.Count -gt 0) { throw ('Desinstalador finalizou sem remocao confirmada: '+$name) }
       Write-GuardianUninstallDebug ('REMOVIDO '+$name)
-    } catch { Write-GuardianUninstallDebug ('FALHA: ' + $name + ': ' + $_.Exception.Message); $issues.Add($name+': '+$_.Exception.Message) }
+    } catch { Write-GuardianUninstallDebug ('FALHA '+$name+': '+$_.Exception.Message); $issues.Add($name+': '+$_.Exception.Message) }
   }
   if ($issues.Count -gt 0) { throw ('PENDENTE: '+($issues -join ' | ')) }
 }
 function Remove-GuardianMalwarebytesAll {
-  # Aplicar politica Guardian: remover Malwarebytes exceto nos hosts protegidos.
+  # A execucao deste Checkup e autorizacao operacional para remover o Malwarebytes
+  # independentemente da licenca (Free, Trial ou Premium).
   # Para produtos sem desinstalador silencioso conhecido, informar pendencia;
   # nao adivinhar switches nem remover arquivos de protecao manualmente.
   Remove-GuardianApprovedApps '(?i)^Malwarebytes(?:\s|$)'
 }
 
 function Invoke-GuardianAppCleanup {
-  Write-GuardianUninstallDebug 'Iniciando verificacao dos aplicativos.'
-  # Padroes de identificacao iguais aos do Checkup para os programas solicitados.
-  $remove=@(
-    @('CrystalDiskInfo','(?i)^CrystalDiskInfo(?:\s|$)'),
-    @('CCleaner','(?i)^CCleaner(?:\s|$)'),
-    @('CrystalDiskMark','(?i)^CrystalDiskMark(?:\s|$)'),
-    @('MiniTool Partition Wizard','(?i)^MiniTool Partition Wizard(?:\s|$)'),
-    @('Revo Uninstaller','(?i)^Revo Uninstaller(?:\s|$)'),
-    @('CPUID CPU-Z / HWMonitor','(?i)^(?:CPUID\s+)?(?:CPU-Z|HWMonitor)(?:\s|$)'),
-    @('Driver Booster','(?i)^Driver Booster(?:\s|$)')
-  )
-  foreach($item in $remove) {
-    $name=[string]$item[0]; $rx=[string]$item[1]
-    try { Remove-GuardianApprovedApps $rx }
-    catch { Write-GuardianUninstallDebug ('PENDENTE ' + $name + ': ' + $_.Exception.Message) }
-  }
-  # Excecoes somente para Malwarebytes, verificacao exata por nome do computador.
-  if ($env:COMPUTERNAME -in @('JDAC-NB14','INOVATEC-NB21')) {
-    Write-GuardianUninstallDebug ('PRESERVADO: Malwarebytes (' + $env:COMPUTERNAME + ')')
-  } else {
-    try { Remove-GuardianMalwarebytesAll }
-    catch { Write-GuardianUninstallDebug ('PENDENTE Malwarebytes: ' + $_.Exception.Message) }
-  }
-  Write-GuardianUninstallDebug 'Verificacao de aplicativos finalizada.'
+    Write-GuardianUninstallDebug 'Iniciando verificacao de aplicativos.'
+    $remove=@(
+        @('CCleaner','(?i)^CCleaner(?:\s|$)'),
+        @('CPUID CPU-Z / HWMonitor','(?i)^(?:CPUID\s+)?(?:CPU-Z|HWMonitor)(?:\s|$)'),
+        @('CrystalDiskInfo','(?i)^CrystalDiskInfo(?:\s|$)'),
+        @('CrystalDiskMark','(?i)^CrystalDiskMark(?:\s|$)'),
+        @('Driver Booster','(?i)^Driver Booster(?:\s|$)'),
+        @('MiniTool Partition Wizard','(?i)^MiniTool Partition Wizard(?:\s|$)'),
+        @('Revo Uninstaller','(?i)^Revo Uninstaller(?:\s|$)')
+    )
+    foreach ($item in $remove) {
+        $nome=[string]$item[0]
+        $regex=[string]$item[1]
+        try { Remove-GuardianApprovedApps $regex }
+        catch { Write-GuardianUninstallDebug ('PENDENTE '+$nome+': '+$_.Exception.Message) }
+    }
+    # Excecoes baseadas estritamente no nome do computador (independentemente do cliente).
+    if ($env:COMPUTERNAME -in @('JDAC-NB14','INOVATEC-NB21')) {
+        Write-GuardianUninstallDebug ('PRESERVADO: Malwarebytes no computador '+$env:COMPUTERNAME)
+    } else {
+        try { Remove-GuardianMalwarebytesAll }
+        catch { Write-GuardianUninstallDebug ('PENDENTE Malwarebytes: '+$_.Exception.Message) }
+    }
+    Write-GuardianUninstallDebug 'Verificacao encerrada.'
 }
 
-# Posicionada antes do inventario. Nao depende da Fase 6 (Winget).
-# Evita novas mensagens na execucao normal e nunca altera o score do Guardian.
-if (-not $Simulado) {
-  try { Invoke-GuardianAppCleanup }
-  catch { Write-GuardianUninstallDebug ('PENDENTE limpeza: ' + $_.Exception.Message) }
+# Uma unica chamada, antes do inventario, apenas em execucao real da Fase 1.
+if (-not $Simulado -and @($script:GuardianSelectedPhases | Where-Object { $_.Id -eq 1 }).Count -gt 0) {
+    try { Invoke-GuardianAppCleanup }
+    catch { Write-GuardianUninstallDebug ('PENDENTE limpeza: '+$_.Exception.Message) }
 }
 
 # === Loop principal com atualização da UI ===
