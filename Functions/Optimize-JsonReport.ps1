@@ -650,49 +650,44 @@ if ($faseStore) {
 # ------------------------------------------------------------------------------
 # Fase: Atualização dos programas via Winget — interpretação estruturada
 # ------------------------------------------------------------------------------
-$faseWinget = @($jsonRaw.Fases) | Where-Object { $_.Phase -match 'Winget' } | Select-Object -First 1
+$faseWinget = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Winget" }
 
 if ($faseWinget) {
-    $mensagemOriginal = [string]$faseWinget.Mensagem
-    $linhas = $mensagemOriginal -split '\r?\n'
+
+    $linhas = $faseWinget.Mensagem -split "`r`n"
     $tecnico = @{}
     $exitCode = $null
 
     foreach ($l in $linhas) {
-        if ($l -match 'ExitCode\s*=\s*(-?\d+)') {
-            $exitCode = [long]$matches[1]
+
+        # Detectar ExitCode=0
+        if ($l -match "ExitCode\s*=\s*([-]?\d+)") {
+            $exitCode = [int]$matches[1]
         }
-        if ($l -match '^(.*?):\s*(.*)$') {
+
+        # Chave:Valor
+        if ($l -match "^(.*?):\s*(.*)$") {
             $k = $matches[1].Trim()
             $v = $matches[2].Trim()
-            if ($v -match '^-?\d+$') { $v = [long]$v }
+
+            if ($v -match "^\-?\d+$") { $v = [int]$v }
+
             $tecnico[$k] = $v
         }
     }
 
-    # Mensagens informativas de versao desconhecida ou ausencia de updates
-    # NAO sao falhas. Erros explicitos e fase nao executada continuam penalizados.
-    $houveFalhaExplicita = $mensagemOriginal -match '(?i)(acesso negado|access denied|instalador falhou|installation failed|falha na execu[cç][aã]o|unexpected error|erro inesperado|terminou com erro|nao foi possivel|não foi possível)'
-    $faseIgnorada = (@($jsonRaw.PulaFases) -contains 6) -or ($mensagemOriginal -match '(?i)(sem internet: pulando|fase ignorada|etapa ignorada|fase pulada)')
-    $faseExecutada = ([string]$faseWinget.Status -eq 'OK') -and (-not $faseIgnorada)
-
-    if ($null -ne $exitCode) {
-        $sucesso = ($exitCode -eq 0) -and (-not $houveFalhaExplicita) -and $faseExecutada
-    }
-    else {
-        # Algumas versoes do Update-WingetApps nao devolvem ExitCode=0.
-        # Se a etapa terminou OK e nao registrou erro explicito, nao inventar falha.
-        $sucesso = $faseExecutada -and (-not $houveFalhaExplicita)
-    }
+    # interpretação
+    $sucesso = ($exitCode -eq 0)
 
     $interpretacao = if ($sucesso) {
-        'A rotina Winget foi concluida sem falha identificada; avisos de versao desconhecida nao penalizam.'
+        "As atualizações dos programas via Winget foram concluídas com sucesso."
     } else {
-        'Ocorreram erros ao atualizar programas via Winget ou a etapa nao foi concluida.'
+        "Ocorreram erros ao atualizar programas via Winget."
     }
 
+    # substituir por objeto estruturado
     $faseWinget.Mensagem = [PSCustomObject]@{
-        AtualizacaoBemSucedida = [bool]$sucesso
+        AtualizacaoBemSucedida = $sucesso
         CodigoSaida            = $exitCode
         IntegridadeWinget      = $interpretacao
         DetalhesTecnicos       = $tecnico
@@ -978,8 +973,8 @@ $saudeFinal = [Math]::Round($saudeFinal)
 
 # Classificação textual
 $classificacao = switch ($saudeFinal) {
-    {$_ -ge 91} { "Excelente"; break }
-    {$_ -ge 71} { "Boa"; break }
+    {$_ -ge 90} { "Excelente"; break }
+    {$_ -ge 75} { "Boa"; break }
     {$_ -ge 50} { "Regular"; break }
     default     { "Crítica" }
 }
@@ -1005,18 +1000,27 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
 })
 
 
-# ---------------- UUID SMBIOS + CPU ID ----------------
+# ---------------- UUID SMBIOS + CPU ID + SERIAL NUMBER ----------------
 $uuidSistema = $null
 
 try {
-    $uuid  = (Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop).UUID
-    $cpuId = (Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1).ProcessorId
-    $uuidSistema = "$uuid|$cpuId"
+    $uuid  = ([string](Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop).UUID).Trim()
+    $cpuId = ([string](Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1).ProcessorId).Trim()
+    # Reutiliza o serial ja coletado pelo Get-SystemInventory (inclui fallback para placa-mae).
+    $serialIdentidade = ([string]$hardwareObj["Serial Number"]).Trim()
+    $seriaisInvalidos = @('', 'None', 'Unknown', 'Default string', 'System Serial Number', 'To be filled by O.E.M.', '00000000', 'Não Identificado', 'N/A')
+    if (-not [string]::IsNullOrWhiteSpace($uuid) -and -not [string]::IsNullOrWhiteSpace($cpuId) -and
+        $seriaisInvalidos -notcontains $serialIdentidade -and -not $serialIdentidade.Contains('|')) {
+        $uuidSistema = "$uuid|$cpuId|$serialIdentidade"
+    }
 } catch {
     $uuidSistema = $null
 }
 
-
+# Identificador incompleto nao pode provocar associacao indevida entre maquinas.
+if (-not $uuidSistema) {
+    throw "Identificador de hardware incompleto: UUID SMBIOS, CPU ID ou Serial Number indisponivel/invalido. Integracao cancelada."
+}
 
 # ------------------------------------------------------------------------------
 # Finalizar Fase do Inventário
