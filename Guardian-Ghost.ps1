@@ -20,6 +20,43 @@ $GhostJsonPath = "C:\Guardian\guardian_ghost.json"
 $FuncDir       = "C:\Guardian\Functions"
 
 # ============================================================================
+# COMPATIBILIDADE ELEVAGUARDIAN: ADMINISTRADOR INTEGRADO (RID 500)
+# Executado somente como SYSTEM, antes do controle mensal do Ghost.
+# Desativa o modo de aprovacao administrativa apenas quando o ElevaGuardian
+# usa explicitamente a conta integrada (RID 500) do proprio computador.
+# A alteracao pode depender de reinicializacao para produzir efeito.
+# ============================================================================
+try {
+    $ghostIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $credPath = 'C:\Guardian\credenciais.xml'
+    $elevaPath = 'C:\Guardian\ElevaGuardian.ps1'
+
+    if ($ghostIdentity.IsSystem -and
+        (Test-Path -LiteralPath $credPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $elevaPath -PathType Leaf)) {
+
+        [xml]$credXml = Get-Content -LiteralPath $credPath -Raw -ErrorAction Stop
+        $credUser = [string]$credXml.Credenciais.UserName
+        $credUser = ($credUser -split '\\')[-1].Trim()
+        $adminIntegrado = Get-LocalUser -ErrorAction Stop |
+            Where-Object { $_.Enabled -and $_.SID.Value -match '-500$' } |
+            Select-Object -First 1
+
+        if ($adminIntegrado -and
+            [string]::Equals($credUser, $adminIntegrado.Name, [StringComparison]::OrdinalIgnoreCase)) {
+            $uacPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+            $valorAtual = Get-ItemPropertyValue -LiteralPath $uacPath -Name 'FilterAdministratorToken' -ErrorAction SilentlyContinue
+            if ($null -ne $valorAtual -and [int]$valorAtual -eq 1) {
+                Set-ItemProperty -LiteralPath $uacPath -Name 'FilterAdministratorToken' -Value 0 -Type DWord -ErrorAction Stop
+            }
+        }
+    }
+}
+catch {
+    # Nao compromete a execucao das rotinas existentes do Guardian Ghost.
+}
+
+# ============================================================================
 # VERIFICACAO: ja rodou este mes?
 # ============================================================================
 if (Test-Path $GhostJsonPath) {
