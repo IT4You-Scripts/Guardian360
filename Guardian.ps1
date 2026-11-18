@@ -1679,24 +1679,31 @@ if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
 }
 
 # ===============================================================================
-# Limpeza conservadora de ferramentas de diagnostico (mesma estrategia do Checkup).
-# Antes do inventario da Fase 1; somente em execucao real e quando a Fase 1 participa.
-# Falhas individuais nao bloqueiam o restante da manutencao nem alteram sua nota.
+# Remocao silenciosa de ferramentas pontuais - rotina transplantada do Checkup(6).
+# Apenas na execucao real do Guardian (Fase 1 obrigatoria). Nunca em -Simulado.
+# No modo normal esta rotina nao emite nenhuma linha no console.
+# No modo -Debug, exibe encontrado, removido, preservado e pendencias.
 # ===============================================================================
-function Invoke-GuardianUninstallExecutable {
-  param([string]$Exe,[string]$Arguments,[int]$TimeoutSec=1200,[int[]]$AllowedCodes=@(0,3010))
-  if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { throw ('Desinstalador ausente: ' + $Exe) }
-  $proc = Start-Process -FilePath $Exe -ArgumentList $Arguments -PassThru -WindowStyle Hidden -ErrorAction Stop
-  try {
-    if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
-      try { $proc.Kill() } catch { }
-      throw ('Tempo limite excedido na desinstalacao: ' + $Exe)
-    }
-    $code = $proc.ExitCode
-    if ($code -notin $AllowedCodes) { throw ('Desinstalador retornou codigo ' + $code + ': ' + $Exe) }
-  } finally { $proc.Dispose() }
+function Write-GuardianUninstallDebug([string]$Message) {
+  if ($script:GuardianDebugMode) {
+    Microsoft.PowerShell.Utility\Write-Host ('  [LIMPEZA] ' + $Message) -ForegroundColor DarkGray
+  }
 }
 
+function Invoke-GuardianUninstallExecutable([string]$Exe,[string]$Arguments,[int]$TimeoutSec=600,[int[]]$AllowedCodes=@(0,3010)) {
+    if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { throw ('Arquivo nao encontrado: ' + $Exe) }
+    Write-GuardianUninstallDebug ('EXECUTAVEL {0} {1}' -f $Exe,$Arguments)
+    $p = Start-Process -FilePath $Exe -ArgumentList $Arguments -PassThru -WindowStyle Hidden -ErrorAction Stop
+    $exitCode = $null
+    try {
+        if (-not $p.WaitForExit($TimeoutSec * 1000)) { try { $p.Kill() } catch {}; throw ('Tempo limite excedido: '+$TimeoutSec+' segundos.') }
+        $exitCode = $p.ExitCode
+        if ($exitCode -notin $AllowedCodes) { throw ('Codigo de saida ' + $exitCode) }
+    } finally { $p.Dispose() }
+    if ($exitCode -eq 3010) { Write-GuardianUninstallDebug "Reinicializacao solicitada pelo desinstalador." }
+}
+
+# ======================= DESINSTALACAO CONSERVADORA =========================
 function Get-GuardianUninstallRecords {
   $locations=@(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
@@ -1711,7 +1718,7 @@ function Get-GuardianUninstallRecords {
       $path='Registry::HKEY_USERS\'+$sid.PSChildName+'\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
       $all+=@(Get-ItemProperty -Path $path -ErrorAction SilentlyContinue | Where-Object {$_.DisplayName})
     }
-  } catch { Write-GuardianStatus ('Desinstalacao: aviso ao enumerar HKU: ' + $_.Exception.Message) 'WARN' }
+  } catch { Write-GuardianUninstallDebug ('Aviso ao enumerar HKU: '+$_.Exception.Message) }
   @($all | Sort-Object PSPath -Unique)
 }
 function Get-GuardianUninstallMatches([string]$Regex) {
@@ -1779,10 +1786,11 @@ function Invoke-GuardianQuietUninstall([object]$App) {
 }
 function Remove-GuardianApprovedApps([string]$Regex) {
   $targets=@(Get-GuardianUninstallMatches $Regex)
-  if ($targets.Count -eq 0) { return }
+  if ($targets.Count -eq 0) { Write-GuardianUninstallDebug ('NAO ENCONTRADO: ' + $Regex); return }
   $issues=New-Object System.Collections.Generic.List[string]
   foreach ($app in $targets) {
     $name=[string]$app.DisplayName
+    Write-GuardianUninstallDebug ('DESINSTALANDO: ' + $name)
     try {
       Invoke-GuardianQuietUninstall $app
       $present=@()
@@ -1792,48 +1800,50 @@ function Remove-GuardianApprovedApps([string]$Regex) {
         if($present.Count -eq 0){break}
       }
       if ($present.Count -gt 0) { throw ('Desinstalador finalizou sem remocao confirmada: '+$name) }
-      Write-GuardianStatus ('Desinstalado: ' + $name) 'INFO'
-    } catch { $issues.Add($name+': '+$_.Exception.Message) }
+      Write-GuardianUninstallDebug ('REMOVIDO '+$name)
+    } catch { Write-GuardianUninstallDebug ('FALHA: ' + $name + ': ' + $_.Exception.Message); $issues.Add($name+': '+$_.Exception.Message) }
   }
   if ($issues.Count -gt 0) { throw ('PENDENTE: '+($issues -join ' | ')) }
 }
 function Remove-GuardianMalwarebytesAll {
-  # Rotina de manutencao Guardian: remover Malwarebytes, salvo computadores protegidos
-  # independentemente da licenca (Free, Trial ou Premium).
+  # Aplicar politica Guardian: remover Malwarebytes exceto nos hosts protegidos.
   # Para produtos sem desinstalador silencioso conhecido, informar pendencia;
   # nao adivinhar switches nem remover arquivos de protecao manualmente.
   Remove-GuardianApprovedApps '(?i)^Malwarebytes(?:\s|$)'
 }
 
 function Invoke-GuardianAppCleanup {
-  # Ajuste de aplicacoes tecnicas pontuais, sem interferir em outros programas.
-  $remove = @(
-    @('CCleaner',                    '(?i)^CCleaner(?:\s|$)'),
-    @('CPUID CPU-Z / HWMonitor',    '(?i)^(?:CPUID\s+)?(?:CPU-Z|HWMonitor)(?:\s|$)'),
-    @('CrystalDiskInfo',           '(?i)^CrystalDiskInfo(?:\s|$)'),
-    @('CrystalDiskMark',           '(?i)^CrystalDiskMark(?:\s|$)'),
-    @('Driver Booster',            '(?i)^Driver Booster(?:\s|$)'),
-    @('MiniTool Partition Wizard', '(?i)^MiniTool Partition Wizard(?:\s|$)'),
-    @('Revo Uninstaller',          '(?i)^Revo Uninstaller(?:\s|$)')
+  Write-GuardianUninstallDebug 'Iniciando verificacao dos aplicativos.'
+  # Padroes de identificacao iguais aos do Checkup para os programas solicitados.
+  $remove=@(
+    @('CrystalDiskInfo','(?i)^CrystalDiskInfo(?:\s|$)'),
+    @('CCleaner','(?i)^CCleaner(?:\s|$)'),
+    @('CrystalDiskMark','(?i)^CrystalDiskMark(?:\s|$)'),
+    @('MiniTool Partition Wizard','(?i)^MiniTool Partition Wizard(?:\s|$)'),
+    @('Revo Uninstaller','(?i)^Revo Uninstaller(?:\s|$)'),
+    @('CPUID CPU-Z / HWMonitor','(?i)^(?:CPUID\s+)?(?:CPU-Z|HWMonitor)(?:\s|$)'),
+    @('Driver Booster','(?i)^Driver Booster(?:\s|$)')
   )
-  foreach ($item in $remove) {
-    try { Remove-GuardianApprovedApps ([string]$item[1]) }
-    catch { Write-GuardianStatus ('Desinstalacao de {0}: {1}. Guardian prossegue.' -f $item[0], $_.Exception.Message) 'WARN' }
+  foreach($item in $remove) {
+    $name=[string]$item[0]; $rx=[string]$item[1]
+    try { Remove-GuardianApprovedApps $rx }
+    catch { Write-GuardianUninstallDebug ('PENDENTE ' + $name + ': ' + $_.Exception.Message) }
   }
-
-  # Excecoes operacionais do Malwarebytes: identificadas somente pelo nome exato do computador.
-  if ($env:COMPUTERNAME -in @('JDAC-NB14', 'INOVATEC-NB21')) {
-    Write-GuardianStatus ('Malwarebytes preservado neste computador: ' + $env:COMPUTERNAME) 'INFO'
+  # Excecoes somente para Malwarebytes, verificacao exata por nome do computador.
+  if ($env:COMPUTERNAME -in @('JDAC-NB14','INOVATEC-NB21')) {
+    Write-GuardianUninstallDebug ('PRESERVADO: Malwarebytes (' + $env:COMPUTERNAME + ')')
   } else {
     try { Remove-GuardianMalwarebytesAll }
-    catch { Write-GuardianStatus ('Desinstalacao de Malwarebytes: {0}. Guardian prossegue.' -f $_.Exception.Message) 'WARN' }
+    catch { Write-GuardianUninstallDebug ('PENDENTE Malwarebytes: ' + $_.Exception.Message) }
   }
+  Write-GuardianUninstallDebug 'Verificacao de aplicativos finalizada.'
 }
 
-if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
-    (-not $PulaFases -or $PulaFases -notcontains 1) -and -not $Simulado) {
-    try { Invoke-GuardianAppCleanup }
-    catch { Write-GuardianStatus ('Limpeza de aplicativos: {0}. Guardian prossegue.' -f $_.Exception.Message) 'WARN' }
+# Posicionada antes do inventario. Nao depende da Fase 6 (Winget).
+# Evita novas mensagens na execucao normal e nunca altera o score do Guardian.
+if (-not $Simulado) {
+  try { Invoke-GuardianAppCleanup }
+  catch { Write-GuardianUninstallDebug ('PENDENTE limpeza: ' + $_.Exception.Message) }
 }
 
 # === Loop principal com atualização da UI ===
