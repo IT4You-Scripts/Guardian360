@@ -1685,7 +1685,7 @@ if ((-not $ExecutaFases -or $ExecutaFases -contains 1) -and
 # ===============================================================================
 function Write-GuardianUninstallDebug([string]$Message) {
     if ($script:GuardianDebugMode) {
-        Microsoft.PowerShell.Utility\Write-Host ('  [DESINSTALACAO] ' + $Message) -ForegroundColor DarkGray
+        Microsoft.PowerShell.Utility\Write-Host ('  [PREPARACAO] ' + $Message) -ForegroundColor DarkGray
     }
 }
 function Assert-GuardianUninstallTrue([bool]$Condition,[string]$Message) {
