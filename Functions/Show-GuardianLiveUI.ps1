@@ -342,6 +342,21 @@ $robotFinalImage = Get-GuardianBitmapImage -Path $robotFinalPath
 $robotWarningImage = Get-GuardianBitmapImage -Path $robotWarningPath
 $robotErrorImage = Get-GuardianBitmapImage -Path $robotErrorPath
 $robotApiImage = Get-GuardianBitmapImage -Path $robotApiPath
+# Imagens exclusivas de cada fase; carregadas uma vez e reutilizadas.
+$script:GuardianPhaseRobotImages = @{}
+$phaseRobotFiles = @{
+    1 = 'guardian_robot_inventario.png'
+    3 = 'guardian_robot_otimizacoes.png'
+    4 = 'guardian_robot_limpeza.png'
+    5 = 'guardian_robot_windows_update.png'
+    6 = 'guardian_robot_winget.png'
+    7 = 'guardian_robot_componentes.png'
+    8 = 'guardian_robot_armazenamento.png'
+    9 = 'guardian_robot_seguranca.png'
+}
+foreach ($phaseId in $phaseRobotFiles.Keys) {
+    $script:GuardianPhaseRobotImages[$phaseId] = Get-GuardianBitmapImage -Path (Join-Path $baseDir ('Assets\Images\' + $phaseRobotFiles[$phaseId]))
+}
 $backgroundImage = Get-GuardianBitmapImage -Path $backgroundPath
 
 # Centraliza no MESMO monitor do console do Guardian. Se nao houver
@@ -460,6 +475,18 @@ function Set-GuardianRobotState {
     } elseif ($robotPanel) {
         $robotPanel.Visibility = [System.Windows.Visibility]::Collapsed
         Update-RobotLayout
+    }
+}
+
+function Set-GuardianRobotPhase {
+    param([int]$PhaseId)
+    $phaseImage = $script:GuardianPhaseRobotImages[$PhaseId]
+    if ($phaseImage) {
+        $robotImage.Source = $phaseImage
+        Update-RobotLayout
+    } else {
+        # Se faltar o PNG da fase, preserva o comportamento original.
+        Set-GuardianRobotState -State 'exec'
     }
 }
 
@@ -698,7 +725,11 @@ $timer.Add_Tick({
                             $phaseText.Text = [string]$message.label
                             $activityText.Text = 'Preparando atividades desta etapa...'
                             $progress.Value = [int]$message.percent
-                            Set-GuardianRobotState -State 'exec'
+                            if ($null -ne $message.data -and $null -ne $message.data.phaseId) {
+                                Set-GuardianRobotPhase -PhaseId ([int]$message.data.phaseId)
+                            } else {
+                                Set-GuardianRobotState -State 'exec'
+                            }
                         }
                         'activity' {
                             $activityText.Text = [string]$message.label

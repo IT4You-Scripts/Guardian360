@@ -73,6 +73,15 @@
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_ressalvas.png"; Path = "$BasePath\Assets\Images\guardian_robot_ressalvas.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_critico.png"; Path = "$BasePath\Assets\Images\guardian_robot_critico.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_api_pendente.png"; Path = "$BasePath\Assets\Images\guardian_robot_api_pendente.png" },
+        # Imagens das oito fases da interface Guardian 360.
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_inventario.png"; Path = "$BasePath\Assets\Images\guardian_robot_inventario.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_otimizacoes.png"; Path = "$BasePath\Assets\Images\guardian_robot_otimizacoes.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_limpeza.png"; Path = "$BasePath\Assets\Images\guardian_robot_limpeza.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_windows_update.png"; Path = "$BasePath\Assets\Images\guardian_robot_windows_update.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_winget.png"; Path = "$BasePath\Assets\Images\guardian_robot_winget.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_componentes.png"; Path = "$BasePath\Assets\Images\guardian_robot_componentes.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_armazenamento.png"; Path = "$BasePath\Assets\Images\guardian_robot_armazenamento.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_seguranca.png"; Path = "$BasePath\Assets\Images\guardian_robot_seguranca.png" },
         # Funcoes utilizadas / carregadas pelo Guardian 360 v2.0.
         @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1"; Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
         @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1"; Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
