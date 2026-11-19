@@ -2188,6 +2188,18 @@ function Test-GuardianPCManagerInstalled {
 }
 
 function Install-GuardianPCManager {
+    # PC Manager somente em estacoes Windows 11; Windows 10 e Windows Server sao ignorados.
+    try {
+        $osPCManager = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $buildPCManager = [int]$osPCManager.BuildNumber
+        if ([int]$osPCManager.ProductType -ne 1 -or $buildPCManager -lt 22000) {
+            Write-GuardianUninstallDebug 'PC Manager: sistema nao e Windows 11; verificacao e instalacao ignoradas.'
+            return
+        }
+    } catch {
+        Write-GuardianUninstallDebug ('PC Manager: nao foi possivel confirmar Windows 11; instalacao ignorada: ' + $_.Exception.Message)
+        return
+    }
     if (Test-GuardianPCManagerInstalled) {
         Write-GuardianUninstallDebug 'PC Manager: ja instalado; nenhuma acao necessaria.'
         return
