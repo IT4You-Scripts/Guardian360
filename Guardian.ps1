@@ -1747,6 +1747,19 @@ function Get-GuardianApprovedUninstallCommand([object]$App) {
   if($msi.Success -and ($quiet+' '+$normal) -match '(?i)\bmsiexec') {
     return [pscustomobject]@{Exe="$env:windir\System32\msiexec.exe";Arguments=('/x '+$msi.Value+' /qn /norestart');ExitCodes=@(0,3010,1605,1614)}
   }
+  # TeamViewer (Classic/Host): desinstalador EXE aceita /S MAIUSCULO.
+  # MSI continua tratado acima via msiexec /x /qn /norestart.
+  # Nunca aplicar /S a executaveis nao reconhecidos.
+  if($name -match '(?i)^TeamViewer(?:\s|$)') {
+    foreach($entry in @($normal,$quiet)) {
+      if([string]::IsNullOrWhiteSpace($entry)) { continue }
+      $tvParsed=$null
+      try { $tvParsed=Split-GuardianUninstallCommand $entry } catch { }
+      if($tvParsed -and $tvParsed.Exe -match '(?i)\\TeamViewer(?:\s+Host|\s+Remote)?(?:\\Version\d+)?\\uninstall\.exe$') {
+        return [pscustomobject]@{Exe=$tvParsed.Exe;Arguments='/S';ExitCodes=@(0,3010)}
+      }
+    }
+  }
   # Preferir desinstalador registrado. Somente aplicar switches a executaveis reconhecidos.
   $parsed=$null
   if($normal.Trim()) { try {$parsed=Split-GuardianUninstallCommand $normal} catch {} }
@@ -2250,7 +2263,8 @@ function Invoke-GuardianAppCleanup {
         @('CrystalDiskMark','(?i)^CrystalDiskMark(?:\s|$)'),
         @('Driver Booster','(?i)^Driver Booster(?:\s|$)'),
         @('MiniTool Partition Wizard','(?i)^MiniTool Partition Wizard(?:\s|$)'),
-        @('Revo Uninstaller','(?i)^Revo Uninstaller(?:\s|$)')
+        @('Revo Uninstaller','(?i)^Revo Uninstaller(?:\s|$)'),
+        @('TeamViewer','(?i)^TeamViewer(?:\s|$)')
     )
     foreach ($item in $remove) {
         $nome=[string]$item[0]
