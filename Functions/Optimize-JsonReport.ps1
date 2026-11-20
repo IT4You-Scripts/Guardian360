@@ -654,14 +654,15 @@ $faseWinget = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Winget" }
 
 if ($faseWinget) {
 
-    $linhas = $faseWinget.Mensagem -split "`r`n"
+    $linhas = [string]$faseWinget.Mensagem -split '\r?\n'
     $tecnico = @{}
     $exitCode = $null
 
     foreach ($l in $linhas) {
 
-        # Detectar ExitCode=0
-        if ($l -match "ExitCode\s*=\s*([-]?\d+)") {
+        # O retorno do objeto PowerShell via Out-String usa "ExitCode : 0".
+        # Aceitar tambem "ExitCode=0", somente como campo independente.
+        if ($l -match '^\s*ExitCode\s*[:=]\s*(-?\d+)\s*$') {
             $exitCode = [int]$matches[1]
         }
 
