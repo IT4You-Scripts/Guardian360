@@ -141,6 +141,7 @@ function Update-GuardianFiles {
         @{ Url = "$BaseUrl/Assets/Images/bg.png"; Path = "$BasePath\Assets\Images\bg.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_execucao.png"; Path = "$BasePath\Assets\Images\guardian_robot_execucao.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_final.png"; Path = "$BasePath\Assets\Images\guardian_robot_final.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_final_oculos.png"; Path = "$BasePath\Assets\Images\guardian_robot_final_oculos.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_ressalvas.png"; Path = "$BasePath\Assets\Images\guardian_robot_ressalvas.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_critico.png"; Path = "$BasePath\Assets\Images\guardian_robot_critico.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_api_pendente.png"; Path = "$BasePath\Assets\Images\guardian_robot_api_pendente.png" },

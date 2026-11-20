@@ -333,30 +333,17 @@ function Get-GuardianBitmapImage {
 $baseDir = Split-Path -Parent $PSScriptRoot
 $robotExecPath = Join-Path $baseDir 'Assets\Images\guardian_robot_execucao.png'
 $robotFinalPath = Join-Path $baseDir 'Assets\Images\guardian_robot_final.png'
+$robotPerfectPath = Join-Path $baseDir 'Assets\Images\guardian_robot_final_oculos.png'
 $robotWarningPath = Join-Path $baseDir 'Assets\Images\guardian_robot_ressalvas.png'
 $robotErrorPath = Join-Path $baseDir 'Assets\Images\guardian_robot_critico.png'
 $robotApiPath = Join-Path $baseDir 'Assets\Images\guardian_robot_api_pendente.png'
 $backgroundPath = Join-Path $baseDir 'Assets\Images\bg.png'
 $robotExecImage = Get-GuardianBitmapImage -Path $robotExecPath
 $robotFinalImage = Get-GuardianBitmapImage -Path $robotFinalPath
+$robotPerfectImage = Get-GuardianBitmapImage -Path $robotPerfectPath
 $robotWarningImage = Get-GuardianBitmapImage -Path $robotWarningPath
 $robotErrorImage = Get-GuardianBitmapImage -Path $robotErrorPath
 $robotApiImage = Get-GuardianBitmapImage -Path $robotApiPath
-# Imagens exclusivas de cada fase; carregadas uma vez e reutilizadas.
-$script:GuardianPhaseRobotImages = @{}
-$phaseRobotFiles = @{
-    1 = 'guardian_robot_inventario.png'
-    3 = 'guardian_robot_otimizacoes.png'
-    4 = 'guardian_robot_limpeza.png'
-    5 = 'guardian_robot_windows_update.png'
-    6 = 'guardian_robot_winget.png'
-    7 = 'guardian_robot_componentes.png'
-    8 = 'guardian_robot_armazenamento.png'
-    9 = 'guardian_robot_seguranca.png'
-}
-foreach ($phaseId in $phaseRobotFiles.Keys) {
-    $script:GuardianPhaseRobotImages[$phaseId] = Get-GuardianBitmapImage -Path (Join-Path $baseDir ('Assets\Images\' + $phaseRobotFiles[$phaseId]))
-}
 $backgroundImage = Get-GuardianBitmapImage -Path $backgroundPath
 
 # Centraliza no MESMO monitor do console do Guardian. Se nao houver
@@ -461,10 +448,11 @@ $window.FindName('ClientText').Text = "$Cliente"
 $window.FindName('PCText').Text = "$Computador"
 
 function Set-GuardianRobotState {
-    param([ValidateSet('exec','success','warning','error','api')][string]$State)
+    param([ValidateSet('exec','success','perfect','warning','error','api')][string]$State)
     switch ($State) {
         'exec'    { $img = if ($robotExecImage) { $robotExecImage } elseif ($robotFinalImage) { $robotFinalImage } else { $null } }
         'success' { $img = if ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
+        'perfect' { $img = if ($robotPerfectImage) { $robotPerfectImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
         'warning' { $img = if ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
         'error'   { $img = if ($robotErrorImage) { $robotErrorImage } elseif ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
         'api'     { $img = if ($robotApiImage) { $robotApiImage } elseif ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
@@ -475,18 +463,6 @@ function Set-GuardianRobotState {
     } elseif ($robotPanel) {
         $robotPanel.Visibility = [System.Windows.Visibility]::Collapsed
         Update-RobotLayout
-    }
-}
-
-function Set-GuardianRobotPhase {
-    param([int]$PhaseId)
-    $phaseImage = $script:GuardianPhaseRobotImages[$PhaseId]
-    if ($phaseImage) {
-        $robotImage.Source = $phaseImage
-        Update-RobotLayout
-    } else {
-        # Se faltar o PNG da fase, preserva o comportamento original.
-        Set-GuardianRobotState -State 'exec'
     }
 }
 
@@ -725,11 +701,7 @@ $timer.Add_Tick({
                             $phaseText.Text = [string]$message.label
                             $activityText.Text = 'Preparando atividades desta etapa...'
                             $progress.Value = [int]$message.percent
-                            if ($null -ne $message.data -and $null -ne $message.data.phaseId) {
-                                Set-GuardianRobotPhase -PhaseId ([int]$message.data.phaseId)
-                            } else {
-                                Set-GuardianRobotState -State 'exec'
-                            }
+                            Set-GuardianRobotState -State 'exec'
                         }
                         'activity' {
                             $activityText.Text = [string]$message.label
@@ -785,6 +757,9 @@ $timer.Add_Tick({
                                 $robotState = 'api'
                             } elseif ([string]$message.status -eq 'warning' -or ($null -ne $finalScore -and $finalScore -lt 70)) {
                                 $robotState = 'warning'
+                            }
+                            if ($robotState -eq 'success' -and $null -ne $finalScore -and $finalScore -eq 100) {
+                                $robotState = 'perfect'
                             }
                             Set-GuardianRobotState -State $robotState
                             switch ([string]$message.status) {
