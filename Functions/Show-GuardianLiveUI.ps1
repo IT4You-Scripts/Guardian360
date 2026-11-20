@@ -512,9 +512,9 @@ $finishButton.Add_Click({ if ($script:Finished) { $window.Close() } })
 # Cor da Nota Geral: variacao visual independente da classificacao e da formula.
 function Set-GuardianHealthScoreColor {
     param([double]$Score)
-    $color = if ($Score -lt 50) { '#EB7777' }
-             elseif ($Score -le 70) { '#F0A35B' }
-             elseif ($Score -le 90) { '#E8CD69' }
+    $color = if ($Score -lt 51) { '#EB7777' }
+             elseif ($Score -lt 71) { '#F0A35B' }
+             elseif ($Score -lt 90) { '#E8CD69' }
              else { '#62DDA5' }
     $brush = [System.Windows.Media.BrushConverter]::new().ConvertFromString($color)
     $healthScore.Foreground = $brush
