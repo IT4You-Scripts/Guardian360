@@ -338,6 +338,22 @@ $robotWarningPath = Join-Path $baseDir 'Assets\Images\guardian_robot_ressalvas.p
 $robotErrorPath = Join-Path $baseDir 'Assets\Images\guardian_robot_critico.png'
 $robotApiPath = Join-Path $baseDir 'Assets\Images\guardian_robot_api_pendente.png'
 $backgroundPath = Join-Path $baseDir 'Assets\Images\bg.png'
+# Imagens especificas de cada fase (IDs reais enviados pelo Guardian).
+$robotPhaseImages = @{}
+$robotPhaseFiles = @{
+    1 = 'guardian_robot_inventario.png'
+    3 = 'guardian_robot_otimizacoes.png'
+    4 = 'guardian_robot_limpeza.png'
+    5 = 'guardian_robot_windows_update.png'
+    6 = 'guardian_robot_winget.png'
+    7 = 'guardian_robot_componentes.png'
+    8 = 'guardian_robot_armazenamento.png'
+    9 = 'guardian_robot_seguranca.png'
+}
+foreach ($phaseId in $robotPhaseFiles.Keys) {
+    $phaseImagePath = Join-Path $baseDir ('Assets\Images\' + $robotPhaseFiles[$phaseId])
+    $robotPhaseImages[[int]$phaseId] = Get-GuardianBitmapImage -Path $phaseImagePath
+}
 $robotExecImage = Get-GuardianBitmapImage -Path $robotExecPath
 $robotFinalImage = Get-GuardianBitmapImage -Path $robotFinalPath
 $robotPerfectImage = Get-GuardianBitmapImage -Path $robotPerfectPath
@@ -701,7 +717,18 @@ $timer.Add_Tick({
                             $phaseText.Text = [string]$message.label
                             $activityText.Text = 'Preparando atividades desta etapa...'
                             $progress.Value = [int]$message.percent
-                            Set-GuardianRobotState -State 'exec'
+                            # Mostra a imagem correspondente a fase; se indisponivel, usa a padrao.
+                            $phaseId = 0
+                            if ($null -ne $message.data -and $null -ne $message.data.phaseId) {
+                                $phaseId = [int]$message.data.phaseId
+                            }
+                            $phaseImage = $robotPhaseImages[$phaseId]
+                            if ($null -ne $phaseImage) {
+                                $robotImage.Source = $phaseImage
+                                Update-RobotLayout
+                            } else {
+                                Set-GuardianRobotState -State 'exec'
+                            }
                         }
                         'activity' {
                             $activityText.Text = [string]$message.label
