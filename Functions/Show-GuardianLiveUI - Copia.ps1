@@ -333,12 +333,30 @@ function Get-GuardianBitmapImage {
 $baseDir = Split-Path -Parent $PSScriptRoot
 $robotExecPath = Join-Path $baseDir 'Assets\Images\guardian_robot_execucao.png'
 $robotFinalPath = Join-Path $baseDir 'Assets\Images\guardian_robot_final.png'
+$robotPerfectPath = Join-Path $baseDir 'Assets\Images\guardian_robot_final_oculos.png'
 $robotWarningPath = Join-Path $baseDir 'Assets\Images\guardian_robot_ressalvas.png'
 $robotErrorPath = Join-Path $baseDir 'Assets\Images\guardian_robot_critico.png'
 $robotApiPath = Join-Path $baseDir 'Assets\Images\guardian_robot_api_pendente.png'
 $backgroundPath = Join-Path $baseDir 'Assets\Images\bg.png'
+# Imagens especificas de cada fase (IDs reais enviados pelo Guardian).
+$robotPhaseImages = @{}
+$robotPhaseFiles = @{
+    1 = 'guardian_robot_inventario.png'
+    3 = 'guardian_robot_otimizacoes.png'
+    4 = 'guardian_robot_limpeza.png'
+    5 = 'guardian_robot_windows_update.png'
+    6 = 'guardian_robot_winget.png'
+    7 = 'guardian_robot_componentes.png'
+    8 = 'guardian_robot_armazenamento.png'
+    9 = 'guardian_robot_seguranca.png'
+}
+foreach ($phaseId in $robotPhaseFiles.Keys) {
+    $phaseImagePath = Join-Path $baseDir ('Assets\Images\' + $robotPhaseFiles[$phaseId])
+    $robotPhaseImages[[int]$phaseId] = Get-GuardianBitmapImage -Path $phaseImagePath
+}
 $robotExecImage = Get-GuardianBitmapImage -Path $robotExecPath
 $robotFinalImage = Get-GuardianBitmapImage -Path $robotFinalPath
+$robotPerfectImage = Get-GuardianBitmapImage -Path $robotPerfectPath
 $robotWarningImage = Get-GuardianBitmapImage -Path $robotWarningPath
 $robotErrorImage = Get-GuardianBitmapImage -Path $robotErrorPath
 $robotApiImage = Get-GuardianBitmapImage -Path $robotApiPath
@@ -446,10 +464,11 @@ $window.FindName('ClientText').Text = "$Cliente"
 $window.FindName('PCText').Text = "$Computador"
 
 function Set-GuardianRobotState {
-    param([ValidateSet('exec','success','warning','error','api')][string]$State)
+    param([ValidateSet('exec','success','perfect','warning','error','api')][string]$State)
     switch ($State) {
         'exec'    { $img = if ($robotExecImage) { $robotExecImage } elseif ($robotFinalImage) { $robotFinalImage } else { $null } }
         'success' { $img = if ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
+        'perfect' { $img = if ($robotPerfectImage) { $robotPerfectImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
         'warning' { $img = if ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
         'error'   { $img = if ($robotErrorImage) { $robotErrorImage } elseif ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
         'api'     { $img = if ($robotApiImage) { $robotApiImage } elseif ($robotWarningImage) { $robotWarningImage } elseif ($robotFinalImage) { $robotFinalImage } elseif ($robotExecImage) { $robotExecImage } else { $null } }
@@ -493,9 +512,9 @@ $finishButton.Add_Click({ if ($script:Finished) { $window.Close() } })
 # Cor da Nota Geral: variacao visual independente da classificacao e da formula.
 function Set-GuardianHealthScoreColor {
     param([double]$Score)
-    $color = if ($Score -lt 50) { '#EB7777' }
-             elseif ($Score -le 70) { '#F0A35B' }
-             elseif ($Score -le 90) { '#E8CD69' }
+    $color = if ($Score -lt 51) { '#EB7777' }
+             elseif ($Score -lt 71) { '#F0A35B' }
+             elseif ($Score -lt 90) { '#E8CD69' }
              else { '#62DDA5' }
     $brush = [System.Windows.Media.BrushConverter]::new().ConvertFromString($color)
     $healthScore.Foreground = $brush
@@ -698,7 +717,18 @@ $timer.Add_Tick({
                             $phaseText.Text = [string]$message.label
                             $activityText.Text = 'Preparando atividades desta etapa...'
                             $progress.Value = [int]$message.percent
-                            Set-GuardianRobotState -State 'exec'
+                            # Mostra a imagem correspondente a fase; se indisponivel, usa a padrao.
+                            $phaseId = 0
+                            if ($null -ne $message.data -and $null -ne $message.data.phaseId) {
+                                $phaseId = [int]$message.data.phaseId
+                            }
+                            $phaseImage = $robotPhaseImages[$phaseId]
+                            if ($null -ne $phaseImage) {
+                                $robotImage.Source = $phaseImage
+                                Update-RobotLayout
+                            } else {
+                                Set-GuardianRobotState -State 'exec'
+                            }
                         }
                         'activity' {
                             $activityText.Text = [string]$message.label
@@ -754,6 +784,9 @@ $timer.Add_Tick({
                                 $robotState = 'api'
                             } elseif ([string]$message.status -eq 'warning' -or ($null -ne $finalScore -and $finalScore -lt 70)) {
                                 $robotState = 'warning'
+                            }
+                            if ($robotState -eq 'success' -and $null -ne $finalScore -and $finalScore -eq 100) {
+                                $robotState = 'perfect'
                             }
                             Set-GuardianRobotState -State $robotState
                             switch ([string]$message.status) {

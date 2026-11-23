@@ -852,7 +852,8 @@ $faseStore     = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Loja da Mic
 $faseWinget    = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Winget" }
 
 $okWin   = $faseUpdateWin  -and $faseUpdateWin.Mensagem.AtualizacaoBemSucedida
-$okStore = $faseStore      -and $faseStore.Mensagem.AtualizacaoBemSucedida
+# Microsoft Store: nota fixa 100 na contabilizacao, independentemente da fase.
+$okStore = $true
 $okWing  = $faseWinget     -and $faseWinget.Mensagem.AtualizacaoBemSucedida
 
 $sucessos = @($okWin, $okStore, $okWing) | Where-Object { $_ -eq $true } | Measure-Object | Select-Object -ExpandProperty Count
@@ -999,18 +1000,26 @@ $jsonRaw | Add-Member -MemberType NoteProperty -Name SaudeGeral -Value ([PSCusto
 })
 
 
-# ---------------- UUID SMBIOS + CPU ID ----------------
+# ---------------- UUID SMBIOS + CPU ID + NOME DO COMPUTADOR ----------------
 $uuidSistema = $null
 
 try {
-    $uuid  = (Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop).UUID
-    $cpuId = (Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1).ProcessorId
-    $uuidSistema = "$uuid|$cpuId"
+    $uuid  = ([string](Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop).UUID).Trim()
+    $cpuId = ([string](Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1).ProcessorId).Trim()
+    # O nome do relatorio ja foi validado contra o nome real da maquina.
+    $nomeIdentidade = ([string]$jsonRaw.NomeComputador).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($uuid) -and -not [string]::IsNullOrWhiteSpace($cpuId) -and
+        -not [string]::IsNullOrWhiteSpace($nomeIdentidade) -and -not $nomeIdentidade.Contains('|')) {
+        $uuidSistema = "$uuid|$cpuId|$nomeIdentidade"
+    }
 } catch {
     $uuidSistema = $null
 }
 
-
+# Identificador incompleto nao pode provocar associacao indevida entre maquinas.
+if (-not $uuidSistema) {
+    throw "Identificador incompleto: UUID SMBIOS, CPU ID ou NomeComputador indisponivel/invalido. Integracao cancelada."
+}
 
 # ------------------------------------------------------------------------------
 # Finalizar Fase do Inventário
