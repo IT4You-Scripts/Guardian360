@@ -370,51 +370,14 @@ $preferredHeight = 768.0
 
 $xmlReader = [System.Xml.XmlNodeReader]::new($xaml)
 $window = [Windows.Markup.XamlReader]::Load($xmlReader)
-# Posiciona no monitor do Guardian usando o DPI do monitor de destino,
-# e nao o DPI inicial da janela (que pode pertencer a outro monitor).
-if (-not ('GuardianMonitorDpi' -as [type])) {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class GuardianMonitorDpi {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct POINT { public int X; public int Y; }
-    [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(POINT point, uint flags);
-    [DllImport("shcore.dll")] public static extern int GetDpiForMonitor(IntPtr monitor, int dpiType, out uint dpiX, out uint dpiY);
-}
-'@
-}
-
+# SourceInitialized fornece o HwndSource para converter pixels de monitor
+# em unidades WPF (DIP), respeitando a escala de exibicao do Windows.
 $window.Add_SourceInitialized({
     try {
+        $source = [System.Windows.Interop.HwndSource]::FromVisual($window)
+        $scaleX = $source.CompositionTarget.TransformFromDevice.M11
+        $scaleY = $source.CompositionTarget.TransformFromDevice.M22
         $bounds = $guardianScreen.WorkingArea
-        $scaleX = 1.0
-        $scaleY = 1.0
-
-        # MDT_EFFECTIVE_DPI (0): escala real do monitor escolhido.
-        try {
-            $point = [GuardianMonitorDpi+POINT]::new()
-            $point.X = [int]($bounds.Left + $bounds.Width / 2)
-            $point.Y = [int]($bounds.Top + $bounds.Height / 2)
-            $monitor = [GuardianMonitorDpi]::MonitorFromPoint($point, 2)
-            [uint32]$dpiX = 96
-            [uint32]$dpiY = 96
-            if ($monitor -ne [IntPtr]::Zero -and
-                [GuardianMonitorDpi]::GetDpiForMonitor($monitor, 0, [ref]$dpiX, [ref]$dpiY) -eq 0 -and
-                $dpiX -gt 0 -and $dpiY -gt 0) {
-                $scaleX = 96.0 / $dpiX
-                $scaleY = 96.0 / $dpiY
-            } else {
-                throw 'DPI do monitor indisponivel'
-            }
-        } catch {
-            $source = [System.Windows.Interop.HwndSource]::FromVisual($window)
-            if ($null -ne $source -and $null -ne $source.CompositionTarget) {
-                $scaleX = $source.CompositionTarget.TransformFromDevice.M11
-                $scaleY = $source.CompositionTarget.TransformFromDevice.M22
-            }
-        }
-
         $areaLeft = $bounds.Left * $scaleX
         $areaTop = $bounds.Top * $scaleY
         $areaWidth = $bounds.Width * $scaleX
@@ -428,6 +391,7 @@ $window.Add_SourceInitialized({
         $window.Left = $areaLeft + [Math]::Max(0, ($areaWidth - $targetWidth) / 2)
         $window.Top = $areaTop + [Math]::Max(0, ($areaHeight - $targetHeight) / 2)
     } catch {
+        # Sem console/monitor valido, comportamento anterior: centralizar.
         $area = [System.Windows.SystemParameters]::WorkArea
         $window.Width = [Math]::Min($preferredWidth, [Math]::Max(440.0, $area.Width - 32.0))
         $window.Height = [Math]::Min($preferredHeight, [Math]::Max(360.0, $area.Height - 32.0))
@@ -492,6 +456,8 @@ if ($backgroundImage) {
     $rootSurface = $window.FindName('RootSurface')
     $fullBackground = [System.Windows.Media.ImageBrush]::new($backgroundImage)
     $fullBackground.Stretch = [System.Windows.Media.Stretch]::Fill
+    $fullBackground.Viewbox = [System.Windows.Rect]::new(0.0, 0.0, 0.99, 1.0)
+    $fullBackground.ViewboxUnits = [System.Windows.Media.BrushMappingMode]::RelativeToBoundingBox
     $fullBackground.AlignmentX = [System.Windows.Media.AlignmentX]::Center
     $fullBackground.AlignmentY = [System.Windows.Media.AlignmentY]::Center
     $rootSurface.Background = $fullBackground
