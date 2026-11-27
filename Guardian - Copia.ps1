@@ -1133,7 +1133,27 @@ function Invoke-GuardianStep {
         }
         else {
             # 🔴 CAPTURA TUDO que a função produzir
-            $stepOutput = & $Action 2>&1 | Out-String
+            if ($isWingetStep) {
+                # Preserva o objeto tecnico antes da formatacao tabular do Out-String.
+                # O conversor JSON espera um campo independente "ExitCode=numero".
+                $wingetOutput = @(& $Action 2>&1)
+                $wingetResult = @($wingetOutput | Where-Object {
+                    $_ -is [psobject] -and $_.PSObject.Properties['ExitCode'] -and
+                    $_.PSObject.Properties['MensagemTecnica']
+                } | Select-Object -Last 1)
+                if ($wingetResult.Count -gt 0) {
+                    $wingetCode = $wingetResult[0].ExitCode
+                    $wingetMessage = [string]$wingetResult[0].MensagemTecnica
+                    $wingetOther = @($wingetOutput | Where-Object {
+                        -not ($_.PSObject.Properties['ExitCode'] -and $_.PSObject.Properties['MensagemTecnica'])
+                    } | ForEach-Object { [string]$_ })
+                    $stepOutput = (@($wingetOther) + @("MensagemTecnica: $wingetMessage", "ExitCode=$wingetCode")) -join "`n"
+                } else {
+                    $stepOutput = $wingetOutput | Out-String
+                }
+            } else {
+                $stepOutput = & $Action 2>&1 | Out-String
+            }
         }
     }
     catch {
@@ -2304,7 +2324,7 @@ foreach ($phase in $script:GuardianSelectedPhases) {
 
     Write-Host ""
     Show-Phase -Id $phase.Id -Title $phase.Title
-    Send-GuardianLiveEvent -Type 'phase' -Label ('Tarefa {0:00} de {1:00} · {2}' -f $CurrentPhaseOrdinal, $script:GuardianPhaseCount, $phase.Title) -Percent ([int][Math]::Floor((($CurrentPhaseOrdinal - 1) / [Math]::Max(1,$script:GuardianPhaseCount)) * 95))
+    Send-GuardianLiveEvent -Type 'phase' -Label ('Tarefa {0:00} de {1:00} · {2}' -f $CurrentPhaseOrdinal, $script:GuardianPhaseCount, $phase.Title) -Percent ([int][Math]::Floor((($CurrentPhaseOrdinal - 1) / [Math]::Max(1,$script:GuardianPhaseCount)) * 95)) -Data @{ phaseId = $id }
     Write-GuardianStatus ("=== Fase {0}: {1} ===" -f $phase.Id, $phase.Title) 'INFO'
 
     # Executa cada passo da fase
