@@ -618,7 +618,7 @@ function Remove-GuardianObsoleteParameters([string]$Text) {
 }
 
 function Get-GuardianTaskInventory {
-    $items = New-Object 'System.Collections.Generic.List[object]'
+    $items = @()
     foreach ($task in @(Get-ScheduledTask -TaskPath $script:GuardianTaskFolder -ErrorAction SilentlyContinue)) {
         $text = (@($task.Actions | ForEach-Object { ([string]$_.Execute + ' ' + [string]$_.Arguments) }) -join ' ')
         $role = 'Outra'
@@ -626,9 +626,9 @@ function Get-GuardianTaskInventory {
         elseif ($text -match '(?i)Guardian-Ghost\.ps1' -or $task.TaskName -match '(?i)Ghost') { $role = 'Ghost' }
         elseif ($task.TaskName -match '(?i)System' -and $text -match '(?i)(Roda|Eleva)Guardian\.ps1') { $role = 'System' }
         elseif ($text -match '(?i)(Roda|Eleva)Guardian\.ps1') { $role = 'Main' }
-        $items.Add([pscustomobject]@{ Task = $task; Name = [string]$task.TaskName; Role = $role })
+        $items += [pscustomobject]@{ Task = $task; Name = [string]$task.TaskName; Role = $role }
     }
-    return @($items)
+    return $items
 }
 
 function Get-GuardianMainSpec([object]$Task) {
@@ -696,9 +696,9 @@ function Test-GuardianTaskMatchesXml([string]$TaskName,[string]$DesiredXml) {
 
 function Sync-GuardianScheduledTasks {
     $result = [pscustomobject]@{
-        Registered = New-Object 'System.Collections.Generic.List[string]'
-        Removed    = New-Object 'System.Collections.Generic.List[string]'
-        Notes      = New-Object 'System.Collections.Generic.List[string]'
+        Registered = @()
+        Removed    = @()
+        Notes      = @()
     }
     $inventory = @(Get-GuardianTaskInventory)
 
@@ -718,24 +718,24 @@ function Sync-GuardianScheduledTasks {
     if ($groups.Count -eq 1) {
         $spec = $groups[0].Group[0]
     } elseif ($groups.Count -gt 1) {
-        $result.Notes.Add('mais de uma tarefa principal com parametros diferentes (' + (($sources | ForEach-Object { $_.Name }) -join ' | ') + '); tarefas 2 e 3 nao recriadas e nada removido delas')
+        $result.Notes += 'mais de uma tarefa principal com parametros diferentes (' + (($sources | ForEach-Object { $_.Name }) -join ' | ') + '); tarefas 2 e 3 nao recriadas e nada removido delas'
     } else {
-        $result.Notes.Add('nenhuma tarefa principal encontrada em \Guardian\; tarefas 2 e 3 nao criadas')
+        $result.Notes += 'nenhuma tarefa principal encontrada em \Guardian\; tarefas 2 e 3 nao criadas'
     }
 
     # 2) Montar o plano. A tarefa 3 herda os parametros da principal, sempre via RodaGuardian e sem -ExecutaFases.
-    $plan = New-Object 'System.Collections.Generic.List[object]'
-    $plan.Add([pscustomobject]@{ Role = 'Update'; Name = $script:GuardianTaskName['Update']; Xml = $script:GuardianTaskXml['Update'] })
+    $plan = @()
+    $plan += [pscustomobject]@{ Role = 'Update'; Name = $script:GuardianTaskName['Update']; Xml = $script:GuardianTaskXml['Update'] }
     if ($spec) {
         $mainKey = 'Admin'; $mainScript = 'RodaGuardian.ps1'
         if ($spec.Variant -eq 'Restrito') { $mainKey = 'Restrito'; $mainScript = 'ElevaGuardian.ps1' }
         $mainXml = Set-GuardianXmlArguments $script:GuardianTaskXml[$mainKey] (New-GuardianTaskArguments $mainScript $spec.Rest)
-        $plan.Add([pscustomobject]@{ Role = 'Main'; Name = $script:GuardianTaskName[$mainKey]; Xml = $mainXml })
+        $plan += [pscustomobject]@{ Role = 'Main'; Name = $script:GuardianTaskName[$mainKey]; Xml = $mainXml }
         $systemRest = ([regex]::Replace($spec.Rest,'(?i)\s*-ExecutaFases(?:\s+(?:"[^"]*"|\S+))?','')).Trim()
         $systemXml = Set-GuardianXmlArguments $script:GuardianTaskXml['System'] (New-GuardianTaskArguments 'RodaGuardian.ps1' $systemRest)
-        $plan.Add([pscustomobject]@{ Role = 'System'; Name = $script:GuardianTaskName['System']; Xml = $systemXml })
+        $plan += [pscustomobject]@{ Role = 'System'; Name = $script:GuardianTaskName['System']; Xml = $systemXml }
     }
-    $plan.Add([pscustomobject]@{ Role = 'Ghost'; Name = $script:GuardianTaskName['Ghost']; Xml = $script:GuardianTaskXml['Ghost'] })
+    $plan += [pscustomobject]@{ Role = 'Ghost'; Name = $script:GuardianTaskName['Ghost']; Xml = $script:GuardianTaskXml['Ghost'] }
 
     # 3) Registrar so o que mudou. Qualquer falha interrompe ANTES de remover algo.
     foreach ($item in $plan) {
@@ -743,7 +743,7 @@ function Sync-GuardianScheduledTasks {
         $null = Register-ScheduledTask -TaskName $item.Name -TaskPath $script:GuardianTaskFolder -Xml $item.Xml -Force -ErrorAction Stop
         $check = Get-ScheduledTask -TaskName $item.Name -TaskPath $script:GuardianTaskFolder -ErrorAction Stop
         if ($check.State -eq 'Disabled') { throw ('Tarefa registrada, mas desabilitada: ' + $item.Name) }
-        $result.Registered.Add($item.Name)
+        $result.Registered += $item.Name
     }
 
     # 4) Remover somente as antigas substituidas. Outras funcoes nunca sao tocadas; a principal e a
@@ -759,12 +759,12 @@ function Sync-GuardianScheduledTasks {
             $current = Get-ScheduledTask -TaskName $old.Name -TaskPath $script:GuardianTaskFolder -ErrorAction Stop
             if ([string]$current.State -eq 'Running') {
                 if ([string]$current.State -ne 'Disabled') { Disable-ScheduledTask -TaskName $old.Name -TaskPath $script:GuardianTaskFolder -ErrorAction Stop | Out-Null }
-                $result.Notes.Add('tarefa antiga em execucao desabilitada (sera removida na proxima rodada): ' + $old.Name)
+                $result.Notes += 'tarefa antiga em execucao desabilitada (sera removida na proxima rodada): ' + $old.Name
                 continue
             }
             Unregister-ScheduledTask -TaskName $old.Name -TaskPath $script:GuardianTaskFolder -Confirm:$false -ErrorAction Stop
-            $result.Removed.Add($old.Name)
-        } catch { $result.Notes.Add('nao foi possivel remover a tarefa antiga ' + $old.Name + ': ' + $_.Exception.Message) }
+            $result.Removed += $old.Name
+        } catch { $result.Notes += 'nao foi possivel remover a tarefa antiga ' + $old.Name + ': ' + $_.Exception.Message }
     }
     return $result
 }
