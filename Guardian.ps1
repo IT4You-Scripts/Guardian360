@@ -694,11 +694,44 @@ function Test-GuardianTaskMatchesXml([string]$TaskName,[string]$DesiredXml) {
     return ($expectedTriggers -eq $actualTriggers -and $expectedActions -eq $actualActions)
 }
 
+function Start-GuardianOldTaskCleanup([string[]]$Names) {
+    # Tarefa antiga em execucao nao pode ser apagada pelo proprio Guardian que roda nela.
+    # Uma tarefa auxiliar independente (SYSTEM) espera a antiga terminar, remove-a e se remove.
+    $helperName = 'Guardian 360 v2.1 (Limpeza Temporaria)'
+    $quoted = (@($Names) | ForEach-Object { "'" + ([string]$_).Replace("'","''") + "'" }) -join ','
+    $lines = @(
+        ('$names = @(' + $quoted + ')'),
+        '$folder = ''\Guardian\''',
+        '$limit = (Get-Date).AddHours(6)',
+        'foreach ($n in $names) {',
+        '    while ((Get-Date) -lt $limit) {',
+        '        $t = Get-ScheduledTask -TaskName $n -TaskPath $folder -ErrorAction SilentlyContinue',
+        '        if (-not $t) { break }',
+        '        if ([string]$t.State -ne ''Running'') {',
+        '            Unregister-ScheduledTask -TaskName $n -TaskPath $folder -Confirm:$false -ErrorAction SilentlyContinue',
+        '            break',
+        '        }',
+        '        Start-Sleep -Seconds 10',
+        '    }',
+        '}',
+        ('Unregister-ScheduledTask -TaskName ''' + $helperName + ''' -TaskPath $folder -Confirm:$false -ErrorAction SilentlyContinue')
+    )
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(($lines -join "`r`n")))
+    $exe = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    if (-not (Test-Path -LiteralPath $exe)) { $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
+    $action = New-ScheduledTaskAction -Execute $exe -Argument ('-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ' + $encoded)
+    $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 7) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
+    $null = Register-ScheduledTask -TaskName $helperName -TaskPath $script:GuardianTaskFolder -Action $action -Principal $principal -Settings $settings -Force -ErrorAction Stop
+    Start-ScheduledTask -TaskName $helperName -TaskPath $script:GuardianTaskFolder -ErrorAction Stop
+}
+
 function Sync-GuardianScheduledTasks {
     $result = [pscustomobject]@{
         Registered = @()
         Removed    = @()
         Notes      = @()
+        Pending    = @()
     }
     $inventory = @(Get-GuardianTaskInventory)
 
@@ -748,7 +781,7 @@ function Sync-GuardianScheduledTasks {
 
     # 4) Remover somente as antigas substituidas. Outras funcoes nunca sao tocadas; a principal e a
     #    System antigas so saem se as novas existem. Tarefa antiga em execucao (inclusive a que iniciou
-    #    esta rodada) apenas e desabilitada; a proxima rodada a remove.
+    #    esta rodada) e desabilitada e removida por uma tarefa auxiliar assim que terminar.
     $newNames = @($plan | ForEach-Object { $_.Name })
     $replacedRoles = @($plan | ForEach-Object { $_.Role })
     if ($groups.Count -gt 1) { $replacedRoles = @($replacedRoles | Where-Object { $_ -ne 'Main' -and $_ -ne 'System' }) }
@@ -758,8 +791,8 @@ function Sync-GuardianScheduledTasks {
         try {
             $current = Get-ScheduledTask -TaskName $old.Name -TaskPath $script:GuardianTaskFolder -ErrorAction Stop
             if ([string]$current.State -eq 'Running') {
-                if ([string]$current.State -ne 'Disabled') { Disable-ScheduledTask -TaskName $old.Name -TaskPath $script:GuardianTaskFolder -ErrorAction Stop | Out-Null }
-                $result.Notes += 'tarefa antiga em execucao desabilitada (sera removida na proxima rodada): ' + $old.Name
+                Disable-ScheduledTask -TaskName $old.Name -TaskPath $script:GuardianTaskFolder -ErrorAction Stop | Out-Null
+                $result.Pending += $old.Name
                 continue
             }
             Unregister-ScheduledTask -TaskName $old.Name -TaskPath $script:GuardianTaskFolder -Confirm:$false -ErrorAction Stop
@@ -2677,6 +2710,15 @@ try {
         if ($sync.Registered.Count -gt 0) { Write-GuardianConsoleEvent -Text ('Agendamentos criados/atualizados: ' + ($sync.Registered -join ' | ')) -Kind OK }
         if ($sync.Removed.Count -gt 0) { Write-GuardianConsoleEvent -Text ('Agendamentos antigos removidos: ' + ($sync.Removed -join ' | ')) -Kind OK }
         foreach ($note in $sync.Notes) { Write-GuardianConsoleEvent -Text ('Agendamentos: ' + $note) -Kind WARN }
+        if ($sync.Pending.Count -gt 0) {
+            try {
+                Start-GuardianOldTaskCleanup $sync.Pending
+                Write-GuardianConsoleEvent -Text ('Tarefa antiga sera removida ao terminar esta execucao: ' + ($sync.Pending -join ' | ')) -Kind OK
+            } catch {
+                Write-GuardianConsoleEvent -Text ('Agendamentos: nao foi possivel programar a remocao da tarefa antiga: ' + $_.Exception.Message) -Kind WARN
+                $script:GuardianTasksPadronizadas = $false
+            }
+        }
         $script:GuardianTasksPadronizadas = ($sync.Notes.Count -eq 0)
     }
     $tasks = @(Get-ScheduledTask -TaskPath $script:GuardianTaskFolder -ErrorAction Stop)
