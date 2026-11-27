@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 
 <#
 .SYNOPSIS
@@ -189,6 +189,35 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
     }
 }
 # --- FIM DO BLOCO ---
+
+# =========================================================================
+# TRAVA DE EXECUCAO UNICA (v2.1)
+# Impede dois Guardian simultaneos no mesmo PC (tarefas diferentes, execucao manual, ElevaGuardian).
+# O arquivo e aberto com acesso exclusivo e mantido aberto ate o fim do processo; o proprio
+# Windows o libera se o script terminar, travar ou for encerrado: nao fica trava velha.
+# So uma violacao de compartilhamento significa "outro Guardian em execucao"; qualquer outro
+# problema com o arquivo (permissao, disco) nunca impede o Guardian de rodar.
+# Fica DEPOIS da elevacao/relancamento no PowerShell 7, para nao bloquear o processo filho.
+# =========================================================================
+$script:GuardianLockStream = $null
+try {
+    if (-not (Test-Path -LiteralPath 'C:\Guardian' -PathType Container)) {
+        New-Item -ItemType Directory -Path 'C:\Guardian' -Force -ErrorAction Stop | Out-Null
+    }
+    $script:GuardianLockStream = [System.IO.File]::Open(
+        'C:\Guardian\guardian.lock',
+        [System.IO.FileMode]::OpenOrCreate,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None)
+} catch [System.IO.IOException] {
+    # 32 = ERROR_SHARING_VIOLATION, 33 = ERROR_LOCK_VIOLATION
+    if (($_.Exception.HResult -band 0xFFFF) -in @(32, 33)) {
+        Write-Host 'Guardian ja esta em execucao neste computador; esta execucao foi encerrada.' -ForegroundColor Yellow
+        exit 0
+    }
+} catch { }
+# =========================================================================
+
 
 # =========================================================================
 # GERENCIAMENTO CENTRAL DAS QUATRO TAREFAS AGENDADAS (Guardian 360 v2.1)
