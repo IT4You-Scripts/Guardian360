@@ -63,7 +63,6 @@ function Update-GuardianFiles {
         # Scripts principais (mantem o mesmo funcionamento de distribuicao).
         @{ Url = "$BaseUrl/CriaCredenciais.ps1"; Path = "$BasePath\CriaCredenciais.ps1" },
         @{ Url = "$BaseUrl/Guardian.ps1"; Path = "$BasePath\Guardian.ps1" },
-        @{ Url = "$BaseUrl/Prepara.ps1"; Path = "$BasePath\Prepara.ps1" },
         @{ Url = "$BaseUrl/Guardian-Ghost.ps1"; Path = "$BasePath\Guardian-Ghost.ps1" },
         # UI 29: imagens da interface WPF, incluindo ressalvas, erro critico e API pendente.
         @{ Url = "$BaseUrl/Assets/Images/bg.png"; Path = "$BasePath\Assets\Images\bg.png" },
