@@ -61,7 +61,6 @@ function Update-GuardianFiles {
         @{ Url = "$BaseUrl/ElevaGuardian.ps1"; Path = "$BasePath\ElevaGuardian.new" },
         @{ Url = "$BaseUrl/Functions/Update-GuardianFiles.ps1"; Path = "$BasePath\Functions\Update-GuardianFiles.new" },
         # Scripts principais (mantem o mesmo funcionamento de distribuicao).
-        @{ Url = "$BaseUrl/Atualiza.ps1"; Path = "$BasePath\Atualiza.ps1" },
         @{ Url = "$BaseUrl/CriaCredenciais.ps1"; Path = "$BasePath\CriaCredenciais.ps1" },
         @{ Url = "$BaseUrl/Guardian.ps1"; Path = "$BasePath\Guardian.ps1" },
         @{ Url = "$BaseUrl/Prepara.ps1"; Path = "$BasePath\Prepara.ps1" },
@@ -129,20 +128,45 @@ function Update-GuardianFiles {
     }
 
     # -------------------------------
-    # DOWNLOAD ATUALIZADO
+    # DOWNLOAD ATUALIZADO (em duas fases)
+    # Fase 1: baixa tudo para arquivos temporarios (.download) e valida cada um.
+    # Fase 2: somente se todos os scripts foram validados, troca os arquivos.
+    # Assim um download cortado ou invalido nunca substitui um arquivo bom e a
+    # atualizacao nao fica pela metade (parte nova, parte antiga).
     # -------------------------------
     Show-Header "Atualizando Guardian 360..." -Color Cyan
 
+    $Baixados = @()
     foreach ($File in $Files) {
+        $temporario = "$($File.Path).download"
         try {
             Invoke-WebRequest `
                 -Uri "$($File.Url)$NoCache" `
-                -OutFile $File.Path `
+                -OutFile $temporario `
                 -UseBasicParsing `
                 -Headers @{ "Cache-Control"="no-cache" } `
                 -ErrorAction Stop
+
+            if ((Get-Item -LiteralPath $temporario -ErrorAction Stop).Length -eq 0) {
+                throw 'Download vazio'
+            }
+
+            # Script cortado: confere a sintaxe (somente no PowerShell 7+, que entende toda a
+            # sintaxe usada pelos scripts; no 5.1 so a verificacao de arquivo nao vazio vale).
+            if ($File.Url -match '\.ps1$' -and $PSVersionTable.PSVersion.Major -ge 7) {
+                $texto  = [System.IO.File]::ReadAllText($temporario, [System.Text.UTF8Encoding]::new($false))
+                $tokens = $null
+                $erros  = $null
+                [void][System.Management.Automation.Language.Parser]::ParseInput($texto, [ref]$tokens, [ref]$erros)
+                if (@($erros).Count -gt 0) {
+                    throw "Script incompleto ou invalido: $($erros[0].Message)"
+                }
+            }
+
+            $Baixados += $File
         }
         catch {
+            Remove-Item -LiteralPath $temporario -Force -ErrorAction SilentlyContinue
 
             # Se for imagem, só avisa
             if ($File.Path -match "\.png$") {
@@ -150,11 +174,30 @@ function Update-GuardianFiles {
                 continue
             }
 
-            # Se for script, falha crítica
+            # Se for script, falha crítica: nada foi substituido ainda; descarta os temporarios.
+            foreach ($Anterior in $Baixados) {
+                Remove-Item -LiteralPath "$($Anterior.Path).download" -Force -ErrorAction SilentlyContinue
+            }
             Fail "Falha crítica ao atualizar: $($File.Path)"
         }
     }
-  
+
+    # Fase 2: troca dos arquivos validados.
+    foreach ($File in $Baixados) {
+        $temporario = "$($File.Path).download"
+        try {
+            Move-Item -LiteralPath $temporario -Destination $File.Path -Force -ErrorAction Stop
+        }
+        catch {
+            Remove-Item -LiteralPath $temporario -Force -ErrorAction SilentlyContinue
+            if ($File.Path -match "\.png$") {
+                Write-Host "Aviso: Falha ao gravar imagem $($File.Path)" -ForegroundColor DarkYellow
+                continue
+            }
+            Fail "Falha crítica ao gravar: $($File.Path)"
+        }
+    }
+
 # Atualização dos aqruivos que estavam na nmemória
 $AtomicTargets = @(
     @{ New = "$BasePath\RodaGuardian.new";                    Final = "$BasePath\RodaGuardian.ps1" },

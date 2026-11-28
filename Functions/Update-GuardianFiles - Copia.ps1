@@ -1,0 +1,244 @@
+function Update-GuardianFiles {
+
+    $ErrorActionPreference = "Stop"
+    $ProgressPreference   = "SilentlyContinue"
+
+    # -------------------------------
+    # Função para cabeçalho estilizado
+    # -------------------------------
+    function Show-Header {
+        param(
+            [string]$Text,
+            [ConsoleColor]$Color = 'Cyan'
+        )
+
+        $bar = '─' * ($Text.Length + 2)
+        Write-Host ""
+        Write-Host ("┌$bar┐") -ForegroundColor $Color
+        Write-Host ("│ $Text │") -ForegroundColor $Color
+        Write-Host ("└$bar┘") -ForegroundColor $Color
+        Write-Host ""
+    }
+
+    # -------------------------------
+    # Função de falha controlada
+    # -------------------------------
+    function Fail {
+        param ([string]$Message)
+        Show-Header $Message -Color Red
+        Write-Host "O script será encerrado em 5 segundos..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 5
+        exit 1
+    }
+
+    # Configurações
+    $BaseUrl   = "https://raw.githubusercontent.com/IT4You-Scripts/Guardian360/main"
+    $BasePath  = "C:\Guardian"
+
+    # Cache busting permanente (ANTI GitHub RAW cache)
+    $NoCache   = "?nocache=$(Get-Date -Format 'yyyyMMddHHmmss')"
+
+    # Estrutura base (nunca apaga nada)
+    $Folders = @(
+        $BasePath,
+        "$BasePath\Functions",
+        "$BasePath\Monitor",
+        "$BasePath\Assets\Images"
+    )
+
+    foreach ($Folder in $Folders) {
+        if (-not (Test-Path $Folder)) {
+            New-Item -ItemType Directory -Path $Folder -Force | Out-Null
+        }
+    }
+
+    # -------------------------------
+    # Lista de arquivos oficiais
+    # -------------------------------
+    $Files = @(
+        # Lancadores e atualizador: staging .new para preservar a estrategia existente.
+        @{ Url = "$BaseUrl/RodaGuardian.ps1"; Path = "$BasePath\RodaGuardian.new" },
+        @{ Url = "$BaseUrl/ElevaGuardian.ps1"; Path = "$BasePath\ElevaGuardian.new" },
+        @{ Url = "$BaseUrl/Functions/Update-GuardianFiles.ps1"; Path = "$BasePath\Functions\Update-GuardianFiles.new" },
+        # Scripts principais (mantem o mesmo funcionamento de distribuicao).
+        @{ Url = "$BaseUrl/Atualiza.ps1"; Path = "$BasePath\Atualiza.ps1" },
+        @{ Url = "$BaseUrl/CriaCredenciais.ps1"; Path = "$BasePath\CriaCredenciais.ps1" },
+        @{ Url = "$BaseUrl/Guardian.ps1"; Path = "$BasePath\Guardian.ps1" },
+        @{ Url = "$BaseUrl/Prepara.ps1"; Path = "$BasePath\Prepara.ps1" },
+        @{ Url = "$BaseUrl/Guardian-Ghost.ps1"; Path = "$BasePath\Guardian-Ghost.ps1" },
+        # UI 29: imagens da interface WPF, incluindo ressalvas, erro critico e API pendente.
+        @{ Url = "$BaseUrl/Assets/Images/bg.png"; Path = "$BasePath\Assets\Images\bg.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_execucao.png"; Path = "$BasePath\Assets\Images\guardian_robot_execucao.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_final.png"; Path = "$BasePath\Assets\Images\guardian_robot_final.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_final_oculos.png"; Path = "$BasePath\Assets\Images\guardian_robot_final_oculos.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_ressalvas.png"; Path = "$BasePath\Assets\Images\guardian_robot_ressalvas.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_critico.png"; Path = "$BasePath\Assets\Images\guardian_robot_critico.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_api_pendente.png"; Path = "$BasePath\Assets\Images\guardian_robot_api_pendente.png" },
+        # Imagens das oito fases da interface Guardian 360.
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_inventario.png"; Path = "$BasePath\Assets\Images\guardian_robot_inventario.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_otimizacoes.png"; Path = "$BasePath\Assets\Images\guardian_robot_otimizacoes.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_limpeza.png"; Path = "$BasePath\Assets\Images\guardian_robot_limpeza.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_windows_update.png"; Path = "$BasePath\Assets\Images\guardian_robot_windows_update.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_winget.png"; Path = "$BasePath\Assets\Images\guardian_robot_winget.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_componentes.png"; Path = "$BasePath\Assets\Images\guardian_robot_componentes.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_armazenamento.png"; Path = "$BasePath\Assets\Images\guardian_robot_armazenamento.png" },
+        @{ Url = "$BaseUrl/Assets/Images/guardian_robot_seguranca.png"; Path = "$BasePath\Assets\Images\guardian_robot_seguranca.png" },
+        # Funcoes utilizadas / carregadas pelo Guardian 360 v2.1.
+        @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1"; Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
+        @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1"; Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
+        @{ Url = "$BaseUrl/Functions/Clear-BrowserCache.ps1"; Path = "$BasePath\Functions\Clear-BrowserCache.ps1" },
+        @{ Url = "$BaseUrl/Functions/Clear-RecentFilesHistory.ps1"; Path = "$BasePath\Functions\Clear-RecentFilesHistory.ps1" },
+        @{ Url = "$BaseUrl/Functions/Clear-TempFiles.ps1"; Path = "$BasePath\Functions\Clear-TempFiles.ps1" },
+        @{ Url = "$BaseUrl/Functions/Clear-WindowsUpdateCache.ps1"; Path = "$BasePath\Functions\Clear-WindowsUpdateCache.ps1" },
+        @{ Url = "$BaseUrl/Functions/Confirm-MacriumBackup.ps1"; Path = "$BasePath\Functions\Confirm-MacriumBackup.ps1" },
+        @{ Url = "$BaseUrl/Functions/Get-SystemInventory.ps1"; Path = "$BasePath\Functions\Get-SystemInventory.ps1" },
+        @{ Url = "$BaseUrl/Functions/Manage-RustDesk.ps1"; Path = "$BasePath\Functions\Manage-RustDesk.ps1" },
+        @{ Url = "$BaseUrl/Functions/Optimize-HDD.ps1"; Path = "$BasePath\Functions\Optimize-HDD.ps1" },
+        @{ Url = "$BaseUrl/Functions/Optimize-JsonReport.ps1"; Path = "$BasePath\Functions\Optimize-JsonReport.ps1" },
+        @{ Url = "$BaseUrl/Functions/Optimize-NetworkSettings.ps1"; Path = "$BasePath\Functions\Optimize-NetworkSettings.ps1" },
+        @{ Url = "$BaseUrl/Functions/Optimize-PowerSettings.ps1"; Path = "$BasePath\Functions\Optimize-PowerSettings.ps1" },
+        @{ Url = "$BaseUrl/Functions/Optimize-SSD.ps1"; Path = "$BasePath\Functions\Optimize-SSD.ps1" },
+        @{ Url = "$BaseUrl/Functions/Remove-OldUpdateFiles.ps1"; Path = "$BasePath\Functions\Remove-OldUpdateFiles.ps1" },
+        @{ Url = "$BaseUrl/Functions/Repair-SystemIntegrity.ps1"; Path = "$BasePath\Functions\Repair-SystemIntegrity.ps1" },
+        @{ Url = "$BaseUrl/Functions/Scan-AntiMalware.ps1"; Path = "$BasePath\Functions\Scan-AntiMalware.ps1" },
+        @{ Url = "$BaseUrl/Functions/Send-LogToServer.ps1"; Path = "$BasePath\Functions\Send-LogToServer.ps1" },
+        @{ Url = "$BaseUrl/Functions/Update-MicrosoftStore.ps1"; Path = "$BasePath\Functions\Update-MicrosoftStore.ps1" },
+        @{ Url = "$BaseUrl/Functions/Update-WindowsOS.ps1"; Path = "$BasePath\Functions\Update-WindowsOS.ps1" },
+        @{ Url = "$BaseUrl/Functions/Update-PowerShellMSI.ps1"; Path = "$BasePath\Functions\Update-PowerShellMSI.ps1" },
+        @{ Url = "$BaseUrl/Functions/Update-WingetApps.ps1"; Path = "$BasePath\Functions\Update-WingetApps.ps1" },
+        @{ Url = "$BaseUrl/Functions/Write-JsonResult.ps1"; Path = "$BasePath\Functions\Write-JsonResult.ps1" },
+        @{ Url = "$BaseUrl/Functions/Show-GuardianLiveUI.ps1"; Path = "$BasePath\Functions\Show-GuardianLiveUI.ps1" }
+    )
+
+    # --------------------------------------------------------------
+    # Limpeza dos atributos Read-Only (caso existam)
+    # --------------------------------------------------------------
+    Show-Header "Baixando arquivos do Guardian 360..." -Color Yellow
+
+    foreach ($File in $Files) {
+        try {
+            if (Test-Path $File.Path) {
+
+                # Remove atributo ReadOnly
+                attrib -R $File.Path 2>$null
+            }
+        }
+        catch {
+            Write-Host "Aviso: Não foi possível mudar os atributos dos arquivos $($File.Path)" -ForegroundColor DarkYellow
+        }
+    }
+
+    # -------------------------------
+    # DOWNLOAD ATUALIZADO
+    # -------------------------------
+    Show-Header "Atualizando Guardian 360..." -Color Cyan
+
+    foreach ($File in $Files) {
+        try {
+            Invoke-WebRequest `
+                -Uri "$($File.Url)$NoCache" `
+                -OutFile $File.Path `
+                -UseBasicParsing `
+                -Headers @{ "Cache-Control"="no-cache" } `
+                -ErrorAction Stop
+        }
+        catch {
+
+            # Se for imagem, só avisa
+            if ($File.Path -match "\.png$") {
+                Write-Host "Aviso: Falha ao baixar imagem $($File.Path)" -ForegroundColor DarkYellow
+                continue
+            }
+
+            # Se for script, falha crítica
+            Fail "Falha crítica ao atualizar: $($File.Path)"
+        }
+    }
+  
+# Atualização dos aqruivos que estavam na nmemória
+$AtomicTargets = @(
+    @{ New = "$BasePath\RodaGuardian.new";                    Final = "$BasePath\RodaGuardian.ps1" },
+    @{ New = "$BasePath\ElevaGuardian.new";                   Final = "$BasePath\ElevaGuardian.ps1" },
+    @{ New = "$BasePath\Functions\Update-GuardianFiles.new";  Final = "$BasePath\Functions\Update-GuardianFiles.ps1" }
+)
+
+foreach ($item in $AtomicTargets) {
+    $src = $item.New
+    $dst = $item.Final
+
+    if (Test-Path $src) {
+
+        try {
+            attrib -R $dst 2>$null
+            Move-Item -Force $src $dst
+        }
+        catch {
+            Write-Host "Aviso: não foi possível atualizar $dst" -ForegroundColor DarkYellow
+        }
+    }
+}
+
+    # --------------------------------------------------------------
+    # Telemetria - componentes opcionais, isolados do fluxo principal.
+    # Arquivos devem existir na mesma estrutura no GitHub.
+    # Uma falha aqui nao aborta a atualizacao nem o Guardian.
+    # --------------------------------------------------------------
+    $MonitorFiles = @(
+        @{ Repo = 'Functions/Get-HardwareTelemetry.ps1'; Dest = "$BasePath\Functions\Get-HardwareTelemetry.ps1" },
+        @{ Repo = 'Monitor/BlackSharp.Core.dll';          Dest = "$BasePath\Monitor\BlackSharp.Core.dll" },
+        @{ Repo = 'Monitor/DiskInfoToolkit.dll';           Dest = "$BasePath\Monitor\DiskInfoToolkit.dll" },
+        @{ Repo = 'Monitor/HidSharp.dll';                  Dest = "$BasePath\Monitor\HidSharp.dll" },
+        @{ Repo = 'Monitor/LibreHardwareMonitorLib.dll';  Dest = "$BasePath\Monitor\LibreHardwareMonitorLib.dll" },
+        @{ Repo = 'Monitor/RAMSPDToolkit-NDD.dll';         Dest = "$BasePath\Monitor\RAMSPDToolkit-NDD.dll" },
+        @{ Repo = 'Monitor/System.IO.Ports.dll';          Dest = "$BasePath\Monitor\System.IO.Ports.dll" },
+        @{ Repo = 'Monitor/System.Management.dll';        Dest = "$BasePath\Monitor\System.Management.dll" }
+    )
+
+    # Binarios opcionais somente em notebooks Dell. Falhas nao abortam a atualizacao.
+    try {
+        $csDellSMM = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+        $ehDell = ([string]$csDellSMM.Manufacturer -match '(?i)dell')
+        $ehNotebook = ($csDellSMM.PCSystemType -eq 2)
+        if (-not $ehNotebook) {
+            $ehNotebook = @((Get-CimInstance Win32_SystemEnclosure -ErrorAction Stop).ChassisTypes |
+                Where-Object { $_ -in @(8,9,10,11,12,14,18,21,30,31,32) }).Count -gt 0
+        }
+        if ($ehDell -and $ehNotebook) {
+            $MonitorFiles += @(
+            @{ Repo = 'Monitor/DellFanCmd/DellFanCmd.exe'; Dest = "$BasePath\Monitor\DellFanCmd\DellFanCmd.exe" },
+            @{ Repo = 'Monitor/DellFanCmd/DellFanLib.dll'; Dest = "$BasePath\Monitor\DellFanCmd\DellFanLib.dll" },
+            @{ Repo = 'Monitor/DellFanCmd/bzh_dell_smm_io_x64.sys'; Dest = "$BasePath\Monitor\DellFanCmd\bzh_dell_smm_io_x64.sys" }
+            )
+        }
+    } catch { Write-Warning "Dell SMM: identificacao indisponivel; download ignorado." }
+
+    foreach ($MonitorFile in $MonitorFiles) {
+        try { New-Item -ItemType Directory -Path (Split-Path -Parent $MonitorFile.Dest) -Force -ErrorAction Stop | Out-Null } catch { continue }
+        $temporario = "$($MonitorFile.Dest).download"
+        try {
+            Invoke-WebRequest `
+                -Uri "$BaseUrl/$($MonitorFile.Repo)$NoCache" `
+                -OutFile $temporario `
+                -UseBasicParsing `
+                -Headers @{ 'Cache-Control' = 'no-cache' } `
+                -ErrorAction Stop
+
+            if ((Get-Item -LiteralPath $temporario -ErrorAction Stop).Length -eq 0) {
+                throw 'Download vazio'
+            }
+            if (Test-Path -LiteralPath $MonitorFile.Dest) {
+                attrib -R $MonitorFile.Dest 2>$null
+            }
+            Move-Item -LiteralPath $temporario -Destination $MonitorFile.Dest -Force -ErrorAction Stop
+        }
+        catch {
+            Write-Host "Aviso: telemetria nao atualizada ($($MonitorFile.Repo)): $($_.Exception.Message)" -ForegroundColor DarkYellow
+        }
+        finally {
+            Remove-Item -LiteralPath $temporario -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Final OK
+    Show-Header "Atualização concluída com sucesso!" -Color Green
+}
