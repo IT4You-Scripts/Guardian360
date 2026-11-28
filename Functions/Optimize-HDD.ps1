@@ -17,6 +17,13 @@
             Write-Host ("Disco {0}: Tipo {1}" -f $deviceID, $mediaType) -ForegroundColor White
             $mensagens += "Disco $deviceID Tipo $mediaType"
 
+            # Discos externos USB nao sao desfragmentados (pertencem ao usuario e podem ser lentos).
+            if ($disco.BusType -eq 'USB') {
+                Write-Host " -> Disco USB detectado. Ignorando." -ForegroundColor Yellow
+                $mensagens += "Disco $deviceID USB ignorado"
+                continue
+            }
+
             switch ($mediaType) {
 
                 "SSD" {
@@ -41,9 +48,12 @@
                             $mensagens += "Unidade $driveLetter desfragmentada"
                         }
                         catch {
-                            Write-Host ("   Falha ao desfragmentar unidade {0}." -f $driveLetter) -ForegroundColor Yellow
+                            $motivo = ([string]$_.Exception.Message -replace '\s+', ' ').Trim()
+                            if ([string]::IsNullOrWhiteSpace($motivo)) { $motivo = 'motivo nao informado' }
 
-                            $mensagens += "Falha unidade $driveLetter"
+                            Write-Host ("   Falha ao desfragmentar unidade {0}: {1}" -f $driveLetter, $motivo) -ForegroundColor Yellow
+
+                            $mensagens += "Falha unidade ${driveLetter}: $motivo"
                         }
                     }
 

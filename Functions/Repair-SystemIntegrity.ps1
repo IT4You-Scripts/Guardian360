@@ -4,77 +4,72 @@
         [string]$SourcePath
     )
 
+    # Tempo maximo (minutos) de cada etapa demorada: DISM cleanup, DISM RestoreHealth e SFC.
+    $tempoLimiteMin = 60
+
     function Test-PendingReboot {
         try {
-            $cbs  = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing' -Name 'RebootPending' -ErrorAction SilentlyContinue
-            $wu   = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update' -Name 'RebootRequired' -ErrorAction SilentlyContinue
+            # RebootPending e RebootRequired sao SUBCHAVES (nao valores): usar Test-Path.
+            $cbs  = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+            $wu   = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
             $pfr  = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name 'PendingFileRenameOperations' -ErrorAction SilentlyContinue
             $pxml = Test-Path "$env:windir\winsxs\pending.xml"
-            return ($cbs -or $wu -or $pfr -or $pxml)
+            return [bool]($cbs -or $wu -or $pfr -or $pxml)
         } catch {
             return $false
         }
     }
 
+    # Executa um programa e espera ate o tempo limite. Se estourar, encerra o programa
+    # e seus processos filhos e devolve ExitCode = -1 com TimedOut = $true.
+    function Invoke-ProcessWithTimeout {
+        param(
+            [string]$FilePath,
+            [string]$Arguments,
+            [int]$TimeoutMinutes
+        )
+
+        $proc = Start-Process $FilePath -ArgumentList $Arguments -PassThru -NoNewWindow
+        $null = $proc.Handle   # garante a leitura do ExitCode depois que o processo terminar
+
+        if ($proc.WaitForExit($TimeoutMinutes * 60 * 1000)) {
+            return [PSCustomObject]@{ ExitCode = [int]$proc.ExitCode; TimedOut = $false }
+        }
+
+        try { & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null } catch {}
+        try { if (-not $proc.HasExited) { $proc.Kill() } } catch {}
+
+        return [PSCustomObject]@{ ExitCode = -1; TimedOut = $true }
+    }
+
     try {
         $pendingBefore = Test-PendingReboot
-        if ($pendingBefore) {
-        }
+        $estouraramTempo = @()
 
         $cleanupArgs = "/Online /Cleanup-Image /StartComponentCleanup /Quiet /NoRestart"
-        $cleanupProc = Start-Process dism.exe -ArgumentList $cleanupArgs -Wait -PassThru -NoNewWindow
-        $cleanupExit = $cleanupProc.ExitCode
-
-        if ($cleanupExit -ne 0 -and $cleanupExit -ne 3010) {
-        }
+        $cleanupRes  = Invoke-ProcessWithTimeout -FilePath 'dism.exe' -Arguments $cleanupArgs -TimeoutMinutes $tempoLimiteMin
+        $cleanupExit = $cleanupRes.ExitCode
+        if ($cleanupRes.TimedOut) { $estouraramTempo += 'DISM-StartComponentCleanup' }
 
         $dismArgs = "/Online /Cleanup-Image /RestoreHealth"
         if ($SourcePath) {
             $dismArgs += " /Source:`"$SourcePath`" /LimitAccess"
         }
 
-        $dismProc = Start-Process dism.exe -ArgumentList $dismArgs -Wait -PassThru -NoNewWindow
-        $dismExit = $dismProc.ExitCode
+        $dismRes  = Invoke-ProcessWithTimeout -FilePath 'dism.exe' -Arguments $dismArgs -TimeoutMinutes $tempoLimiteMin
+        $dismExit = $dismRes.ExitCode
+        if ($dismRes.TimedOut) { $estouraramTempo += 'DISM-RestoreHealth' }
 
-        if ($dismExit -eq 3010) {
-        } elseif ($dismExit -ne 0) {
-        }
-
-        $sfcProc = Start-Process sfc.exe -ArgumentList "/scannow" -Wait -PassThru -NoNewWindow
-        $sfcExit = $sfcProc.ExitCode
-
-        switch ($sfcExit) {
-            1 { }
-            2 { }
-            3 { }
-            Default {
-                if ($sfcExit -ne 0) {
-                }
-            }
-        }
-
-        if ($sfcExit -ne 0) {
-            $cbsPath = "$env:windir\Logs\CBS\CBS.log"
-            if (Test-Path $cbsPath) {
-
-                $srCannot = Select-String -Path $cbsPath -Pattern '\[SR\].*Cannot repair' -ErrorAction SilentlyContinue
-                $qtdCannot = ($srCannot | Measure-Object).Count
-
-                $srRepaired = Select-String -Path $cbsPath -Pattern '\[SR\].*Repairing corrupted' -ErrorAction SilentlyContinue
-                $qtdRepaired = ($srRepaired | Measure-Object).Count
-
-                if ($qtdCannot -gt 0) {
-                } elseif ($qtdRepaired -gt 0 -and $sfcExit -eq 1) {
-                }
-            } else {
-            }
-        }
+        $sfcRes  = Invoke-ProcessWithTimeout -FilePath 'sfc.exe' -Arguments '/scannow' -TimeoutMinutes $tempoLimiteMin
+        $sfcExit = $sfcRes.ExitCode
+        if ($sfcRes.TimedOut) { $estouraramTempo += 'SFC' }
 
         $pendingAfter = Test-PendingReboot
-        if ($pendingAfter -or $dismExit -eq 3010 -or $cleanupExit -eq 3010) {
-        }
 
         $msg = "SFC/DISM finalizados. ExitCodes: SFC=$sfcExit, DISM=$dismExit, Cleanup=$cleanupExit. PendingBefore=$pendingBefore, PendingAfter=$pendingAfter"
+        if ($estouraramTempo.Count -gt 0) {
+            $msg += ". TempoLimiteExcedido=$($estouraramTempo -join '+') (ExitCode -1)"
+        }
 
         return [PSCustomObject]@{
             MensagemTecnica          = $msg

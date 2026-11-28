@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # Manage-RustDesk.ps1
 # Guardian 360 - Integracao com RustDesk
 # =============================================================================
@@ -373,23 +373,49 @@ key = '$RustDeskKey'
         #
         # =================================================================
         try {
+            # Mesmo alfabeto e tamanho de antes; geracao com RNG criptografico
+            # (Get-Random nao e adequado para senha de acesso remoto).
+            # Descarta bytes acima do maior multiplo do alfabeto para nao enviesar a escolha.
             $chars    = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#%&*'
-            $password = -join (1..$PasswordLength | ForEach-Object {
-                $chars[(Get-Random -Maximum $chars.Length)]
-            })
+            $limiteRng = 256 - (256 % $chars.Length)
+            $rng       = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+            try {
+                $umByte = New-Object byte[] 1
+                $sbSenha = New-Object System.Text.StringBuilder
+                while ($sbSenha.Length -lt $PasswordLength) {
+                    $rng.GetBytes($umByte)
+                    if ($umByte[0] -lt $limiteRng) {
+                        [void]$sbSenha.Append($chars[$umByte[0] % $chars.Length])
+                    }
+                }
+                $password = $sbSenha.ToString()
+            }
+            finally { $rng.Dispose() }
 
             Write-Host "[RustDesk] Definindo nova senha permanente..." -ForegroundColor Cyan
 
             Start-Service -Name $RustDeskService -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 5
 
-            & $RustDeskExe --password $password 2>&1 | Out-Null
+            $saidaSenha = & $RustDeskExe --password $password 2>&1 | Out-String
 
             Start-Sleep -Seconds 3
 
-            $result.rustdesk_pw = $password
+            # So informa a senha quando nao ha indicio de falha: servico em execucao
+            # e nenhuma mensagem de recusa do proprio RustDesk. Sem isso, o JSON/banco
+            # ficaria com uma senha que nao existe no computador.
+            $servicoSenha = Get-Service -Name $RustDeskService -ErrorAction SilentlyContinue
+            $servicoRodando = ($null -ne $servicoSenha -and $servicoSenha.Status -eq 'Running')
+            $recusada = ($saidaSenha -match '(?i)privileges required|are disabled')
 
-            Write-Host "[RustDesk] Senha definida." -ForegroundColor Green
+            if ($servicoRodando -and -not $recusada) {
+                $result.rustdesk_pw = $password
+                Write-Host "[RustDesk] Senha definida." -ForegroundColor Green
+            }
+            else {
+                $motivoSenha = if (-not $servicoRodando) { 'servico RustDesk nao esta em execucao' } else { 'RustDesk recusou o comando' }
+                Write-Host "[RustDesk] AVISO: senha nao confirmada ($motivoSenha); rustdesk_pw nao sera informada." -ForegroundColor Yellow
+            }
         }
         catch {
             Write-Host "[RustDesk] ERRO ao definir senha: $($_.Exception.Message)" -ForegroundColor Red

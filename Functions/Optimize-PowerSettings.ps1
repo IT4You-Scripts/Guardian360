@@ -10,43 +10,98 @@ function Optimize-PowerSettings {
 
         $highPerfGuid = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
 
-        # Garante que o plano High Performance exista
-        if (-not (powercfg /list | Select-String $highPerfGuid)) {
-            powercfg /duplicatescheme SCHEME_MIN | Out-Null
+        # GUID em qualquer idioma do Windows (a linha do powercfg muda: "Power Scheme GUID:",
+        # "GUID do Esquema de Energia:" etc.), por isso extraímos pelo formato do GUID.
+        $padraoGuid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+
+        function Get-PlanoAtivoGuid {
+            $saida = (powercfg /getactivescheme | Out-String)
+            $achado = [regex]::Match($saida, $padraoGuid)
+            if ($achado.Success) { return $achado.Value.ToLowerInvariant() }
+            return $null
         }
 
-        # Ativa o plano
-        powercfg /setactive $highPerfGuid | Out-Null
+        # Executa o powercfg e informa se terminou sem erro (sem vazar saída para o retorno)
+        function Invoke-PowercfgChecked {
+            param([string[]]$Argumentos)
+            & powercfg @Argumentos 2>&1 | Out-Null
+            return ($LASTEXITCODE -eq 0)
+        }
+
+        $avisos = @()
+
+        # Garante e ativa o plano High Performance somente se ele ainda não estiver ativo
+        $ativo = Get-PlanoAtivoGuid
+        if ($ativo -ne $highPerfGuid) {
+            $listaPlanos = (powercfg /list | Out-String)
+            if ($listaPlanos -notmatch [regex]::Escape($highPerfGuid)) {
+                # Cria o plano já com o GUID esperado (sem GUID de destino, o Windows
+                # geraria um GUID novo a cada execução e o plano abaixo nunca seria ativado).
+                [void](Invoke-PowercfgChecked @('/duplicatescheme', 'SCHEME_MIN', $highPerfGuid))
+            }
+
+            [void](Invoke-PowercfgChecked @('/setactive', $highPerfGuid))
+            $ativo = Get-PlanoAtivoGuid
+        }
 
         # Recupera o plano ativo
-        $activeScheme = (powercfg /getactivescheme) -replace '.*GUID:\s*([a-f0-9\-]+).*', '$1'
-        if (-not $activeScheme) { throw "Falha ao identificar plano ativo." }
+        if (-not $ativo) { throw "Falha ao identificar plano ativo." }
+
+        if ($ativo -ne $highPerfGuid) {
+            $avisos += "plano High Performance não ficou ativo (plano ativo: $ativo)"
+        }
 
         # Verifica se há bateria
         $hasBattery = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
 
+        $falhasAjuste = @()
+
         # USB Selective Suspend (AC)
-        powercfg /setacvalueindex $activeScheme `
-            2a737441-1930-4402-8d77-b2bebba308a3 `
-            48983702-45ee-4273-9aa2-d11f35229dc5 0 2>$null
+        if (-not (Invoke-PowercfgChecked @('/setacvalueindex', $ativo,
+                '2a737441-1930-4402-8d77-b2bebba308a3',
+                '48983702-45ee-4273-9aa2-d11f35229dc5', '0'))) {
+            $falhasAjuste += 'USB Selective Suspend (AC)'
+        }
 
         # USB Selective Suspend (DC se houver bateria)
         if ($hasBattery) {
-            powercfg /setdcvalueindex $activeScheme `
-                2a737441-1930-4402-8d77-b2bebba308a3 `
-                48983702-45ee-4273-9aa2-d11f35229dc5 0 2>$null
+            if (-not (Invoke-PowercfgChecked @('/setdcvalueindex', $ativo,
+                    '2a737441-1930-4402-8d77-b2bebba308a3',
+                    '48983702-45ee-4273-9aa2-d11f35229dc5', '0'))) {
+                $falhasAjuste += 'USB Selective Suspend (DC)'
+            }
         }
 
         # Timeouts AC
-        powercfg /change monitor-timeout-ac 15 | Out-Null
-        powercfg /change disk-timeout-ac 0     | Out-Null
-        powercfg /change standby-timeout-ac 0  | Out-Null
+        foreach ($ajuste in @(
+            @('monitor-timeout-ac', '15'),
+            @('disk-timeout-ac',    '0'),
+            @('standby-timeout-ac', '0')
+        )) {
+            if (-not (Invoke-PowercfgChecked @('/change', $ajuste[0], $ajuste[1]))) { $falhasAjuste += $ajuste[0] }
+        }
 
         # Timeouts DC (se houver)
         if ($hasBattery) {
-            powercfg /change monitor-timeout-dc 10 | Out-Null
-            powercfg /change disk-timeout-dc 15    | Out-Null
-            powercfg /change standby-timeout-dc 20 | Out-Null
+            foreach ($ajuste in @(
+                @('monitor-timeout-dc', '10'),
+                @('disk-timeout-dc',    '15'),
+                @('standby-timeout-dc', '20')
+            )) {
+                if (-not (Invoke-PowercfgChecked @('/change', $ajuste[0], $ajuste[1]))) { $falhasAjuste += $ajuste[0] }
+            }
+        }
+
+        # Reaplica o plano ativo para que os valores gravados tenham efeito imediato
+        [void](Invoke-PowercfgChecked @('/setactive', $ativo))
+
+        if ($falhasAjuste.Count -gt 0) {
+            $avisos += "ajustes não aplicados: $($falhasAjuste -join ', ')"
+        }
+
+        if ($avisos.Count -gt 0) {
+            Write-Host "Configurações de energia aplicadas com ressalvas." -ForegroundColor Yellow
+            return "Configurações de energia aplicadas com ressalvas: $($avisos -join ' | ')"
         }
 
         Write-Host "Configurações de energia otimizadas." -ForegroundColor Green

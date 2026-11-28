@@ -193,18 +193,23 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 # =========================================================================
 # TRAVA DE EXECUCAO UNICA (v2.1)
 # Impede dois Guardian simultaneos no mesmo PC (tarefas diferentes, execucao manual, ElevaGuardian).
-# O arquivo e aberto com acesso exclusivo e mantido aberto ate o fim do processo; o proprio
-# Windows o libera se o script terminar, travar ou for encerrado: nao fica trava velha.
+# O arquivo e aberto com acesso exclusivo e mantido aberto ate o fim da rodada (liberado no final
+# do script); o proprio Windows o libera se o processo terminar, travar ou for encerrado: nao fica trava velha.
 # So uma violacao de compartilhamento significa "outro Guardian em execucao"; qualquer outro
 # problema com o arquivo (permissao, disco) nunca impede o Guardian de rodar.
 # Fica DEPOIS da elevacao/relancamento no PowerShell 7, para nao bloquear o processo filho.
 # =========================================================================
-$script:GuardianLockStream = $null
+# Uma execucao anterior neste MESMO PowerShell (terminal que continuou aberto) pode ter deixado
+# o arquivo aberto; como e o mesmo processo, nenhuma outra copia esta rodando: libera antes de reabrir.
+if ($null -ne $global:GuardianLockStream) {
+    try { $global:GuardianLockStream.Dispose() } catch { }
+    $global:GuardianLockStream = $null
+}
 try {
     if (-not (Test-Path -LiteralPath 'C:\Guardian' -PathType Container)) {
         New-Item -ItemType Directory -Path 'C:\Guardian' -Force -ErrorAction Stop | Out-Null
     }
-    $script:GuardianLockStream = [System.IO.File]::Open(
+    $global:GuardianLockStream = [System.IO.File]::Open(
         'C:\Guardian\guardian.lock',
         [System.IO.FileMode]::OpenOrCreate,
         [System.IO.FileAccess]::ReadWrite,
@@ -989,7 +994,7 @@ function Show-Header {
     param([string]$Text,[string]$Color = $Cyan)
     Microsoft.PowerShell.Utility\Write-Host ''
     Microsoft.PowerShell.Utility\Write-Host '  GUARDIAN 360' -ForegroundColor White -NoNewline
-    Microsoft.PowerShell.Utility\Write-Host '   v2.0' -ForegroundColor White -NoNewline
+    Microsoft.PowerShell.Utility\Write-Host '   v2.1' -ForegroundColor White -NoNewline
     if ($Dev) { Microsoft.PowerShell.Utility\Write-Host '   DEV' -ForegroundColor White }
     else { Microsoft.PowerShell.Utility\Write-Host '' }
     Microsoft.PowerShell.Utility\Write-Host ('  ' + ('─' * 51)) -ForegroundColor DarkGray
@@ -1219,8 +1224,13 @@ function Invoke-ConsoleLog { param([string]$Message,[string]$Level='DEBUG') try 
 function Test-HasRawUI { try { return ($null -ne $Host -and $null -ne $Host.UI -and $null -ne $Host.UI.RawUI) } catch { return $false } }
 
 function Expand-ConsoleWindow {
+  # Windows Terminal gerencia o proprio tamanho; mexer na janela/buffer do ConPTY pode travar a sessao.
+  if (-not [string]::IsNullOrEmpty($env:WT_SESSION)) {
+    Invoke-ConsoleLog 'Windows Terminal detectado; maximizacao e ajuste de buffer ignorados.'
+    return
+  }
   try {
-    $hWnd = [Win32.ConsoleWindow]::GetConsoleWindow()
+    $hWnd =[Win32.ConsoleWindow]::GetConsoleWindow()
     if ($hWnd -ne [IntPtr]::Zero) { [void][Win32.ConsoleWindow]::ShowWindow($hWnd, 3) }
     if (Test-HasRawUI) {
       $raw = $Host.UI.RawUI
@@ -1382,7 +1392,7 @@ function Invoke-GuardianStep {
 
 
 # =========================================================================
-# Guardian 360 v2.0 - interface de acompanhamento independente (sem arquivo IPC)
+# Guardian 360 v2.1 - interface de acompanhamento independente (sem arquivo IPC)
 # O motor permanece dono da manutencao, da telemetria e do JSON definitivo.
 # A UI recebe SOMENTE informacoes de andamento, por TCP localhost.
 # =========================================================================
@@ -1452,7 +1462,7 @@ if (-not $script:GuardianDebugMode) {
 }
 Enable-ConsoleAppearance -ForceMaximize:$script:GuardianDebugMode
 Clear-Host
-Show-Header -Text 'Guardian 360 v2.0'
+Show-Header -Text 'Guardian 360 v2.1'
 Initialize-GuardianLiveUI
 Send-GuardianLiveEvent -Type 'start' -Label 'Preparando manutenção preventiva' -Percent 0
 
@@ -2936,4 +2946,11 @@ catch {
     Send-GuardianLiveEvent -Type 'complete' -Label $statusTexto -Percent 100 -Status $(if (-not $statusOk) { 'error' } elseif ($qtdAvisos -gt 0 -or $pendencias.Count -gt 0) { 'warning' } else { 'ok' }) -Data $uiHealth
     Disable-QuickEditProtection
     Disable-ConsoleAppearance
+}
+
+# Fim da rodada: libera o bloqueio de execucao unica. Sem isso, o arquivo continuaria aberto enquanto
+# o terminal estivesse aberto, barrando uma nova execucao manual ou uma tarefa agendada.
+if ($null -ne $global:GuardianLockStream) {
+    try { $global:GuardianLockStream.Dispose() } catch { }
+    $global:GuardianLockStream = $null
 }

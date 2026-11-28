@@ -1,5 +1,5 @@
-﻿#Requires -Version 7.0
-<# Guardian 360 v2.0 - WPF de acompanhamento (processo independente)
+#Requires -Version 7.0
+<# Guardian 360 v2.1 - WPF de acompanhamento (processo independente)
    Nao executa manutencao; apenas observa eventos locais do Guardian.ps1.
    Nenhum LOG, JSON intermediario ou dependencia de API.
 #>
@@ -107,7 +107,7 @@ function Get-GuardianBitmapImage {
         WindowStyle="None" AllowsTransparency="True" ResizeMode="CanMinimize"
         Width="1362" Height="768" MinWidth="560" MinHeight="390"
         Background="Transparent" Foreground="#F4F6F8" WindowStartupLocation="Manual"
-        FontFamily="Segoe UI" Title="Guardian 360 v2.0" ShowInTaskbar="True">
+        FontFamily="Segoe UI" Title="Guardian 360 v2.1" ShowInTaskbar="True">
   <Window.Resources>
     <!-- Barras de progresso com trilho e preenchimento arredondados. -->
     <Style TargetType="{x:Type ProgressBar}">
@@ -138,7 +138,7 @@ function Get-GuardianBitmapImage {
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="22,0,0,0">
             <TextBlock Text="●" FontSize="16" Foreground="#FF00FF00" Margin="0,0,10,0"/>
             <TextBlock Text="Guardian 360" FontSize="15" FontWeight="SemiBold" Foreground="#F4F6F8"/>
-            <TextBlock Text="  v2.0" FontSize="12" Foreground="#7E9AA5" VerticalAlignment="Center"/>
+            <TextBlock Text="  v2.1" FontSize="12" Foreground="#7E9AA5" VerticalAlignment="Center"/>
           </StackPanel>
           <Button x:Name="MinButton" Grid.Column="1" Height="30" BorderThickness="0" Background="Transparent" Cursor="Hand" ToolTip="Minimizar">
             <Button.Template>
@@ -579,6 +579,7 @@ function Show-GuardianScoreBreakdown {
     if ($null -eq $Details) { return }
     $items = @(
         @{ Key = 'Atualizacoes'; Label = 'Atualizações' },
+        @{ Key = 'Armazenamento'; Label = 'Armazenamento' },
         @{ Key = 'Particoes'; Label = 'Espaço Livre' },
         @{ Key = 'IntegridadeSistema'; Label = 'Integridade do Sistema' },
         @{ Key = 'Limpezas'; Label = 'Limpezas' },

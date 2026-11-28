@@ -1,4 +1,4 @@
-﻿function Update-GuardianFiles {
+function Update-GuardianFiles {
 
     $ErrorActionPreference = "Stop"
     $ProgressPreference   = "SilentlyContinue"
@@ -83,7 +83,7 @@
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_componentes.png"; Path = "$BasePath\Assets\Images\guardian_robot_componentes.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_armazenamento.png"; Path = "$BasePath\Assets\Images\guardian_robot_armazenamento.png" },
         @{ Url = "$BaseUrl/Assets/Images/guardian_robot_seguranca.png"; Path = "$BasePath\Assets\Images\guardian_robot_seguranca.png" },
-        # Funcoes utilizadas / carregadas pelo Guardian 360 v2.0.
+        # Funcoes utilizadas / carregadas pelo Guardian 360 v2.1.
         @{ Url = "$BaseUrl/Functions/Block-AppUpdates.ps1"; Path = "$BasePath\Functions\Block-AppUpdates.ps1" },
         @{ Url = "$BaseUrl/Functions/Clear-AllRecycleBins.ps1"; Path = "$BasePath\Functions\Clear-AllRecycleBins.ps1" },
         @{ Url = "$BaseUrl/Functions/Clear-BrowserCache.ps1"; Path = "$BasePath\Functions\Clear-BrowserCache.ps1" },

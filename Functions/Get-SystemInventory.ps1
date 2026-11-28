@@ -319,17 +319,43 @@ function Get-SystemInventory {
             $rawSmartData  = Get-CimInstance -Namespace "root\wmi" -ClassName MSStorageDriver_ATASmartData -ErrorAction SilentlyContinue
             $failPredict   = Get-CimInstance -Namespace "root\wmi" -ClassName MSStorageDriver_FailurePredictStatus -ErrorAction SilentlyContinue
 
+            # Associacao exata disco -> registro SMART:
+            # Win32_DiskDrive.Index = numero do disco (DeviceId do Get-PhysicalDisk);
+            # Win32_DiskDrive.PNPDeviceID = InstanceName do SMART sem o sufixo "_0".
+            # Antes, o DeviceId ("0", "1") era procurado como texto dentro do InstanceName
+            # e casava com qualquer registro, associando o SMART ao disco errado.
+            $diskDrives = @(Get-CimInstance -ClassName Win32_DiskDrive -ErrorAction SilentlyContinue)
+            $apenasUmDisco = (@($physicalDisks).Count -eq 1)
+
+            function Find-GuardianSmartRecord {
+                param($Registros, [string]$PnpId, [bool]$AceitarUnico)
+                $lista = @(@($Registros) | Where-Object { $null -ne $_ })
+                if ($lista.Count -eq 0) { return $null }
+                if ($PnpId) {
+                    foreach ($r in $lista) {
+                        if (-not $r.InstanceName) { continue }
+                        $inst = ([string]$r.InstanceName) -replace '_\d+$', ''
+                        if ($inst -ieq $PnpId) { return $r }
+                    }
+                }
+                # Compatibilidade: com um unico disco e um unico registro, nao ha ambiguidade.
+                if ($AceitarUnico -and $lista.Count -eq 1) { return $lista[0] }
+                return $null
+            }
+
             foreach ($disk in $physicalDisks) {
                 $friendlyName = $disk.FriendlyName
                 $deviceId = $disk.DeviceId
                 $vidaExibicao = "N/A"
 
-                # Leitura bruta de firmware (sem wildcard/regex): contains case-insensitive
+                $pnpId = $null
+                $driveDisco = $diskDrives | Where-Object { [string]$_.Index -eq [string]$deviceId } | Select-Object -First 1
+                if ($driveDisco) { $pnpId = [string]$driveDisco.PNPDeviceID }
+
+                # Leitura bruta de firmware (associacao exata pelo PNPDeviceID)
                 $diskRaw = $null
                 if ($rawSmartData) {
-                    $diskRaw = $rawSmartData | Where-Object {
-                        $_.InstanceName -and $deviceId -and ($_.InstanceName.IndexOf($deviceId, [StringComparison]::OrdinalIgnoreCase) -ge 0)
-                    } | Select-Object -First 1
+                    $diskRaw = Find-GuardianSmartRecord $rawSmartData $pnpId $apenasUmDisco
                 }
 
                 if ($null -ne $diskRaw) {
@@ -359,12 +385,10 @@ function Get-SystemInventory {
                     Default     { $statusBruto }
                 }
 
-                # Verificação de Falha Preditiva (sem wildcard/regex)
+                # Verificação de Falha Preditiva (associacao exata pelo PNPDeviceID)
                 $predictiveFailure = $null
                 if ($failPredict) {
-                    $predictiveFailure = $failPredict | Where-Object {
-                        $_.InstanceName -and $deviceId -and ($_.InstanceName.IndexOf($deviceId, [StringComparison]::OrdinalIgnoreCase) -ge 0)
-                    } | Select-Object -First 1
+                    $predictiveFailure = Find-GuardianSmartRecord $failPredict $pnpId $apenasUmDisco
                 }
                 if ($null -ne $predictiveFailure -and $predictiveFailure.PredictFailure) {
                     $statusTraduzido = if ($statusBruto -eq "Healthy") { "Atenção, verificar manualmente com o CrystalDiskInfo" } else { "CRÍTICO (Falha Preditiva)" }

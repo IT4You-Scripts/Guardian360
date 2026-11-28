@@ -191,25 +191,68 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 # --- FIM DO BLOCO ---
 
 # =========================================================================
-# GERENCIAMENTO CENTRAL DAS QUATRO TAREFAS AGENDADAS
-# Executado exclusivamente pelo Guardian.ps1, apos elevacao administrativa.
-# Nao depende de RodaGuardian, ElevaGuardian, Atualiza ou Prepara.
+# TRAVA DE EXECUCAO UNICA (v2.1)
+# Impede dois Guardian simultaneos no mesmo PC (tarefas diferentes, execucao manual, ElevaGuardian).
+# O arquivo e aberto com acesso exclusivo e mantido aberto ate o fim do processo; o proprio
+# Windows o libera se o script terminar, travar ou for encerrado: nao fica trava velha.
+# So uma violacao de compartilhamento significa "outro Guardian em execucao"; qualquer outro
+# problema com o arquivo (permissao, disco) nunca impede o Guardian de rodar.
+# Fica DEPOIS da elevacao/relancamento no PowerShell 7, para nao bloquear o processo filho.
 # =========================================================================
-# ----- TASK 0: PowerShell Update (XML fornecido, com limite de 2 horas) -----
-function Sync-GuardianPowerShellTask {
-    $taskPath = '\Guardian\'
-    $taskName = '0. Guardian (PowerShell Update)'
-    $desiredXml = @'
-<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+$script:GuardianLockStream = $null
+try {
+    if (-not (Test-Path -LiteralPath 'C:\Guardian' -PathType Container)) {
+        New-Item -ItemType Directory -Path 'C:\Guardian' -Force -ErrorAction Stop | Out-Null
+    }
+    $script:GuardianLockStream = [System.IO.File]::Open(
+        'C:\Guardian\guardian.lock',
+        [System.IO.FileMode]::OpenOrCreate,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None)
+} catch [System.IO.IOException] {
+    # 32 = ERROR_SHARING_VIOLATION, 33 = ERROR_LOCK_VIOLATION
+    if (($_.Exception.HResult -band 0xFFFF) -in @(32, 33)) {
+        Write-Host 'Guardian ja esta em execucao neste computador; esta execucao foi encerrada.' -ForegroundColor Yellow
+        exit 0
+    }
+} catch { }
+# =========================================================================
+
+
+# =========================================================================
+# GERENCIAMENTO CENTRAL DAS QUATRO TAREFAS AGENDADAS (Guardian 360 v2.1)
+# Somente DEFINICOES aqui. A execucao (Sync-GuardianScheduledTasks) ocorre no FINAL
+# da rodada, depois de gravar o guardian.json, para que as tarefas novas nunca
+# disparem uma segunda copia do Guardian enquanto esta rodada ainda esta em andamento.
+# XMLs exportados do Agendador de Tarefas (Windows 10) e validados pela IT4YOU.
+# Todas as tarefas ficam na pasta \Guardian\ do Agendador.
+# Fluxo: 1) inventariar as tarefas existentes; 2) guardar os parametros da principal
+# (-Cliente, -PulaFases etc., sem -FileServer); 3) registrar as 4 tarefas novas;
+# 4) somente depois, remover as antigas substituidas (em execucao: apenas desabilitar).
+# =========================================================================
+$script:GuardianTaskFolder = '\Guardian\'
+$script:GuardianTaskName = @{
+    Update   = '1. Guardian 360 v2.1 (PowerShell Update)'
+    Admin    = '2. Guardian 360 v2.1 (Usuários Administradores)'
+    Restrito = '2. Guardian 360 v2.1 (Usuários Restritos)'
+    System   = '3. Guardian 360 v2.1 (System)'
+    Ghost    = '4. Guardian 360 v2.1 (Ghost)'
+}
+$script:GuardianTaskXml = @{}
+$script:GuardianTaskXml['Update'] = @'
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Author>MORETTI-PC06\Administrador</Author>
-    <Description>Atualiza PowerShell 7 por MSI oficial da Microsoft; sem Winget.</Description>
-    <URI>\Guardian\0. Guardian (PowerShell Update)</URI>
+    <Date>2026-11-26T20:52:51.3813995</Date>
+    <Author>IT4You</Author>
+    <Description>Atualiza PowerShell 7 por MSI oficial da Microsoft; sem Winget. Sextas 10:00 (atraso aleatório de até 45 min), fora da janela do Guardian.</Description>
+    <URI>\Guardian\1. Guardian 360 v2.1 (PowerShell Update)</URI>
   </RegistrationInfo>
   <Triggers>
     <CalendarTrigger>
-      <StartBoundary>2026-01-01T12:00:00</StartBoundary>
+      <StartBoundary>2026-01-01T10:00:00</StartBoundary>
       <Enabled>true</Enabled>
+      <RandomDelay>PT45M</RandomDelay>
       <ScheduleByWeek>
         <DaysOfWeek>
           <Friday />
@@ -226,8 +269,8 @@ function Sync-GuardianPowerShellTask {
   </Principals>
   <Settings>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <AllowHardTerminate>true</AllowHardTerminate>
     <StartWhenAvailable>true</StartWhenAvailable>
     <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
@@ -253,402 +296,541 @@ function Sync-GuardianPowerShellTask {
   </Actions>
 </Task>
 '@
-    try {
-        [xml]$expected = $desiredXml
-        $existing = Get-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction SilentlyContinue
-        $needsUpdate = $true
-        if ($existing) {
-            [xml]$current = Export-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction Stop
-            # Compara as folhas do XML de referencia (incluindo horario, SYSTEM,
-            # bateria, argumentos, visibilidade e limite de execucao).
-            function Test-GuardianTaskXmlNode {
-                param([System.Xml.XmlNode]$Actual, [System.Xml.XmlNode]$Reference)
-                if (-not $Actual -or $Actual.LocalName -ne $Reference.LocalName) { return $false }
-                $referenceChildren = @($Reference.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
-                if ($referenceChildren.Count -eq 0) { return ($Actual.InnerText -eq $Reference.InnerText) }
-                $actualChildren = @($Actual.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
-                foreach ($referenceChild in $referenceChildren) {
-                    $sameNameReference = @($referenceChildren | Where-Object LocalName -eq $referenceChild.LocalName)
-                    $index = [array]::IndexOf($sameNameReference, $referenceChild)
-                    $sameNameActual = @($actualChildren | Where-Object LocalName -eq $referenceChild.LocalName)
-                    if ($index -ge $sameNameActual.Count) { return $false }
-                    if (-not (Test-GuardianTaskXmlNode -Actual $sameNameActual[$index] -Reference $referenceChild)) { return $false }
-                }
-                return $true
-            }
-            $matched = $true
-            foreach ($section in @('Triggers','Principals','Settings','Actions')) {
-                $expectedSection = $expected.Task.SelectSingleNode("*[local-name()='$section']")
-                $currentSection = $current.Task.SelectSingleNode("*[local-name()='$section']")
-                if (-not (Test-GuardianTaskXmlNode -Actual $currentSection -Reference $expectedSection)) {
-                    $matched = $false
-                    break
-                }
-            }
-            if ($matched) {
-                $expectedTriggerCount = @($expected.Task.Triggers.ChildNodes | Where-Object NodeType -eq Element).Count
-                $actualTriggerCount = @($current.Task.Triggers.ChildNodes | Where-Object NodeType -eq Element).Count
-                $expectedActionCount = @($expected.Task.Actions.ChildNodes | Where-Object NodeType -eq Element).Count
-                $actualActionCount = @($current.Task.Actions.ChildNodes | Where-Object NodeType -eq Element).Count
-                $matched = ($expectedTriggerCount -eq $actualTriggerCount -and $expectedActionCount -eq $actualActionCount)
-            }
-            $needsUpdate = -not $matched
-        }
-        if ($needsUpdate) {
-            Register-ScheduledTask -TaskPath $taskPath -TaskName $taskName -Xml $desiredXml -Force -ErrorAction Stop | Out-Null
-            Write-Host '[Task 0] Criada/corrigida: sexta-feira 12:00, SYSTEM, limite de 2 horas.' -ForegroundColor Green
-        }
-        else {
-            Write-Host '[Task 0] Configuracao validada; nenhuma alteracao necessaria.' -ForegroundColor Green
-        }
-    }
-    catch {
-        Write-Host "[Task 0] Erro na criacao/validacao: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
+$script:GuardianTaskXml['Admin'] = @'
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Date>2026-11-26T21:09:16</Date>
+    <Author>IT4You</Author>
+    <Description>Vistoria mensal do Guardian 360 (usuários administradores).
+Dias 1 a 10, a partir das 12:00, repetindo a cada 30 min até 14:30. Inicia com o PC ocioso por 10 min (espera até 2 h) e, se o PC estava desligado, executa assim que possível.
+Chama RodaGuardian.ps1, que só roda se o mês ainda não foi concluído. Instância em andamento é ignorada. Limite de 6 h.</Description>
+    <URI>\Guardian\2. Guardian 360 v2.1 (Usuários Administradores)</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <Repetition>
+        <Interval>PT30M</Interval>
+        <Duration>PT2H30M</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2026-01-01T12:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <RandomDelay>PT10M</RandomDelay>
+      <ScheduleByMonth>
+        <DaysOfMonth>
+          <Day>1</Day>
+          <Day>2</Day>
+          <Day>3</Day>
+          <Day>4</Day>
+          <Day>5</Day>
+          <Day>6</Day>
+          <Day>7</Day>
+          <Day>8</Day>
+          <Day>9</Day>
+          <Day>10</Day>
+        </DaysOfMonth>
+        <Months>
+          <January />
+          <February />
+          <March />
+          <April />
+          <May />
+          <June />
+          <July />
+          <August />
+          <September />
+          <October />
+          <November />
+          <December />
+        </Months>
+      </ScheduleByMonth>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <GroupId>S-1-5-32-545</GroupId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <Duration>PT10M</Duration>
+      <WaitTimeout>PT2H</WaitTimeout>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>true</RunOnlyIfIdle>
+    <DisallowStartOnRemoteAppSession>false</DisallowStartOnRemoteAppSession>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT6H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>"%ProgramFiles%\PowerShell\7\pwsh.exe"</Command>
+      <Arguments>-WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Guardian\RodaGuardian.ps1" -Cliente "IT4You Ltda" -PulaFases ""</Arguments>
+      <WorkingDirectory>C:\Guardian</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+'@
+$script:GuardianTaskXml['Restrito'] = @'
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Date>2026-11-26T21:09:16</Date>
+    <Author>IT4You</Author>
+    <Description>Vistoria mensal do Guardian 360 (usuários restritos).
+Dias 1 a 10, a partir das 12:00, repetindo a cada 30 min durante 2 h 30 min. Inicia com o PC ocioso por 10 min (espera até 2 h) e, se o PC estava desligado, executa assim que possível.
+Chama ElevaGuardian.ps1, que só roda se o mês ainda não foi concluído, usa as credenciais salvas (credenciais.xml/chave.key) para iniciar o Guardian com privilégio elevado e não aguarda o término. Execução em andamento é ignorada pelo próprio Guardian.</Description>
+    <URI>\Guardian\2. Guardian 360 v2.1 (Usuários Restritos)</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <Repetition>
+        <Interval>PT30M</Interval>
+        <Duration>PT2H30M</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2026-01-01T12:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <RandomDelay>PT10M</RandomDelay>
+      <ScheduleByMonth>
+        <DaysOfMonth>
+          <Day>1</Day>
+          <Day>2</Day>
+          <Day>3</Day>
+          <Day>4</Day>
+          <Day>5</Day>
+          <Day>6</Day>
+          <Day>7</Day>
+          <Day>8</Day>
+          <Day>9</Day>
+          <Day>10</Day>
+        </DaysOfMonth>
+        <Months>
+          <January />
+          <February />
+          <March />
+          <April />
+          <May />
+          <June />
+          <July />
+          <August />
+          <September />
+          <October />
+          <November />
+          <December />
+        </Months>
+      </ScheduleByMonth>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <GroupId>S-1-5-32-545</GroupId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <Duration>PT10M</Duration>
+      <WaitTimeout>PT2H</WaitTimeout>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>true</RunOnlyIfIdle>
+    <DisallowStartOnRemoteAppSession>false</DisallowStartOnRemoteAppSession>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT6H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>"%ProgramFiles%\PowerShell\7\pwsh.exe"</Command>
+      <Arguments>-WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Guardian\ElevaGuardian.ps1" -Cliente "IT4You Ltda" -ExecutaFases "" -PulaFases ""</Arguments>
+      <WorkingDirectory>C:\Guardian</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+'@
+$script:GuardianTaskXml['System'] = @'
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Date>2026-11-26T21:26:19</Date>
+    <Author>IT4You</Author>
+    <Description>Guardian 360 - tarefa de reforço (roda como SYSTEM, sem depender de usuário logado).
+Dias 11 a 20, a partir das 15:00, repetindo a cada 1 h durante 3 h (atraso aleatório de até 10 min). Roda mesmo com o PC em uso e, se o PC estava desligado, executa assim que possível.
+Chama RodaGuardian.ps1, que só roda se o mês ainda não foi concluído. Instância em andamento é ignorada. Limite de 6 h.</Description>
+    <URI>\Guardian\3. Guardian 360 v2.1 (System)</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <Repetition>
+        <Interval>PT1H</Interval>
+        <Duration>PT3H</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2026-01-11T15:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <RandomDelay>PT10M</RandomDelay>
+      <ScheduleByMonth>
+        <DaysOfMonth>
+          <Day>11</Day>
+          <Day>12</Day>
+          <Day>13</Day>
+          <Day>14</Day>
+          <Day>15</Day>
+          <Day>16</Day>
+          <Day>17</Day>
+          <Day>18</Day>
+          <Day>19</Day>
+          <Day>20</Day>
+        </DaysOfMonth>
+        <Months>
+          <January />
+          <February />
+          <March />
+          <April />
+          <May />
+          <June />
+          <July />
+          <August />
+          <September />
+          <October />
+          <November />
+          <December />
+        </Months>
+      </ScheduleByMonth>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <DisallowStartOnRemoteAppSession>false</DisallowStartOnRemoteAppSession>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT6H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>"%ProgramFiles%\PowerShell\7\pwsh.exe"</Command>
+      <Arguments>-WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Guardian\RodaGuardian.ps1" -Cliente "IT4You Ltda" -PulaFases ""</Arguments>
+      <WorkingDirectory>C:\Guardian</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+'@
+$script:GuardianTaskXml['Ghost'] = @'
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Date>2026-11-26T21:31:12</Date>
+    <Author>IT4You</Author>
+    <Description>Guardian 360 - Ghost: System Integrity (Fase 2) silenciosa (roda como SYSTEM, sem depender de usuário logado).
+Dias 21 a 25, às 12:00 (atraso aleatório de até 10 min). Roda mesmo com o PC em uso e, se o PC estava desligado, executa assim que possível.
+Chama Guardian-Ghost.ps1. Instância em andamento é ignorada. Limite de 6 h.</Description>
+    <URI>\Guardian\4. Guardian 360 v2.1 (Ghost)</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-01-21T12:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <RandomDelay>PT10M</RandomDelay>
+      <ScheduleByMonth>
+        <DaysOfMonth>
+          <Day>21</Day>
+          <Day>22</Day>
+          <Day>23</Day>
+          <Day>24</Day>
+          <Day>25</Day>
+        </DaysOfMonth>
+        <Months>
+          <January />
+          <February />
+          <March />
+          <April />
+          <May />
+          <June />
+          <July />
+          <August />
+          <September />
+          <October />
+          <November />
+          <December />
+        </Months>
+      </ScheduleByMonth>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <DisallowStartOnRemoteAppSession>false</DisallowStartOnRemoteAppSession>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT6H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>"%ProgramFiles%\PowerShell\7\pwsh.exe"</Command>
+      <Arguments>-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Guardian\Guardian-Ghost.ps1"</Arguments>
+      <WorkingDirectory>C:\Guardian</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+'@
+
+function Remove-GuardianObsoleteParameters([string]$Text) {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+    # -FileServer "ENDERECO_IP" nao e mais usado: remover o parametro e o seu valor.
+    $clean = [regex]::Replace($Text,'(?i)(?:^|\s+)-FileServer(?:\s+(?:"[^"]*"|''[^'']*''|[^\s"'']+))?','')
+    return $clean.Trim()
 }
-# ----- FIM TASK 0 -----
 
-Sync-GuardianPowerShellTask
+function Get-GuardianTaskInventory {
+    $items = @()
+    foreach ($task in @(Get-ScheduledTask -TaskPath $script:GuardianTaskFolder -ErrorAction SilentlyContinue)) {
+        $text = (@($task.Actions | ForEach-Object { ([string]$_.Execute + ' ' + [string]$_.Arguments) }) -join ' ')
+        $role = 'Outra'
+        if ($text -match '(?i)Update-PowerShellMSI\.ps1' -or $task.TaskName -match '(?i)PowerShell') { $role = 'Update' }
+        elseif ($text -match '(?i)Guardian-Ghost\.ps1' -or $task.TaskName -match '(?i)Ghost') { $role = 'Ghost' }
+        elseif ($task.TaskName -match '(?i)System' -and $text -match '(?i)(Roda|Eleva)Guardian\.ps1') { $role = 'System' }
+        elseif ($text -match '(?i)(Roda|Eleva)Guardian\.ps1') { $role = 'Main' }
+        $items += [pscustomobject]@{ Task = $task; Name = [string]$task.TaskName; Role = $role }
+    }
+    return $items
+}
 
-# =========================================================================
-# PADRONIZAÇÃO DAS TAREFAS NO AGENDADOR (via XML — testado e aprovado)
-# =========================================================================
-try {
-    $taskFolder = "\Guardian\"
-
-    # ----- TASK DO GUARDIAN (dias 1-10, 12:00, ociosidade 10min, aguardar 2h) -----
-    $guardianTasks = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
-                     Where-Object {
-                         $_.TaskName -like "*Guardian*" -and
-                         $_.TaskName -notlike "*Ghost*" -and
-                         $_.TaskName -notlike "*System*" -and
-                         $_.TaskName -ne "0. Guardian (PowerShell Update)" -and
-                         $_.TaskName -notmatch '^\s*[23]\.\s'
-                     }
-
-    foreach ($task in $guardianTasks) {
-        $xmlStr = Export-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder
-        $xml = [xml]$xmlStr
-        $ns = $xml.Task.NamespaceURI
-
-        $oldTriggers = $xml.Task.SelectSingleNode("*[local-name()='Triggers']")
-        if ($oldTriggers) { $xml.Task.RemoveChild($oldTriggers) | Out-Null }
-
-        $newTriggers = $xml.CreateElement("Triggers", $ns)
-        $calTrigger = $xml.CreateElement("CalendarTrigger", $ns)
-
-        $startEl = $xml.CreateElement("StartBoundary", $ns)
-        $startEl.InnerText = "2026-01-01T12:00:00"
-        $calTrigger.AppendChild($startEl) | Out-Null
-
-        $enabledEl = $xml.CreateElement("Enabled", $ns)
-        $enabledEl.InnerText = "true"
-        $calTrigger.AppendChild($enabledEl) | Out-Null
-
-        $monthlyEl = $xml.CreateElement("ScheduleByMonth", $ns)
-
-        $daysEl = $xml.CreateElement("DaysOfMonth", $ns)
-        1..10 | ForEach-Object {
-            $dayEl = $xml.CreateElement("Day", $ns)
-            $dayEl.InnerText = $_
-            $daysEl.AppendChild($dayEl) | Out-Null
+function Get-GuardianMainSpec([object]$Task) {
+    foreach ($action in @($Task.Actions)) {
+        $argumentText = [string]$action.Arguments
+        $m = [regex]::Match($argumentText,'(?i)(Roda|Eleva)Guardian\.ps1"?(.*)$')
+        if ($m.Success) {
+            $variant = 'Administrador'
+            if ($m.Groups[1].Value -match '(?i)^Eleva') { $variant = 'Restrito' }
+            return [pscustomobject]@{ Variant = $variant; Rest = (Remove-GuardianObsoleteParameters $m.Groups[2].Value) }
         }
-        $monthlyEl.AppendChild($daysEl) | Out-Null
+    }
+    return $null
+}
 
-        $monthsEl = $xml.CreateElement("Months", $ns)
-        @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
-            $mEl = $xml.CreateElement($_, $ns)
-            $monthsEl.AppendChild($mEl) | Out-Null
-        }
-        $monthlyEl.AppendChild($monthsEl) | Out-Null
-        $calTrigger.AppendChild($monthlyEl) | Out-Null
-        $newTriggers.AppendChild($calTrigger) | Out-Null
+function New-GuardianTaskArguments([string]$ScriptName,[string]$Rest) {
+    $text = '-WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Guardian\' + $ScriptName + '"'
+    if (-not [string]::IsNullOrWhiteSpace($Rest)) { $text += ' ' + $Rest.Trim() }
+    return $text
+}
 
-        $principals = $xml.Task.SelectSingleNode("*[local-name()='Principals']")
-        $xml.Task.InsertBefore($newTriggers, $principals) | Out-Null
+function Set-GuardianXmlArguments([string]$Xml,[string]$Arguments) {
+    $escaped = [System.Security.SecurityElement]::Escape($Arguments)
+    $replacement = '<Arguments>' + $escaped.Replace('$','$$') + '</Arguments>'
+    $result = [regex]::Replace($Xml,'(?s)<Arguments>.*?</Arguments>',$replacement)
+    if (-not $result.Contains($escaped)) { throw 'Nao foi possivel aplicar os argumentos na tarefa.' }
+    return $result
+}
 
-        $actionArgsNode = $xml.Task.SelectSingleNode("*[local-name()='Actions']/*[local-name()='Exec']/*[local-name()='Arguments']")
-        if ($actionArgsNode -and $actionArgsNode.InnerText -notmatch '(?i)(^|\s)-WindowStyle\s+Hidden(\s|$)') {
-            $actionArgsNode.InnerText = "-WindowStyle Hidden " + $actionArgsNode.InnerText
-        }
+# Compara as folhas do XML de referencia com o XML exportado (o Windows acrescenta
+# valores padrao, que sao ignorados). Listas de dias/meses exigem o mesmo tamanho.
+function Test-GuardianTaskXmlNode {
+    param([System.Xml.XmlNode]$Actual, [System.Xml.XmlNode]$Reference)
+    if (-not $Actual -or -not $Reference -or $Actual.LocalName -ne $Reference.LocalName) { return $false }
+    $referenceChildren = @($Reference.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+    if ($referenceChildren.Count -eq 0) { return ($Actual.InnerText -eq $Reference.InnerText) }
+    $actualChildren = @($Actual.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+    if ($Reference.LocalName -in @('DaysOfMonth','Months','DaysOfWeek') -and $actualChildren.Count -ne $referenceChildren.Count) { return $false }
+    foreach ($referenceChild in $referenceChildren) {
+        $sameNameReference = @($referenceChildren | Where-Object LocalName -eq $referenceChild.LocalName)
+        $index = [array]::IndexOf($sameNameReference, $referenceChild)
+        $sameNameActual = @($actualChildren | Where-Object LocalName -eq $referenceChild.LocalName)
+        if ($index -ge $sameNameActual.Count) { return $false }
+        if (-not (Test-GuardianTaskXmlNode -Actual $sameNameActual[$index] -Reference $referenceChild)) { return $false }
+    }
+    return $true
+}
 
-        $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
+function Test-GuardianTaskMatchesXml([string]$TaskName,[string]$DesiredXml) {
+    $existing = Get-ScheduledTask -TaskPath $script:GuardianTaskFolder -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $existing) { return $false }
+    [xml]$expected = $DesiredXml
+    [xml]$current = Export-ScheduledTask -TaskPath $script:GuardianTaskFolder -TaskName $TaskName -ErrorAction Stop
+    foreach ($section in @('Triggers','Principals','Settings','Actions')) {
+        $expectedSection = $expected.Task.SelectSingleNode("*[local-name()='$section']")
+        $currentSection = $current.Task.SelectSingleNode("*[local-name()='$section']")
+        if (-not (Test-GuardianTaskXmlNode -Actual $currentSection -Reference $expectedSection)) { return $false }
+    }
+    $expectedTriggers = @($expected.Task.Triggers.ChildNodes | Where-Object NodeType -eq Element).Count
+    $actualTriggers = @($current.Task.Triggers.ChildNodes | Where-Object NodeType -eq Element).Count
+    $expectedActions = @($expected.Task.Actions.ChildNodes | Where-Object NodeType -eq Element).Count
+    $actualActions = @($current.Task.Actions.ChildNodes | Where-Object NodeType -eq Element).Count
+    return ($expectedTriggers -eq $actualTriggers -and $expectedActions -eq $actualActions)
+}
 
-        # A tarefa principal também deve aparecer com a opção "Oculto" habilitada.
-        $hiddenNode = $settingsNode.SelectSingleNode("*[local-name()='Hidden']")
-        if ($hiddenNode) { $hiddenNode.InnerText = "true" }
-        else {
-            $hiddenEl = $xml.CreateElement("Hidden", $ns)
-            $hiddenEl.InnerText = "true"
-            $settingsNode.AppendChild($hiddenEl) | Out-Null
-        }
+function Start-GuardianOldTaskCleanup([string[]]$Names) {
+    # Tarefa antiga em execucao nao pode ser apagada pelo proprio Guardian que roda nela.
+    # Uma tarefa auxiliar independente (SYSTEM) espera a antiga terminar, remove-a e se remove.
+    $helperName = 'Guardian 360 v2.1 (Limpeza Temporaria)'
+    $quoted = (@($Names) | ForEach-Object { "'" + ([string]$_).Replace("'","''") + "'" }) -join ','
+    $lines = @(
+        ('$names = @(' + $quoted + ')'),
+        '$folder = ''\Guardian\''',
+        '$limit = (Get-Date).AddHours(6)',
+        'foreach ($n in $names) {',
+        '    while ((Get-Date) -lt $limit) {',
+        '        $t = Get-ScheduledTask -TaskName $n -TaskPath $folder -ErrorAction SilentlyContinue',
+        '        if (-not $t) { break }',
+        '        if ([string]$t.State -ne ''Running'') {',
+        '            Unregister-ScheduledTask -TaskName $n -TaskPath $folder -Confirm:$false -ErrorAction SilentlyContinue',
+        '            break',
+        '        }',
+        '        Start-Sleep -Seconds 10',
+        '    }',
+        '}',
+        ('Unregister-ScheduledTask -TaskName ''' + $helperName + ''' -TaskPath $folder -Confirm:$false -ErrorAction SilentlyContinue')
+    )
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(($lines -join "`r`n")))
+    $exe = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    if (-not (Test-Path -LiteralPath $exe)) { $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
+    $action = New-ScheduledTaskAction -Execute $exe -Argument ('-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ' + $encoded)
+    $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 7) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
+    $null = Register-ScheduledTask -TaskName $helperName -TaskPath $script:GuardianTaskFolder -Action $action -Principal $principal -Settings $settings -Force -ErrorAction Stop
+    Start-ScheduledTask -TaskName $helperName -TaskPath $script:GuardianTaskFolder -ErrorAction Stop
+}
 
-        # Permitir iniciar também quando o computador estiver usando bateria.
-        $batteryNode = $settingsNode.SelectSingleNode("*[local-name()='DisallowStartIfOnBatteries']")
-        if ($batteryNode) { $batteryNode.InnerText = "false" }
-        else {
-            $batteryEl = $xml.CreateElement("DisallowStartIfOnBatteries", $ns)
-            $batteryEl.InnerText = "false"
-            $settingsNode.AppendChild($batteryEl) | Out-Null
-        }
+function Sync-GuardianScheduledTasks {
+    $result = [pscustomobject]@{
+        Registered = @()
+        Removed    = @()
+        Notes      = @()
+        Pending    = @()
+    }
+    $inventory = @(Get-GuardianTaskInventory)
 
-        $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
-        if ($roiNode) { $roiNode.InnerText = "true" }
-        else {
-            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "true"
-            $settingsNode.AppendChild($roiEl) | Out-Null
-        }
-
-        $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
-        if (-not $idleSettings) {
-            $idleSettings = $xml.CreateElement("IdleSettings", $ns)
-            $settingsNode.AppendChild($idleSettings) | Out-Null
-        }
-        foreach ($child in @($idleSettings.ChildNodes)) { $idleSettings.RemoveChild($child) | Out-Null }
-
-        $durEl = $xml.CreateElement("Duration", $ns); $durEl.InnerText = "PT10M"
-        $idleSettings.AppendChild($durEl) | Out-Null
-        $waitEl = $xml.CreateElement("WaitTimeout", $ns); $waitEl.InnerText = "PT2H"
-        $idleSettings.AppendChild($waitEl) | Out-Null
-        $stopEl = $xml.CreateElement("StopOnIdleEnd", $ns); $stopEl.InnerText = "false"
-        $idleSettings.AppendChild($stopEl) | Out-Null
-        $restartEl = $xml.CreateElement("RestartOnIdle", $ns); $restartEl.InnerText = "false"
-        $idleSettings.AppendChild($restartEl) | Out-Null
-
-        $nomePrincipalNovo = if ($task.TaskName -like "1. *") { $task.TaskName } else { "1. $($task.TaskName)" }
-        Register-ScheduledTask -TaskName $nomePrincipalNovo -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
-        if ($task.TaskName -ne $nomePrincipalNovo) {
-            Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
-        }
-        Write-Host "[Guardian] Task '$($task.TaskName)' padronizada: dias 1-10, 12:00." -ForegroundColor Green
+    # 1) Parametros da tarefa principal. A nova (2. Guardian 360 v2.1) tem prioridade
+    #    sobre a antiga; duas versoes com parametros diferentes bloqueiam a recriacao.
+    $mains = @($inventory | Where-Object { $_.Role -eq 'Main' })
+    $newMains = @($mains | Where-Object { $_.Name -match '^2\.\s+Guardian 360 v2\.1' })
+    $sources = $mains
+    if ($newMains.Count -gt 0) { $sources = $newMains }
+    $specs = @()
+    foreach ($source in $sources) {
+        $found = Get-GuardianMainSpec $source.Task
+        if ($found) { $specs += $found }
+    }
+    $spec = $null
+    $groups = @($specs | Group-Object { $_.Variant + '|' + $_.Rest })
+    if ($groups.Count -eq 1) {
+        $spec = $groups[0].Group[0]
+    } elseif ($groups.Count -gt 1) {
+        $result.Notes += 'mais de uma tarefa principal com parametros diferentes (' + (($sources | ForEach-Object { $_.Name }) -join ' | ') + '); tarefas 2 e 3 nao recriadas e nada removido delas'
+    } else {
+        $result.Notes += 'nenhuma tarefa principal encontrada em \Guardian\; tarefas 2 e 3 nao criadas'
     }
 
+    # 2) Montar o plano. A tarefa 3 herda os parametros da principal, sempre via RodaGuardian e sem -ExecutaFases.
+    $plan = @()
+    $plan += [pscustomobject]@{ Role = 'Update'; Name = $script:GuardianTaskName['Update']; Xml = $script:GuardianTaskXml['Update'] }
+    if ($spec) {
+        $mainKey = 'Admin'; $mainScript = 'RodaGuardian.ps1'
+        if ($spec.Variant -eq 'Restrito') { $mainKey = 'Restrito'; $mainScript = 'ElevaGuardian.ps1' }
+        $mainXml = Set-GuardianXmlArguments $script:GuardianTaskXml[$mainKey] (New-GuardianTaskArguments $mainScript $spec.Rest)
+        $plan += [pscustomobject]@{ Role = 'Main'; Name = $script:GuardianTaskName[$mainKey]; Xml = $mainXml }
+        $systemRest = ([regex]::Replace($spec.Rest,'(?i)\s*-ExecutaFases(?:\s+(?:"[^"]*"|\S+))?','')).Trim()
+        $systemXml = Set-GuardianXmlArguments $script:GuardianTaskXml['System'] (New-GuardianTaskArguments 'RodaGuardian.ps1' $systemRest)
+        $plan += [pscustomobject]@{ Role = 'System'; Name = $script:GuardianTaskName['System']; Xml = $systemXml }
+    }
+    $plan += [pscustomobject]@{ Role = 'Ghost'; Name = $script:GuardianTaskName['Ghost']; Xml = $script:GuardianTaskXml['Ghost'] }
 
-    # ----- TASK GUARDIAN SYSTEM (dias 11-20, 15:00, SYSTEM, sem ociosidade) -----
-    # Usa a acao da task principal como modelo e preserva seus argumentos.
-    $guardianPrincipal = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
-                         Where-Object {
-                             $_.TaskName -like "1. *Guardian*" -and
-                             $_.TaskName -notlike "*Ghost*" -and
-                             $_.TaskName -notlike "*System*"
-                         } |
-                         Select-Object -First 1
+    # 3) Registrar so o que mudou. Qualquer falha interrompe ANTES de remover algo.
+    foreach ($item in $plan) {
+        if (Test-GuardianTaskMatchesXml $item.Name $item.Xml) { continue }
+        $null = Register-ScheduledTask -TaskName $item.Name -TaskPath $script:GuardianTaskFolder -Xml $item.Xml -Force -ErrorAction Stop
+        $check = Get-ScheduledTask -TaskName $item.Name -TaskPath $script:GuardianTaskFolder -ErrorAction Stop
+        if ($check.State -eq 'Disabled') { throw ('Tarefa registrada, mas desabilitada: ' + $item.Name) }
+        $result.Registered += $item.Name
+    }
 
-    if ($guardianPrincipal) {
+    # 4) Remover somente as antigas substituidas. Outras funcoes nunca sao tocadas; a principal e a
+    #    System antigas so saem se as novas existem. Tarefa antiga em execucao (inclusive a que iniciou
+    #    esta rodada) e desabilitada e removida por uma tarefa auxiliar assim que terminar.
+    $newNames = @($plan | ForEach-Object { $_.Name })
+    $replacedRoles = @($plan | ForEach-Object { $_.Role })
+    if ($groups.Count -gt 1) { $replacedRoles = @($replacedRoles | Where-Object { $_ -ne 'Main' -and $_ -ne 'System' }) }
+    foreach ($old in $inventory) {
+        if ($replacedRoles -notcontains $old.Role) { continue }
+        if ($newNames -contains $old.Name) { continue }
         try {
-            $acaoPrincipal = $guardianPrincipal.Actions | Select-Object -First 1
-            $executeSystem = $acaoPrincipal.Execute
-            $argumentsSystem = $acaoPrincipal.Arguments
-            $workingDirSystem = $acaoPrincipal.WorkingDirectory
-
-            # Sob SYSTEM nao ha necessidade de ElevaGuardian.
-            $executeSystem = $executeSystem -replace '(?i)ElevaGuardian\.ps1','RodaGuardian.ps1'
-            $argumentsSystem = $argumentsSystem -replace '(?i)ElevaGuardian\.ps1','RodaGuardian.ps1'
-
-            $actionSystemParams = @{
-                Execute  = $executeSystem
-                Argument = $argumentsSystem
+            $current = Get-ScheduledTask -TaskName $old.Name -TaskPath $script:GuardianTaskFolder -ErrorAction Stop
+            if ([string]$current.State -eq 'Running') {
+                Disable-ScheduledTask -TaskName $old.Name -TaskPath $script:GuardianTaskFolder -ErrorAction Stop | Out-Null
+                $result.Pending += $old.Name
+                continue
             }
-            if (-not [string]::IsNullOrWhiteSpace($workingDirSystem)) {
-                $actionSystemParams.WorkingDirectory = $workingDirSystem
-            }
-            $actionSystem = New-ScheduledTaskAction @actionSystemParams
-
-            # Cria uma task base valida e depois troca somente o trigger mensal via XML,
-            # usando o mesmo metodo ja empregado pelo Guardian Ghost.
-            $triggerSystemBase = New-ScheduledTaskTrigger -Daily -At "15:00"
-            $principalSystem = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-            $settingsSystem = New-ScheduledTaskSettingsSet `
-                -AllowStartIfOnBatteries `
-                -DontStopIfGoingOnBatteries `
-                -StartWhenAvailable `
-                -ExecutionTimeLimit (New-TimeSpan -Hours 6) `
-                -Hidden
-
-            Register-ScheduledTask `
-                -TaskName "2. Guardian System" `
-                -TaskPath $taskFolder `
-                -Action $actionSystem `
-                -Trigger $triggerSystemBase `
-                -Settings $settingsSystem `
-                -Principal $principalSystem `
-                -Description "Guardian System - fallback do Guardian principal. Dias 11-20 as 15:00." `
-                -Force | Out-Null
-
-            $systemXml = [xml](Export-ScheduledTask -TaskName "2. Guardian System" -TaskPath $taskFolder)
-            try {
-                $principalXmlCompat = [xml](Export-ScheduledTask -TaskName $guardianPrincipal.TaskName -TaskPath $taskFolder)
-                if ($principalXmlCompat.Task.version) { $systemXml.Task.version = $principalXmlCompat.Task.version }
-            } catch {}
-            $ns = $systemXml.Task.NamespaceURI
-
-            $oldTriggers = $systemXml.Task.SelectSingleNode("*[local-name()='Triggers']")
-            if ($oldTriggers) { $systemXml.Task.RemoveChild($oldTriggers) | Out-Null }
-
-            $newTriggers = $systemXml.CreateElement("Triggers", $ns)
-            $calTrigger = $systemXml.CreateElement("CalendarTrigger", $ns)
-
-            $startEl = $systemXml.CreateElement("StartBoundary", $ns)
-            $startEl.InnerText = "2026-01-11T15:00:00"
-            $calTrigger.AppendChild($startEl) | Out-Null
-
-            $enabledEl = $systemXml.CreateElement("Enabled", $ns)
-            $enabledEl.InnerText = "true"
-            $calTrigger.AppendChild($enabledEl) | Out-Null
-
-            $monthlyEl = $systemXml.CreateElement("ScheduleByMonth", $ns)
-            $daysEl = $systemXml.CreateElement("DaysOfMonth", $ns)
-            11..20 | ForEach-Object {
-                $dayEl = $systemXml.CreateElement("Day", $ns)
-                $dayEl.InnerText = $_
-                $daysEl.AppendChild($dayEl) | Out-Null
-            }
-            $monthlyEl.AppendChild($daysEl) | Out-Null
-
-            $monthsEl = $systemXml.CreateElement("Months", $ns)
-            @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
-                $mEl = $systemXml.CreateElement($_, $ns)
-                $monthsEl.AppendChild($mEl) | Out-Null
-            }
-            $monthlyEl.AppendChild($monthsEl) | Out-Null
-            $calTrigger.AppendChild($monthlyEl) | Out-Null
-            $newTriggers.AppendChild($calTrigger) | Out-Null
-
-            $principals = $systemXml.Task.SelectSingleNode("*[local-name()='Principals']")
-            $systemXml.Task.InsertBefore($newTriggers, $principals) | Out-Null
-
-            Register-ScheduledTask -TaskName "2. Guardian System" -TaskPath $taskFolder -Xml ($systemXml.OuterXml) -Force | Out-Null
-            Unregister-ScheduledTask -TaskName "Guardian System" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
-            Write-Host "[Guardian System] Task criada/corrigida: dias 11-20, 15:00, SYSTEM, sem ociosidade." -ForegroundColor Green
-        }
-        catch {
-            Write-Host "[Guardian System] Nao foi possivel criar/corrigir a task: $($_.Exception.Message)" -ForegroundColor Yellow
-        }
+            Unregister-ScheduledTask -TaskName $old.Name -TaskPath $script:GuardianTaskFolder -Confirm:$false -ErrorAction Stop
+            $result.Removed += $old.Name
+        } catch { $result.Notes += 'nao foi possivel remover a tarefa antiga ' + $old.Name + ': ' + $_.Exception.Message }
     }
-    else {
-        Write-Host "[Guardian System] Task principal nao encontrada; nenhuma configuracao foi inventada." -ForegroundColor Yellow
-    }
-
-    # ----- TASK DO GUARDIAN GHOST (dias 21-25, 12:00, SYSTEM, sem ociosidade) -----
-    $ghostTask = Get-ScheduledTask -TaskPath $taskFolder -ErrorAction SilentlyContinue |
-                 Where-Object { $_.TaskName -in @("3. Guardian Ghost","3. Guardian Ghost") }
-
-    $ghostPrecisaAjustar = $false
-
-    if (-not $ghostTask) {
-        $ghostPrecisaAjustar = $true
-    }
-    else {
-        # Corrige tambem tarefas existentes que ficaram exigindo ociosidade.
-        if ($ghostTask.Settings.RunOnlyIfIdle) { $ghostPrecisaAjustar = $true }
-        $trigger = $ghostTask.Triggers | Select-Object -First 1
-        if ($trigger -and $trigger.CimClass.CimClassName -eq 'MSFT_TaskMonthlyTrigger') {
-            $diasAtuais = @($trigger.DaysOfMonth) | Sort-Object
-            $diasEsperados = @(21,22,23,24,25)
-            if ($null -ne (Compare-Object $diasAtuais $diasEsperados -SyncWindow 0)) {
-                $ghostPrecisaAjustar = $true
-            }
-        }
-        else {
-            $ghostPrecisaAjustar = $true
-        }
-    }
-
-    if ($ghostPrecisaAjustar) {
-        $pwshPath7 = (Get-Command pwsh.exe -ErrorAction SilentlyContinue)?.Source
-        if (-not $pwshPath7) { $pwshPath7 = "powershell.exe" }
-
-        # Passo 1: Criar task base com cmdlets
-        $action = New-ScheduledTaskAction `
-            -Execute $pwshPath7 `
-            -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Guardian\Guardian-Ghost.ps1"'
-        $triggerGhost = New-ScheduledTaskTrigger -Daily -At "12:00"
-        $principalGhost = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
-        $settingsGhost = New-ScheduledTaskSettingsSet `
-            -AllowStartIfOnBatteries `
-            -DontStopIfGoingOnBatteries `
-            -StartWhenAvailable `
-            -ExecutionTimeLimit (New-TimeSpan -Hours 6) `
-            -Hidden
-
-        Register-ScheduledTask `
-            -TaskName "3. Guardian Ghost" `
-            -TaskPath $taskFolder `
-            -Action $action `
-            -Trigger $triggerGhost `
-            -Settings $settingsGhost `
-            -Principal $principalGhost `
-            -Description "Guardian Ghost - System Integrity (Fase 2) silenciosa. Roda 1x/mes entre dias 21-25." `
-            -Force | Out-Null
-
-        # Passo 2: Exportar e corrigir o trigger mensal via XML
-        $xml = [xml](Export-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder)
-        try {
-            if ($guardianPrincipal) {
-                $principalXmlCompat = [xml](Export-ScheduledTask -TaskName $guardianPrincipal.TaskName -TaskPath $taskFolder)
-                if ($principalXmlCompat.Task.version) { $xml.Task.version = $principalXmlCompat.Task.version }
-            }
-        } catch {}
-        $ns = $xml.Task.NamespaceURI
-
-        $oldTriggers = $xml.Task.SelectSingleNode("*[local-name()='Triggers']")
-        if ($oldTriggers) { $xml.Task.RemoveChild($oldTriggers) | Out-Null }
-
-        $newTriggers = $xml.CreateElement("Triggers", $ns)
-        $calTrigger = $xml.CreateElement("CalendarTrigger", $ns)
-
-        $startEl = $xml.CreateElement("StartBoundary", $ns)
-        $startEl.InnerText = "2026-01-21T12:00:00"
-        $calTrigger.AppendChild($startEl) | Out-Null
-
-        $enabledEl = $xml.CreateElement("Enabled", $ns)
-        $enabledEl.InnerText = "true"
-        $calTrigger.AppendChild($enabledEl) | Out-Null
-
-        $monthlyEl = $xml.CreateElement("ScheduleByMonth", $ns)
-
-        $daysEl = $xml.CreateElement("DaysOfMonth", $ns)
-        21..25 | ForEach-Object {
-            $dayEl = $xml.CreateElement("Day", $ns)
-            $dayEl.InnerText = $_
-            $daysEl.AppendChild($dayEl) | Out-Null
-        }
-        $monthlyEl.AppendChild($daysEl) | Out-Null
-
-        $monthsEl = $xml.CreateElement("Months", $ns)
-        @("January","February","March","April","May","June","July","August","September","October","November","December") | ForEach-Object {
-            $mEl = $xml.CreateElement($_, $ns)
-            $monthsEl.AppendChild($mEl) | Out-Null
-        }
-        $monthlyEl.AppendChild($monthsEl) | Out-Null
-        $calTrigger.AppendChild($monthlyEl) | Out-Null
-        $newTriggers.AppendChild($calTrigger) | Out-Null
-
-        $principals = $xml.Task.SelectSingleNode("*[local-name()='Principals']")
-        $xml.Task.InsertBefore($newTriggers, $principals) | Out-Null
-
-        $settingsNode = $xml.Task.SelectSingleNode("*[local-name()='Settings']")
-
-        # Ghost executa como SYSTEM e nao depende de ociosidade.
-        $roiNode = $settingsNode.SelectSingleNode("*[local-name()='RunOnlyIfIdle']")
-        if ($roiNode) { $roiNode.InnerText = "false" }
-        else {
-            $roiEl = $xml.CreateElement("RunOnlyIfIdle", $ns); $roiEl.InnerText = "false"
-            $settingsNode.AppendChild($roiEl) | Out-Null
-        }
-
-        # Remove apenas os parametros de ociosidade que nao se aplicam ao Ghost.
-        $idleSettings = $settingsNode.SelectSingleNode("*[local-name()='IdleSettings']")
-        if ($idleSettings) { $settingsNode.RemoveChild($idleSettings) | Out-Null }
-
-        Register-ScheduledTask -TaskName "3. Guardian Ghost" -TaskPath $taskFolder -Xml ($xml.OuterXml) -Force | Out-Null
-        Unregister-ScheduledTask -TaskName "Guardian Ghost" -TaskPath $taskFolder -Confirm:$false -ErrorAction SilentlyContinue
-        Write-Host "[Guardian Ghost] Task criada/corrigida: dias 21-25, 12:00, SYSTEM, sem ociosidade." -ForegroundColor Green
-    }
+    return $result
 }
-catch {
-    Write-Host "[Tasks] Erro na padronização: $($_.Exception.Message)" -ForegroundColor Yellow
-}
+
 
 
 
@@ -2545,20 +2727,36 @@ Start-Sleep -Milliseconds 500
     } catch {}
 
 
-# GUARDA DE SEGURANÇA DOS AGENDAMENTOS — UI 10
-# Validação NÃO DESTRUTIVA: nenhuma tarefa é registrada, renomeada ou removida.
-# A normalização automática será retomada após auditoria dos XMLs do laboratório.
+# GERENCIAMENTO E GUARDA DOS AGENDAMENTOS (v2.1)
+# Executado no FINAL da rodada, depois do guardian.json: as tarefas novas, se criadas agora,
+# nao iniciam uma segunda copia do Guardian (a guarda mensal do Roda/ElevaGuardian as bloqueia).
+# Em -Dev ou -Simulado nenhuma tarefa e alterada; apenas a verificacao e feita.
 $script:GuardianTasksPadronizadas = $false
 $script:GuardianTasksVerificadas = $false
 try {
-    $tasks = @(Get-ScheduledTask -TaskPath '\Guardian\' -ErrorAction Stop)
-    $principal = @($tasks | Where-Object {
-        $_.TaskName -match '^1\.\s+Guardian(?:\s|$)' -and
-        $_.TaskName -notmatch '(?i)System|Ghost'
-    })
-    $system = @($tasks | Where-Object { $_.TaskName -eq '2. Guardian System' })
-    $ghost = @($tasks | Where-Object { $_.TaskName -eq '3. Guardian Ghost' })
+    if (-not $Dev -and -not $Simulado) {
+        $sync = Sync-GuardianScheduledTasks
+        if ($sync.Registered.Count -gt 0) { Write-GuardianConsoleEvent -Text ('Agendamentos criados/atualizados: ' + ($sync.Registered -join ' | ')) -Kind OK }
+        if ($sync.Removed.Count -gt 0) { Write-GuardianConsoleEvent -Text ('Agendamentos antigos removidos: ' + ($sync.Removed -join ' | ')) -Kind OK }
+        foreach ($note in $sync.Notes) { Write-GuardianConsoleEvent -Text ('Agendamentos: ' + $note) -Kind WARN }
+        if ($sync.Pending.Count -gt 0) {
+            try {
+                Start-GuardianOldTaskCleanup $sync.Pending
+                Write-GuardianConsoleEvent -Text ('Tarefa antiga sera removida ao terminar esta execucao: ' + ($sync.Pending -join ' | ')) -Kind OK
+            } catch {
+                Write-GuardianConsoleEvent -Text ('Agendamentos: nao foi possivel programar a remocao da tarefa antiga: ' + $_.Exception.Message) -Kind WARN
+                $script:GuardianTasksPadronizadas = $false
+            }
+        }
+        $script:GuardianTasksPadronizadas = ($sync.Notes.Count -eq 0)
+    }
+    $tasks = @(Get-ScheduledTask -TaskPath $script:GuardianTaskFolder -ErrorAction Stop)
+    $update = @($tasks | Where-Object { $_.TaskName -eq $script:GuardianTaskName['Update'] })
+    $principal = @($tasks | Where-Object { $_.TaskName -eq $script:GuardianTaskName['Admin'] -or $_.TaskName -eq $script:GuardianTaskName['Restrito'] })
+    $system = @($tasks | Where-Object { $_.TaskName -eq $script:GuardianTaskName['System'] })
+    $ghost = @($tasks | Where-Object { $_.TaskName -eq $script:GuardianTaskName['Ghost'] })
     $missing = @()
+    if ($update.Count -ne 1) { $missing += 'PowerShell Update' }
     if ($principal.Count -ne 1) { $missing += 'Guardian principal' }
     if ($system.Count -ne 1) { $missing += 'Guardian System' }
     if ($ghost.Count -ne 1) { $missing += 'Guardian Ghost' }
@@ -2569,7 +2767,7 @@ try {
     }
 }
 catch {
-    Write-GuardianConsoleEvent -Text ('Não foi possível consultar os agendamentos: ' + $_.Exception.Message) -Kind WARN
+    Write-GuardianConsoleEvent -Text ('Não foi possível gerenciar/consultar os agendamentos: ' + $_.Exception.Message) -Kind WARN
 }
 
     if ($script:GuardianTasksVerificadas) { Write-GuardianConsoleEvent 'Agendamentos verificados' }
