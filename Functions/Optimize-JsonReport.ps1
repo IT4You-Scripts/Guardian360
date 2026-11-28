@@ -374,7 +374,8 @@ $armazenamentos = @(
 # ------------------------------------------------------------------------------
 $particoes = @()
 try {
-    $drives = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DriveType = 3" -ErrorAction SilentlyContinue
+    # -ErrorAction Stop: falha na consulta deve cair no fallback (antes devolvia lista vazia em silêncio).
+    $drives = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DriveType = 3" -ErrorAction Stop
     foreach ($d in $drives) {
         if ($d.Size -and $d.Size -gt 0) {
             $tamanhoGB = [Math]::Round($d.Size / 1GB, 2)
@@ -391,6 +392,8 @@ try {
             }
         }
     }
+    # Nenhuma partição coletada: usa o fallback em vez de seguir com lista vazia (nota 100 sem medir).
+    if (@($particoes).Count -eq 0) { throw 'Nenhuma partição fixa retornada pela consulta.' }
 } catch {
     # Fallback: usar dados do JSON anterior se a coleta falhar
     $particoes = @(
@@ -408,7 +411,7 @@ try {
                     TamanhoGB = $tamanho
                     LivreGB   = $livreGB
                     UsadoGB   = $usadoGB
-                    UsadoPct  = $usadoPct
+                    UsadoPct  = $pctUsado
                 }
             }
         }
@@ -843,8 +846,36 @@ catch {}
 # ------------------------------------------------------------------------------
 
 # =============== 1. Integridade do Sistema (SFC/DISM) ===============
-# Nota sempre 100 — a Fase 2 agora roda separadamente via Guardian Ghost
+# A Fase 2 roda separadamente via Guardian Ghost, que grava o resultado em guardian_ghost.json
+# (bloco "integridade"). A nota usa esse resultado real. Sem dado válido (arquivo ou bloco ausente,
+# data inválida ou com mais de 60 dias) mantém 100 como antes: não penaliza sem ter medido.
 $notaIntegridade = 100
+try {
+    $ghostJsonPath = 'C:\Guardian\guardian_ghost.json'
+    if (Test-Path -LiteralPath $ghostJsonPath -PathType Leaf) {
+        $ghostInfo  = Get-Content -LiteralPath $ghostJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $ghostInteg = $ghostInfo.integridade
+        if ($ghostInteg -and $null -ne $ghostInteg.sfc_exit_code -and $null -ne $ghostInteg.dism_exit_code -and $ghostInteg.data) {
+            $ghostData  = [datetime]::ParseExact([string]$ghostInteg.data, 'yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture)
+            $ghostIdade = (New-TimeSpan -Start $ghostData -End (Get-Date)).Days
+            if ($ghostIdade -le 60) {
+                $ghostSfcOk   = ([int]$ghostInteg.sfc_exit_code -eq 0)
+                $ghostDismOk  = ([int]$ghostInteg.dism_exit_code -eq 0)
+                $ghostCleanOk = ($null -eq $ghostInteg.cleanup_exit_code) -or ([int]$ghostInteg.cleanup_exit_code -eq 0)
+                if ($ghostSfcOk -and $ghostDismOk) {
+                    $notaIntegridade = if ($ghostCleanOk) { 100 } else { 90 }
+                } elseif ($ghostSfcOk -or $ghostDismOk) {
+                    $notaIntegridade = 40
+                } else {
+                    $notaIntegridade = 10
+                }
+            }
+        }
+    }
+} catch {
+    # Leitura do resultado do Ghost nunca interrompe o relatório.
+    $notaIntegridade = 100
+}
 
 # =============== 2. Atualizações (Windows + Store + Winget) ===============
 $notaAtualizacoes = 0
@@ -852,18 +883,23 @@ $faseUpdateWin = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Atualizaç�
 $faseStore     = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Loja da Microsoft" }
 $faseWinget    = @($jsonRaw.Fases) | Where-Object { $_.Phase -match "Winget" }
 
-$okWin   = $faseUpdateWin  -and $faseUpdateWin.Mensagem.AtualizacaoBemSucedida
-# Microsoft Store: nota fixa 100 na contabilizacao, independentemente da fase.
-$okStore = $true
-$okWing  = $faseWinget     -and $faseWinget.Mensagem.AtualizacaoBemSucedida
+# Só entram na conta as verificações que realmente existem: fase pulada de propósito
+# (-PulaFases 5 ou 6) não conta como falha, e a Loja só conta se a etapa tiver rodado
+# (hoje ela não é chamada pelo Guardian).
+$fasesPuladas = @(@($jsonRaw.PulaFases) | ForEach-Object { try { [int]$_ } catch { } })
+$avaliacoes = @()
+if ($fasesPuladas -notcontains 5) { $avaliacoes += [bool]($faseUpdateWin -and $faseUpdateWin.Mensagem.AtualizacaoBemSucedida) }
+if ($fasesPuladas -notcontains 6) { $avaliacoes += [bool]($faseWinget    -and $faseWinget.Mensagem.AtualizacaoBemSucedida) }
+if ($faseStore)                   { $avaliacoes += [bool]($faseStore.Mensagem.AtualizacaoBemSucedida) }
 
-$sucessos = @($okWin, $okStore, $okWing) | Where-Object { $_ -eq $true } | Measure-Object | Select-Object -ExpandProperty Count
-
-switch ($sucessos) {
-    3 { $notaAtualizacoes = 100 }
-    2 { $notaAtualizacoes = 80 }
-    1 { $notaAtualizacoes = 60 }
-    0 { $notaAtualizacoes = 30 }
+if ($avaliacoes.Count -eq 0) {
+    $notaAtualizacoes = 100   # nada a avaliar nesta execução
+} else {
+    $proporcaoAtualizacoes = (@($avaliacoes | Where-Object { $_ -eq $true }).Count) / $avaliacoes.Count
+    if     ($proporcaoAtualizacoes -ge 1)    { $notaAtualizacoes = 100 }
+    elseif ($proporcaoAtualizacoes -ge 0.66) { $notaAtualizacoes = 80 }
+    elseif ($proporcaoAtualizacoes -ge 0.5)  { $notaAtualizacoes = 60 }
+    else                                     { $notaAtualizacoes = 30 }
 }
 
 # =============== 3. Armazenamentos (SSD/HDD) ===============
@@ -920,7 +956,14 @@ if ($redeAvaliada) {
 }
 
 # =============== 7. Limpezas e Otimizações ===============
-$notaLimpezas = 100  # Se chegou até aqui no script, todas as limpezas foram executadas
+# Proporção das etapas de limpeza/otimização que terminaram OK nesta execução.
+# Sem nenhuma dessas etapas no JSON (todas puladas), mantém 100 como antes.
+$notaLimpezas = 100
+$fasesLimpeza = @(@($jsonRaw.Fases) | Where-Object { $_.Phase -match '^(Limpeza|Otimização|Desfragmentação)' })
+if ($fasesLimpeza.Count -gt 0) {
+    $limpezasOk = @($fasesLimpeza | Where-Object { $_.Status -eq 'OK' }).Count
+    $notaLimpezas = [int][Math]::Round(($limpezasOk / $fasesLimpeza.Count) * 100)
+}
 
 
 # =============== 8. Backup Macrium ===============

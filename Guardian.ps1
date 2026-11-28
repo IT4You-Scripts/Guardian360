@@ -2859,8 +2859,11 @@ catch {
                     $scoreReasons.Particoes = ('Unidade {0}: {1:N1}% do espaço utilizado.' -f [string]$worst.Letra, [double]$worst.UsadoPct)
                 } else { $scoreReasons.Particoes = 'Dados de ocupação das partições não disponíveis.' }
 
-                # Atualmente essas duas notas são fixas no cálculo. Não atribuir análises inexistentes.
+                # A nota de integridade vem do resultado gravado pelo Guardian Ghost; sem esse dado permanece 100.
                 $scoreReasons.IntegridadeSistema = 'Integridade acompanhada por procedimentos automáticos do Guardian Ghost.'
+                if ($null -ne $scoreDetails -and $null -ne $scoreDetails.IntegridadeSistema -and [double]$scoreDetails.IntegridadeSistema -lt 90) {
+                    $scoreReasons.IntegridadeSistema = 'A última verificação do Guardian Ghost (SFC/DISM) encontrou problemas nos arquivos do Windows.'
+                }
                 # A descricao confirma somente etapas de limpeza registradas como concluidas.
                 $cleanPhases = @($scorePhases | Where-Object { $_.Phase -match 'Limpeza das pastas temporárias|Limpeza dos arquivos temporários dos componentes do Windows' })
                 $cleanOK = @($cleanPhases | Where-Object { $_.Status -eq 'OK' -and (

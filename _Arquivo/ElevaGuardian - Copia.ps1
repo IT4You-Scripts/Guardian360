@@ -71,6 +71,27 @@ if (Test-Path $guardianJsonPath) {
 # =========================================================================
 
 
+# =========================================================================
+# VERIFICACAO RAPIDA — Ja ha um Guardian em execucao neste computador?
+# O Guardian.ps1 mantem C:\Guardian\guardian.lock aberto (acesso exclusivo) enquanto roda.
+# Aqui apenas se testa se o arquivo esta em uso; nada e criado nem gravado.
+# Somente "arquivo em uso" encerra: arquivo inexistente ou sem permissao seguem normalmente
+# (a trava definitiva fica no Guardian.ps1).
+# =========================================================================
+try {
+    $lockProbe = [System.IO.File]::Open(
+        'C:\Guardian\guardian.lock',
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::ReadWrite)
+    $lockProbe.Dispose()
+} catch [System.IO.IOException] {
+    # 32 = ERROR_SHARING_VIOLATION, 33 = ERROR_LOCK_VIOLATION
+    if (($_.Exception.HResult -band 0xFFFF) -in @(32, 33)) { exit 0 }
+} catch { }
+# =========================================================================
+
+
 # -------------------------------------------------------------------------------------------------------------------------
 #region BootStrap - Atualiza somente o arquivo Update-GuardianFiles.ps1 — versão mínima e silenciosa
 # -------------------------------------------------------------------------------------------------------------------------

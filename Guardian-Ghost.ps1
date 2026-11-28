@@ -260,15 +260,36 @@ try {
     }
 
     . $repairPath
-    Repair-SystemIntegrity
+    $saidaIntegridade = @(Repair-SystemIntegrity)
 
     # ========================================================================
     # SUCESSO: Gravar guardian_ghost.json
+    # ultima_execucao controla a execucao mensal; o bloco "integridade" guarda o
+    # resultado real do SFC/DISM para o Guardian principal usar na nota de saude.
     # ========================================================================
-    $resultado = @{
-        ultima_execucao = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    $agoraTexto = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    $resultado = [ordered]@{
+        ultima_execucao = $agoraTexto
     }
-    $resultado | ConvertTo-Json | Set-Content -Path $GhostJsonPath -Encoding UTF8 -Force
+
+    try {
+        $objIntegridade = $saidaIntegridade |
+            Where-Object { $null -ne $_ -and $_.PSObject.Properties['SfcExitCode'] } |
+            Select-Object -Last 1
+        if ($objIntegridade) {
+            $resultado['integridade'] = [ordered]@{
+                data              = $agoraTexto
+                sfc_exit_code     = [int]$objIntegridade.SfcExitCode
+                dism_exit_code    = [int]$objIntegridade.DismExitCode
+                cleanup_exit_code = [int]$objIntegridade.ComponentCleanupExitCode
+                reinicio_pendente = [bool]$objIntegridade.PendingRebootAfter
+            }
+        }
+    } catch {
+        # Sem o bloco "integridade" o Guardian mantem o comportamento anterior.
+    }
+
+    $resultado | ConvertTo-Json -Depth 4 | Set-Content -Path $GhostJsonPath -Encoding UTF8 -Force
 
 } catch {
     # Falha silenciosa — nao interrompe nada
