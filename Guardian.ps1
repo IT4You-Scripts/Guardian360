@@ -1529,150 +1529,6 @@ $hasHDD = ($hddList.Count -gt 0)
 
 
 
-  # Coleta passiva do TeamViewer — sem instalar, executar ou alterar o aplicativo.
-  # O resultado compoe o JSON local da vistoria quando a Fase 1 e executada.
-  $script:TeamViewerInfo = $null
-  function Get-GuardianTeamViewerInfo {
-      $info = [ordered]@{
-          Instalado = $false
-          ID        = $null
-          Versao    = $null
-          Status    = 'NaoInstalado'
-      }
-      try {
-          $keys = @(
-              'HKLM:\SOFTWARE\TeamViewer',
-              'HKLM:\SOFTWARE\WOW6432Node\TeamViewer',
-              'HKCU:\SOFTWARE\TeamViewer'
-          )
-          $uninstallKeys = @(
-              'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-              'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
-              'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
-          )
-          $instalacoes = @(
-              foreach ($key in $uninstallKeys) {
-                  Get-ItemProperty -Path $key -ErrorAction SilentlyContinue |
-                      Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -match '^TeamViewer(?:\s|$)' }
-              }
-          )
-          $servico = Get-Service -Name 'TeamViewer' -ErrorAction SilentlyContinue
-          $arquivos = @(
-              (Join-Path $env:ProgramFiles 'TeamViewer\TeamViewer.exe'),
-              (Join-Path $env:ProgramFiles 'TeamViewer\TeamViewer_Service.exe')
-          )
-          if (${env:ProgramFiles(x86)}) {
-              $arquivos += Join-Path ${env:ProgramFiles(x86)} 'TeamViewer\TeamViewer.exe'
-              $arquivos += Join-Path ${env:ProgramFiles(x86)} 'TeamViewer\TeamViewer_Service.exe'
-          }
-          $info.Instalado = (($instalacoes.Count -gt 0) -or ($null -ne $servico) -or
-                             (@($arquivos | Where-Object { Test-Path -LiteralPath $_ }).Count -gt 0))
-          if (-not $info.Instalado) { return [pscustomobject]$info }
-
-          $info.Status = 'IDIndisponivel'
-          foreach ($instalacao in $instalacoes) {
-              if (-not [string]::IsNullOrWhiteSpace([string]$instalacao.DisplayVersion)) {
-                  $info.Versao = [string]$instalacao.DisplayVersion
-                  break
-              }
-          }
-          # O ClientID pode residir na chave principal ou em VersionN (ex.: Version13).
-          # Apenas leitura: nunca abre o TeamViewer, nem altera o Registro.
-          foreach ($key in $keys) {
-              $candidateKeys = @($key)
-              $candidateKeys += @(
-                  Get-ChildItem -LiteralPath $key -ErrorAction SilentlyContinue |
-                      Where-Object { $_.PSChildName -match '^Version\d+$' } |
-                      Sort-Object { if ($_.PSChildName -match '^Version(\d+)$') { [int]$Matches[1] } else { 0 } } -Descending |
-                      ForEach-Object { $_.PSPath }
-              )
-              foreach ($candidateKey in $candidateKeys) {
-                  $item = Get-ItemProperty -LiteralPath $candidateKey -ErrorAction SilentlyContinue
-                  if ($null -eq $item) { continue }
-                  if (-not $info.Versao -and $item.PSObject.Properties['Version']) {
-                      $info.Versao = [string]$item.Version
-                  }
-                  $id = if ($item.PSObject.Properties['ClientID']) { ([string]$item.ClientID).Trim() } else { '' }
-                  if ($id -match '^[0-9]+$' -and $id -ne '0') {
-                      $info.ID = $id
-                      $info.Status = 'OK'
-                      break
-                  }
-              }
-              if ($info.ID) { break }
-          }
-
-          # Fallback oficial para instalacoes sem ClientID no Registro.
-          # Instala TeamViewerPS sob demanda apenas quando o TeamViewer esta presente
-          # e nenhuma chave do Registro forneceu um ID. Sem prompt ou Write-Log.
-          if (-not $info.ID) {
-              try {
-                  $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
-                  if (-not $teamViewerCmd) {
-                      try {
-                          Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
-                      } catch { }
-                      $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
-                  }
-                  if (-not $teamViewerCmd -and (Get-Command -Name 'Install-Module' -ErrorAction SilentlyContinue)) {
-                      # AllUsers e compartilhado entre administradores, usuarios e SYSTEM.
-                      # Sem elevacao, usa CurrentUser em vez de falhar por permissao.
-                      $scope = 'CurrentUser'
-                      try {
-                          $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
-                          if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-                              $scope = 'AllUsers'
-                          }
-                      } catch { }
-
-                      # Instalacao isolada e limitada a 60 s; nunca aguarda interacao.
-                      $installJob = $null
-                      try {
-                          $installJob = Start-Job -ScriptBlock {
-                              param([string]$InstallScope)
-                              $ProgressPreference = 'SilentlyContinue'
-                              $WarningPreference = 'SilentlyContinue'
-                              $InformationPreference = 'SilentlyContinue'
-                              $ConfirmPreference = 'None'
-                              $ErrorActionPreference = 'Stop'
-                              Install-Module -Name 'TeamViewerPS' -Scope $InstallScope -Repository 'PSGallery' -Force -AllowClobber -Confirm:$false -ErrorAction Stop *> $null
-                          } -ArgumentList $scope -ErrorAction Stop
-                          $finished = Wait-Job -Job $installJob -Timeout 60 -ErrorAction SilentlyContinue
-                          if ($finished) {
-                              Receive-Job -Job $installJob -ErrorAction Stop *> $null
-                          } else {
-                              Stop-Job -Job $installJob -ErrorAction SilentlyContinue
-                          }
-                      } catch {
-                          # Galeria indisponivel: nao comprometer a vistoria.
-                      } finally {
-                          if ($installJob) {
-                              Remove-Job -Job $installJob -Force -ErrorAction SilentlyContinue
-                          }
-                      }
-
-                      try {
-                          Import-Module -Name TeamViewerPS -ErrorAction Stop -WarningAction SilentlyContinue 6>$null | Out-Null
-                      } catch { }
-                      $teamViewerCmd = Get-Command -Name 'Get-TeamViewerId' -ErrorAction SilentlyContinue
-                  }
-                  if ($teamViewerCmd) {
-                      $moduleId = Get-TeamViewerId -ErrorAction Stop 6>$null
-                      $id = ([string]$moduleId).Trim()
-                      if ($id -match '^[0-9]+$' -and $id -ne '0') {
-                          $info.ID = $id
-                          $info.Status = 'OK'
-                      }
-                  }
-              } catch {
-                  # Sem identificador: prosseguir com IDIndisponivel, sem interromper o Guardian.
-              }
-          }
-      } catch {
-          $info.Status = 'ErroLeitura'
-      }
-      return [pscustomobject]$info
-  }
 
   # 4) Fases e passos
   $Phases = @(
@@ -2559,19 +2415,6 @@ foreach ($phase in $script:GuardianSelectedPhases) {
             } catch { } # O painel complementar nunca interrompe a manutencao.
         }
 
-        if ($id -eq 1 -and $step.Name -eq 'Get-SystemInventory') {
-            try {
-                $script:TeamViewerInfo = Get-GuardianTeamViewerInfo
-                if ($script:TeamViewerInfo.Instalado) {
-                    $tvLabel = if ($script:TeamViewerInfo.ID) { $script:TeamViewerInfo.ID } else { 'indisponivel' }
-                }
-            } catch {
-                $script:TeamViewerInfo = [pscustomobject]@{
-                    Instalado = $false; ID = $null; Versao = $null; Status = 'ErroLeitura'
-                }
-
-            }
-        }
 
         # Atualiza barra de progresso proporcional
 # v2 console: nao ha controle WPF nesta etapa.
@@ -2654,7 +2497,6 @@ $jsonObject = [PSCustomObject]@{
     NomeComputador     = $env:COMPUTERNAME
     DataExecucao       = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     PulaFases          = @($PulaFases)
-    TeamViewer         = $script:TeamViewerInfo
     Fases              = $jsonResults
 }
 
